@@ -437,6 +437,7 @@ model IngestionEvent {
   source         IngestionSource @relation(fields: [sourceId], references: [id])
   parsedMessages ParsedMessage[]
   sourceSiteMatches SourceSiteMatch[]
+  draftInvoiceRecoveryItems DraftInvoiceRecoveryItem[]
 
   @@unique([sourceId, externalMessageId])
   @@index([status])
@@ -978,6 +979,7 @@ model SupplierBillLine {
   amountIncVat          Decimal?           @db.Decimal(14, 2)
   vatRate               Decimal?           @db.Decimal(5, 2)
   vatStatus             String?
+  commercialStatus      String?
   sourceSiteTextRaw     String?
   sourceCustomerTextRaw String?
   createdAt             DateTime           @default(now())
@@ -1535,6 +1537,7 @@ model SourceSiteMatch {
 model DraftInvoiceRecoveryItem {
   id                     String   @id @default(uuid())
   zohoInvoiceExternalId  String?
+  ingestionEventId       String?
   customerId             String?
   siteId                 String?
   status                 String   @default("DRAFT_IMPORTED")
@@ -1542,13 +1545,17 @@ model DraftInvoiceRecoveryItem {
   sourceInvoiceJson      Json?
   totalValue             Decimal? @db.Decimal(14, 2)
   issuesSummary          String?
+  outcomeInvoiceId       String?
   notes                  String?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
+  ingestionEvent IngestionEvent? @relation(fields: [ingestionEventId], references: [id])
+
   @@index([status])
   @@index([verificationStatus])
   @@index([zohoInvoiceExternalId])
+  @@index([ingestionEventId])
 }
 
 // ─── INGESTION: AUDIT LOG ───────────────────────────────────────────────────

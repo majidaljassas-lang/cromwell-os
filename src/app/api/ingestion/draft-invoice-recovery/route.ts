@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const {
       zohoInvoiceExternalId,
+      ingestionEventId,
       customerId,
       siteId,
       sourceInvoiceJson,
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
     const draft = await prisma.draftInvoiceRecoveryItem.create({
       data: {
         zohoInvoiceExternalId,
+        ingestionEventId,
         customerId,
         siteId,
         status: "DRAFT_IMPORTED",

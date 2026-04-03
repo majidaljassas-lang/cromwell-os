@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { parseZohoBill, type ZohoBillPayload } from "@/lib/ingestion/zoho-parser";
 import { logAudit } from "@/lib/ingestion/audit";
+import { matchCustomer } from "@/lib/ingestion/matching";
 import crypto from "crypto";
 
 export async function POST(request: Request) {
@@ -91,6 +92,24 @@ export async function POST(request: Request) {
               reviewStatus: "UNRESOLVED",
             },
           });
+        }
+
+        // Fix 3: Customer resolution — run matching on vendor name
+        if (parsed.supplierName) {
+          const customerMatches = await matchCustomer(parsed.supplierName);
+          const bestMatch = customerMatches[0];
+          if (bestMatch && bestMatch.confidence < 80) {
+            // Low confidence — add entity for review queue visibility
+            await prisma.extractedEntity.create({
+              data: {
+                parsedMessageId: parsedMsg.id,
+                entityType: "UNRESOLVED_CUSTOMER",
+                value: parsed.supplierName,
+                normalizedValue: bestMatch ? `${bestMatch.entityName} (${bestMatch.confidence}%)` : undefined,
+                confidenceScore: bestMatch?.confidence ?? 0,
+              },
+            });
+          }
         }
 
         // Audit log

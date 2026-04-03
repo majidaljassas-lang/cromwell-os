@@ -12,6 +12,7 @@
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "./audit";
 import { validateBillLine } from "./validation";
+import { autoAllocate, suggestAllocations } from "./auto-allocator";
 
 export interface CommercialiseResult {
   success: boolean;
@@ -133,6 +134,7 @@ export async function commercialiseZohoBill(
             ticketId: options.ticketId,
             costClassification: (line.costClassification as "BILLABLE" | "ABSORBED" | "REALLOCATABLE" | "STOCK" | "MOQ_EXCESS" | "WRITE_OFF" | "CREDIT") || "BILLABLE",
             allocationStatus: "UNALLOCATED" as const,
+            commercialStatus: vat?.vatStatus === "UNKNOWN" ? "BLOCKED_VAT_UNKNOWN" : "READY",
             sourceAmountBasis: vat?.sourceAmountBasis as string || undefined,
             amountExVat: vat ? Number(vat.amountExVat || 0) : undefined,
             vatAmount: vat ? Number(vat.vatAmount || 0) : undefined,
@@ -175,6 +177,26 @@ export async function commercialiseZohoBill(
 
   result.success = true;
   result.createdObjects.push({ type: "SupplierBill", id: bill.id });
+
+  // Fix 2: Auto-allocate BILLABLE lines with high confidence
+  const createdLines = await prisma.supplierBillLine.findMany({
+    where: { supplierBillId: bill.id, costClassification: "BILLABLE", commercialStatus: { not: "BLOCKED_VAT_UNKNOWN" } },
+    select: { id: true },
+  });
+
+  for (const line of createdLines) {
+    const autoResult = await autoAllocate(line.id, options.actor);
+    if (autoResult) {
+      result.createdObjects.push({ type: "CostAllocation_Auto", id: line.id });
+    } else {
+      // Log suggestions for review queue
+      const suggestions = await suggestAllocations(line.id);
+      if (suggestions.length > 0) {
+        result.warnings.push(`Line ${line.id}: ${suggestions.length} allocation suggestion(s) in review queue`);
+      }
+    }
+  }
+
   return result;
 }
 

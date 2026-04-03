@@ -42,6 +42,17 @@ export async function POST(
       );
     }
 
+    // Fix 1: Check for BLOCKED_VAT_UNKNOWN bill lines on this ticket
+    const blockedVatLines = await prisma.supplierBillLine.findMany({
+      where: { ticketId: id, commercialStatus: "BLOCKED_VAT_UNKNOWN" },
+      select: { id: true, description: true },
+    });
+    if (blockedVatLines.length > 0) {
+      readinessWarnings.push(
+        `${blockedVatLines.length} bill line(s) have UNKNOWN VAT basis and are blocked: ${blockedVatLines.map((l) => l.description).join(", ")}`
+      );
+    }
+
     // Check open blocker tasks
     const openBlockerTasks = await prisma.task.findMany({
       where: {
