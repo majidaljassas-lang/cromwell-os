@@ -108,3 +108,29 @@ export async function PATCH(
     return Response.json({ error: "Failed to update ticket line" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  try {
+    // Check for downstream dependencies before deleting
+    const deps = await prisma.costAllocation.count({ where: { ticketLineId: id } });
+    const invoiceLines = await prisma.salesInvoiceLine.count({ where: { ticketLineId: id } });
+
+    if (deps > 0 || invoiceLines > 0) {
+      return Response.json({
+        error: "Cannot delete — line has cost allocations or invoice lines. Remove those first.",
+        costAllocations: deps,
+        invoiceLines,
+      }, { status: 409 });
+    }
+
+    await prisma.ticketLine.delete({ where: { id } });
+    return Response.json({ deleted: true, id });
+  } catch (error) {
+    console.error("Failed to delete ticket line:", error);
+    return Response.json({ error: "Failed to delete ticket line" }, { status: 500 });
+  }
+}

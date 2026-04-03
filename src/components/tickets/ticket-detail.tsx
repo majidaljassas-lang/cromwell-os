@@ -346,6 +346,28 @@ export function TicketDetail({
   const [editingLine, setEditingLine] = useState<TicketLine | null>(null);
   const [editSheetOpen, setEditSheetOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingLine, setDeletingLine] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDeleteLine() {
+    if (!editingLine) return;
+    if (!confirm(`Delete "${editingLine.description}"? This cannot be undone.`)) return;
+    setDeletingLine(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/ticket-lines/${editingLine.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setEditSheetOpen(false);
+        setEditingLine(null);
+        router.refresh();
+      } else {
+        const data = await res.json();
+        setDeleteError(data.error || "Failed to delete");
+      }
+    } finally {
+      setDeletingLine(false);
+    }
+  }
   const [creatingQuote, setCreatingQuote] = useState(false);
 
   // Quote readiness: all lines READY_FOR_QUOTE, at least 1 line
@@ -922,7 +944,13 @@ export function TicketDetail({
                     }`}>{editingLine.status.replace(/_/g, " ")}</Badge>
                     <p className="text-[10px] text-[#666666] mt-1">Status auto-updates on save based on pricing completeness.</p>
                   </div>
-                  <SheetFooter className="mt-2">
+                  {deleteError && (
+                    <div className="text-[#FF3333] text-xs border border-[#FF3333]/30 bg-[#FF3333]/10 px-3 py-2">{deleteError}</div>
+                  )}
+                  <SheetFooter className="mt-2 flex justify-between">
+                    <Button type="button" onClick={handleDeleteLine} disabled={deletingLine} variant="outline" className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
+                      {deletingLine ? "Deleting..." : "Delete Line"}
+                    </Button>
                     <Button type="submit" disabled={savingEdit} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                       {savingEdit ? "Saving..." : "Save Changes"}
                     </Button>
