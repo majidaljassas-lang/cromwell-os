@@ -139,7 +139,7 @@ export async function commercialiseZohoBill(
             amountExVat: vat?.amountExVat != null ? Number(vat.amountExVat) : undefined,
             vatAmount: vat?.vatAmount != null ? Number(vat.vatAmount) : undefined,
             amountIncVat: vat?.amountIncVat != null ? Number(vat.amountIncVat) : undefined,
-            vatRate: vat ? Number(vat.vatRate || 0) : undefined,
+            vatRate: vat?.vatRate != null ? Number(vat.vatRate) : undefined,
             vatStatus: vat?.vatStatus as string || undefined,
             sourceSiteTextRaw: line.sourceSiteTextRaw as string || undefined,
             sourceCustomerTextRaw: line.sourceCustomerTextRaw as string || undefined,

@@ -3,6 +3,12 @@
  *
  * All commercial calculations use EX VAT internally.
  * Original source basis is always preserved.
+ *
+ * For UNKNOWN basis:
+ * - vatRate = NULL (no assumed rate leaks into downstream)
+ * - amountExVat / vatAmount / amountIncVat = NULL
+ * - rawAmount preserved as source truth
+ * - assumedVatRate carries the system default separately for UI display only
  */
 
 export type VatStatus = "CONFIRMED" | "ASSUMED" | "UNKNOWN";
@@ -14,7 +20,8 @@ export interface VatNormalisedAmount {
   amountExVat: number | null;
   vatAmount: number | null;
   amountIncVat: number | null;
-  vatRate: number;
+  vatRate: number | null;
+  assumedVatRate: number | null;
   vatStatus: VatStatus;
 }
 
@@ -38,6 +45,7 @@ export function normaliseVat(
       vatAmount: round2(vatAmount),
       amountIncVat: round2(rawAmount + vatAmount),
       vatRate: rate,
+      assumedVatRate: null,
       vatStatus: status,
     };
   }
@@ -52,24 +60,25 @@ export function normaliseVat(
       vatAmount: round2(vatAmount),
       amountIncVat: round2(rawAmount),
       vatRate: rate,
+      assumedVatRate: null,
       vatStatus: status,
     };
   }
 
   // UNKNOWN basis:
-  // - rawAmount preserved (source truth)
-  // - amountExVat = NULL (not 0, not rawAmount)
-  // - vatAmount = NULL
-  // - amountIncVat = NULL
-  // - line will be BLOCKED_VAT_UNKNOWN in commercialiser
-  // - excluded from deal sheet, bundles, invoices, margin calcs, readiness totals
+  // - rawAmount preserved (source truth, never overwritten)
+  // - vatRate = NULL (not 20 — no real rate known)
+  // - assumedVatRate = UK default (for UI display / future resolution only)
+  // - all calculated fields NULL — nothing usable downstream
+  // - commercialiser sets commercialStatus = BLOCKED_VAT_UNKNOWN
   return {
     sourceAmountBasis: "UNKNOWN",
     rawAmount,
     amountExVat: null,
     vatAmount: null,
     amountIncVat: null,
-    vatRate: rate,
+    vatRate: null,
+    assumedVatRate: UK_STANDARD_VAT,
     vatStatus: "UNKNOWN",
   };
 }
