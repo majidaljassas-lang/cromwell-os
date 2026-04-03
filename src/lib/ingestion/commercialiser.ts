@@ -185,15 +185,25 @@ export async function commercialiseZohoBill(
   });
 
   for (const line of createdLines) {
-    const autoResult = await autoAllocate(line.id, options.actor);
-    if (autoResult) {
-      result.createdObjects.push({ type: "CostAllocation_Auto", id: line.id });
-    } else {
-      // Log suggestions for review queue
-      const suggestions = await suggestAllocations(line.id);
-      if (suggestions.length > 0) {
-        result.warnings.push(`Line ${line.id}: ${suggestions.length} allocation suggestion(s) in review queue`);
+    try {
+      const autoResult = await autoAllocate(line.id, options.actor);
+      if (autoResult) {
+        result.createdObjects.push({ type: "CostAllocation_Auto", id: line.id });
+      } else {
+        const suggestions = await suggestAllocations(line.id);
+        if (suggestions.length > 0) {
+          result.warnings.push(`Line ${line.id}: ${suggestions.length} allocation suggestion(s) in review queue`);
+        }
       }
+    } catch (allocErr) {
+      result.warnings.push(`Line ${line.id}: auto-allocation failed — ${allocErr instanceof Error ? allocErr.message : "unknown error"}`);
+      await logAudit({
+        objectType: "SupplierBillLine",
+        objectId: line.id,
+        actionType: "AUTO_ALLOCATION_FAILED",
+        actor: "SYSTEM",
+        reason: allocErr instanceof Error ? allocErr.message : "Unknown error",
+      });
     }
   }
 

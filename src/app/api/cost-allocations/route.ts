@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/ingestion/audit";
 
 export async function GET(request: Request) {
   try {
@@ -104,6 +105,13 @@ export async function POST(request: Request) {
       });
 
       return created;
+    });
+
+    await logAudit({
+      objectType: "CostAllocation",
+      objectId: allocation.id,
+      actionType: "MANUAL_ALLOCATION",
+      newValue: { ticketLineId, supplierBillLineId, totalCost, allocationStatus },
     });
 
     return Response.json(allocation, { status: 201 });

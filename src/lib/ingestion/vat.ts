@@ -56,13 +56,13 @@ export function normaliseVat(
     };
   }
 
-  // UNKNOWN basis — preserve raw, flag for review
+  // UNKNOWN basis — DO NOT assume raw is ex-VAT. Leave null until resolved.
   return {
     sourceAmountBasis: "UNKNOWN",
     rawAmount,
-    amountExVat: round2(rawAmount),
+    amountExVat: 0, // null-equivalent — must not be used for margin calculations
     vatAmount: 0,
-    amountIncVat: round2(rawAmount),
+    amountIncVat: 0, // null-equivalent — basis unknown
     vatRate: rate,
     vatStatus: "UNKNOWN",
   };

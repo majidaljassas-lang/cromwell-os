@@ -63,6 +63,20 @@ export async function POST(
       );
     }
 
+    // Check: block if any cost allocation on this ticket line comes from a BLOCKED_VAT_UNKNOWN bill line
+    const blockedAllocations = await prisma.costAllocation.findMany({
+      where: {
+        ticketLineId,
+        supplierBillLine: { commercialStatus: "BLOCKED_VAT_UNKNOWN" },
+      },
+    });
+    if (blockedAllocations.length > 0) {
+      return Response.json(
+        { error: "Cannot add to bundle — ticket line has cost allocations from VAT-blocked bill lines" },
+        { status: 422 }
+      );
+    }
+
     const costLink = await prisma.salesBundleCostLink.create({
       data: {
         salesBundleId: id,

@@ -35,6 +35,15 @@ export async function POST(request: Request) {
       );
     }
 
+    // Verify paying customer is a billing entity
+    const customer = await prisma.customer.findUnique({ where: { id: payingCustomerId }, select: { isBillingEntity: true, name: true } });
+    if (customer && customer.isBillingEntity === false) {
+      return Response.json(
+        { error: `Customer "${customer.name}" is not a billing entity. Use the parent billing entity instead.` },
+        { status: 422 }
+      );
+    }
+
     const ticket = await prisma.ticket.create({
       data: {
         payingCustomerId,
