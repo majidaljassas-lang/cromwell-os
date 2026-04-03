@@ -70,26 +70,36 @@ export async function POST(
       };
     });
 
-    const quote = await prisma.quote.create({
-      data: {
-        ticketId: id,
-        quoteNo,
-        versionNo,
-        quoteType,
-        customerId,
-        siteId,
-        siteCommercialLinkId,
-        status: "DRAFT",
-        totalSell,
-        notes,
-        lines: {
-          create: quoteLineData,
+    const quote = await prisma.$transaction(async (tx) => {
+      const created = await tx.quote.create({
+        data: {
+          ticketId: id,
+          quoteNo,
+          versionNo,
+          quoteType,
+          customerId,
+          siteId,
+          siteCommercialLinkId,
+          status: "DRAFT",
+          totalSell,
+          notes,
+          lines: {
+            create: quoteLineData,
+          },
         },
-      },
-      include: {
-        lines: true,
-        customer: true,
-      },
+        include: {
+          lines: { include: { ticketLine: true } },
+          customer: true,
+        },
+      });
+
+      // Update ticket status to QUOTED
+      await tx.ticket.update({
+        where: { id },
+        data: { status: "QUOTED", quoteStatus: "DRAFT" },
+      });
+
+      return created;
     });
 
     return Response.json(quote, { status: 201 });

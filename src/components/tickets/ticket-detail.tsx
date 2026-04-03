@@ -342,6 +342,34 @@ export function TicketDetail({
   const [editingLine, setEditingLine] = useState<TicketLine | null>(null);
   const [editSheetOpen, setEditSheetOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [creatingQuote, setCreatingQuote] = useState(false);
+
+  // Quote readiness: all lines READY_FOR_QUOTE, at least 1 line
+  const isQuoteReady = ticket.lines.length > 0 && ticket.lines.every(
+    (l) => l.status === "READY_FOR_QUOTE" || l.status === "ORDERED" || l.status === "FULLY_COSTED" || l.status === "INVOICED"
+  );
+
+  async function handleCreateQuote() {
+    setCreatingQuote(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/quotes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteType: "STANDARD",
+          customerId: ticket.payingCustomer.id,
+          siteId: ticket.site?.id,
+          siteCommercialLinkId: ticket.siteCommercialLink?.id,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        router.push(`/quotes/${data.id}`);
+      }
+    } finally {
+      setCreatingQuote(false);
+    }
+  }
 
   async function handleSaveLineEdit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -467,6 +495,22 @@ export function TicketDetail({
               ID: {ticket.id.slice(0, 8)}
             </span>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isQuoteReady && ticket.status !== "QUOTED" && ticket.status !== "INVOICED" && ticket.status !== "CLOSED" && (
+            <Button
+              onClick={handleCreateQuote}
+              disabled={creatingQuote}
+              className="bg-[#FF6600] text-black hover:bg-[#FF9900] font-bold"
+            >
+              {creatingQuote ? "Creating..." : "Create Quote"}
+            </Button>
+          )}
+          {!isQuoteReady && ticket.lines.length > 0 && (
+            <div className="text-[10px] text-[#888888] bb-mono">
+              {ticket.lines.filter((l) => l.status === "READY_FOR_QUOTE").length}/{ticket.lines.length} LINES READY
+            </div>
+          )}
         </div>
       </div>
 
