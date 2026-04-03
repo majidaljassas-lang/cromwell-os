@@ -286,6 +286,8 @@ model Site {
   supplierBillLines   SupplierBillLine[]
   quotes              Quote[]
   salesInvoices       SalesInvoice[]
+  siteAliases         SiteAlias[]
+  sourceSiteMatches   SourceSiteMatch[]
 
   @@index([siteName])
   @@index([siteCode])
@@ -299,13 +301,18 @@ model Customer {
   vatNumber           String?
   paymentTerms        String?
   defaultCustomerMode String?
-  poRequiredDefault   Boolean  @default(false)
-  isCashCustomer      Boolean  @default(false)
-  notes               String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  poRequiredDefault     Boolean  @default(false)
+  isCashCustomer        Boolean  @default(false)
+  commercialGroupId     String?
+  parentCustomerEntityId String?
+  entityType            String?
+  isBillingEntity       Boolean  @default(true)
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   siteCommercialLinks SiteCommercialLink[]
+  customerAliases     CustomerAlias[]
   siteContactLinks    SiteContactLink[]
   enquirySuggestions  Enquiry[]             @relation("SuggestedCustomer")
   workItems           InquiryWorkItem[]
@@ -398,13 +405,17 @@ model SiteContactLink {
 // ─── INGESTION ──────────────────────────────────────────────────────────────
 
 model IngestionSource {
-  id               String     @id @default(uuid())
-  sourceType       SourceType
-  externalRef      String?
-  connectedAccount String?
-  isActive         Boolean    @default(true)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  id                  String     @id @default(uuid())
+  sourceType          SourceType
+  externalRef         String?
+  connectedAccount    String?
+  accountName         String?
+  isActive            Boolean    @default(true)
+  isHistoricalCapable Boolean    @default(false)
+  connectorStatus     String?
+  lastSyncAt          DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   ingestionEvents IngestionEvent[]
 }
@@ -413,18 +424,23 @@ model IngestionEvent {
   id                String    @id @default(uuid())
   sourceId          String
   externalMessageId String?
+  sourceRecordType  String?
+  eventKind         String?
   rawPayload        Json
   payloadHash       String?
   receivedAt        DateTime
   processedAt       DateTime?
   status            String
+  errorMessage      String?
   createdAt         DateTime  @default(now())
 
   source         IngestionSource @relation(fields: [sourceId], references: [id])
   parsedMessages ParsedMessage[]
+  sourceSiteMatches SourceSiteMatch[]
 
   @@unique([sourceId, externalMessageId])
   @@index([status])
+  @@index([eventKind])
 }
 
 model ParsedMessage {
@@ -434,6 +450,7 @@ model ParsedMessage {
   structuredData   Json?
   messageType      String
   confidenceScore  Decimal? @db.Decimal(5, 2)
+  parseVersion     Int      @default(1)
   createdAt        DateTime @default(now())
 
   ingestionEvent    IngestionEvent   @relation(fields: [ingestionEventId], references: [id])
@@ -446,22 +463,38 @@ model ExtractedEntity {
   parsedMessageId String
   entityType      String
   value           String
+  normalizedValue String?
   confidenceScore Decimal? @db.Decimal(5, 2)
+  spanStart       Int?
+  spanEnd         Int?
 
   parsedMessage ParsedMessage @relation(fields: [parsedMessageId], references: [id])
 }
 
 model IngestionLink {
-  id                 String  @id @default(uuid())
-  parsedMessageId    String
-  enquiryId          String?
-  ticketId           String?
-  evidenceFragmentId String?
+  id                  String   @id @default(uuid())
+  parsedMessageId     String
+  enquiryId           String?
+  ticketId            String?
+  evidenceFragmentId  String?
+  inquiryWorkItemId   String?
+  supplierBillId      String?
+  supplierBillLineId  String?
+  eventId             String?
+  linkConfidence      Decimal? @db.Decimal(5, 2)
+  linkStatus          String?
+  createdAt           DateTime @default(now())
 
   parsedMessage    ParsedMessage     @relation(fields: [parsedMessageId], references: [id])
   enquiry          Enquiry?          @relation(fields: [enquiryId], references: [id])
   ticket           Ticket?           @relation(fields: [ticketId], references: [id])
   evidenceFragment EvidenceFragment? @relation(fields: [evidenceFragmentId], references: [id])
+  inquiryWorkItem  InquiryWorkItem?  @relation(fields: [inquiryWorkItemId], references: [id])
+  supplierBill     SupplierBill?     @relation(fields: [supplierBillId], references: [id])
+  supplierBillLine SupplierBillLine? @relation(fields: [supplierBillLineId], references: [id])
+  event            Event?            @relation(fields: [eventId], references: [id])
+
+  @@index([linkStatus])
 }
 
 // ─── ENQUIRIES & WORK ITEMS ────────────────────────────────────────────────
@@ -481,6 +514,11 @@ model Enquiry {
   enquiryType                   EnquiryType
   confidenceScore               Decimal?    @db.Decimal(5, 2)
   status                        String
+  discardReason                 String?
+  discardedBy                   String?
+  discardedAt                   DateTime?
+  benchmarkPriceRaw             Decimal?    @db.Decimal(14, 2)
+  benchmarkPriceBasis           String?
   createdAt                     DateTime    @default(now())
   updatedAt                     DateTime    @updatedAt
 
@@ -517,6 +555,7 @@ model InquiryWorkItem {
   siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
   customer           Customer?           @relation(fields: [customerId], references: [id])
   requestedByContact Contact?            @relation("WorkItemRequestedBy", fields: [requestedByContactId], references: [id])
+  ingestionLinks     IngestionLink[]
 
   @@index([status])
 }
@@ -911,8 +950,9 @@ model SupplierBill {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  supplier Supplier           @relation(fields: [supplierId], references: [id])
-  lines    SupplierBillLine[]
+  supplier       Supplier           @relation(fields: [supplierId], references: [id])
+  lines          SupplierBillLine[]
+  ingestionLinks IngestionLink[]
 
   @@index([billNo])
 }
@@ -930,10 +970,18 @@ model SupplierBillLine {
   siteCommercialLinkId String?
   customerId           String?
   ticketId             String?
-  costClassification   CostClassification @default(BILLABLE)
-  allocationStatus     AllocationStatus
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  costClassification    CostClassification @default(BILLABLE)
+  allocationStatus      AllocationStatus
+  sourceAmountBasis     String?
+  amountExVat           Decimal?           @db.Decimal(14, 2)
+  vatAmount             Decimal?           @db.Decimal(14, 2)
+  amountIncVat          Decimal?           @db.Decimal(14, 2)
+  vatRate               Decimal?           @db.Decimal(5, 2)
+  vatStatus             String?
+  sourceSiteTextRaw     String?
+  sourceCustomerTextRaw String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   supplierBill        SupplierBill              @relation(fields: [supplierBillId], references: [id])
   site                Site?                     @relation(fields: [siteId], references: [id])
@@ -944,6 +992,7 @@ model SupplierBillLine {
   returnLines         ReturnLine[]
   absorbedAllocations AbsorbedCostAllocation[]
   stockExcessRecords  StockExcessRecord[]
+  ingestionLinks      IngestionLink[]
 
   @@index([allocationStatus])
 }
@@ -993,6 +1042,7 @@ model CustomerPO {
   profitToDate            Decimal        @default(0) @db.Decimal(14, 2)
   expectedProfitRemaining Decimal        @default(0) @db.Decimal(14, 2)
   sourceAttachmentRef     String?
+  sourceAmountBasis       String?
   notes                   String?
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
@@ -1180,6 +1230,7 @@ model Event {
   ticket            Ticket           @relation(fields: [ticketId], references: [id])
   ticketLine        TicketLine?      @relation(fields: [ticketLineId], references: [id])
   evidencePackItems EvidencePackItem[]
+  ingestionLinks    IngestionLink[]
 }
 
 model Task {
@@ -1425,4 +1476,112 @@ model SitePackItem {
   ticket       Ticket        @relation(fields: [ticketId], references: [id])
   salesInvoice SalesInvoice? @relation(fields: [salesInvoiceId], references: [id])
   evidencePack EvidencePack? @relation(fields: [evidencePackId], references: [id])
+}
+
+// ─── INGESTION: SITE & CUSTOMER RESOLUTION ─────────────────────────────────
+
+model SiteAlias {
+  id               String     @id @default(uuid())
+  siteId           String
+  aliasText        String
+  sourceType       SourceType?
+  isActive         Boolean    @default(true)
+  confidenceDefault Decimal?  @db.Decimal(5, 2)
+  createdAt        DateTime   @default(now())
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@unique([siteId, aliasText])
+  @@index([aliasText])
+}
+
+model CustomerAlias {
+  id         String     @id @default(uuid())
+  customerId String
+  aliasText  String
+  sourceType SourceType?
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([customerId, aliasText])
+  @@index([aliasText])
+}
+
+model SourceSiteMatch {
+  id               String   @id @default(uuid())
+  sourceSystem     String
+  sourceRecordId   String?
+  ingestionEventId String?
+  rawSiteText      String
+  matchedSiteId    String?
+  matchMethod      String?
+  confidenceScore  Decimal? @db.Decimal(5, 2)
+  reviewStatus     String   @default("UNRESOLVED")
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  matchedSite     Site?           @relation(fields: [matchedSiteId], references: [id])
+  ingestionEvent  IngestionEvent? @relation(fields: [ingestionEventId], references: [id])
+
+  @@index([reviewStatus])
+  @@index([rawSiteText])
+}
+
+// ─── INGESTION: DRAFT INVOICE RECOVERY ──────────────────────────────────────
+
+model DraftInvoiceRecoveryItem {
+  id                     String   @id @default(uuid())
+  zohoInvoiceExternalId  String?
+  customerId             String?
+  siteId                 String?
+  status                 String   @default("DRAFT_IMPORTED")
+  verificationStatus     String   @default("UNVERIFIED")
+  sourceInvoiceJson      Json?
+  totalValue             Decimal? @db.Decimal(14, 2)
+  issuesSummary          String?
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([status])
+  @@index([verificationStatus])
+  @@index([zohoInvoiceExternalId])
+}
+
+// ─── INGESTION: AUDIT LOG ───────────────────────────────────────────────────
+
+model IngestionAuditLog {
+  id               String   @id @default(uuid())
+  objectType       String
+  objectId         String
+  actionType       String
+  actor            String?
+  previousValueJson Json?
+  newValueJson     Json?
+  reason           String?
+  createdAt        DateTime @default(now())
+
+  @@index([objectType, objectId])
+  @@index([actionType])
+  @@index([createdAt])
+}
+
+// ─── INGESTION: RECONSTRUCTION BATCHES ──────────────────────────────────────
+
+model ReconstructionBatch {
+  id         String   @id @default(uuid())
+  monthYear  String
+  status     String   @default("PENDING")
+  billsFound Int      @default(0)
+  matched    Int      @default(0)
+  unmatched  Int      @default(0)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([monthYear])
+  @@index([status])
 }
