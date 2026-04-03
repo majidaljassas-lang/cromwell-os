@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { DownloadPdfButton } from "@/components/quotes/download-pdf-button";
 
 export const dynamic = "force-dynamic";
 
@@ -110,14 +111,9 @@ export default async function QuoteViewPage({
           <p className="text-xs text-gray-400 mt-1">All prices are exclusive of VAT unless stated otherwise.</p>
         </div>
 
-        {/* Print button — only visible on screen */}
+        {/* Download PDF button */}
         <div className="mt-8 text-center print:hidden">
-          <a
-            href="javascript:window.print()"
-            className="inline-block px-6 py-2 bg-black text-white text-sm font-medium hover:bg-gray-800"
-          >
-            Print / Save as PDF
-          </a>
+          <DownloadPdfButton quoteId={quote.id} pdfPath={quote.pdfPath} />
         </div>
       </div>
 
