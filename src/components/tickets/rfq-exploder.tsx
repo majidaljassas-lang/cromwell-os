@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Wand2, Check, X, Merge, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,14 @@ export function RfqExploder({
   const [showMerge, setShowMerge] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showSource, setShowSource] = useState(false);
+
+  // Auto-extract on mount if source text exists and no batch
+  useEffect(() => {
+    if (customText.trim() && !batch && !extracting) {
+      handleExtract();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleExtract() {
     if (!customText.trim()) return;

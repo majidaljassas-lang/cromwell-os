@@ -64,9 +64,11 @@ const MATERIAL_KEYWORDS = [
   "pipe", "fitting", "valve", "tap", "mixer", "waste", "trap", "coupling",
   "elbow", "tee", "reducer", "adapter", "connector", "flange", "bracket",
   "clip", "screw", "bolt", "washer", "seal", "gasket", "solder", "flux",
-  "copper", "chrome", "brass", "pvc", "mlcp", "mdpe", "upvc", "solvent",
+  "copper", "cooper", "chrome", "brass", "pvc", "mlcp", "mdpe", "upvc", "solvent",
   "cement", "ptfe", "silicone", "radiator", "cylinder", "boiler",
   "thermostat", "shower", "basin", "bath", "toilet", "cistern",
+  "press", "compression", "lbv", "motorised", "bypass", "lever",
+  "insulation", "band", "ring", "reduced", "hole",
 ];
 
 export function extractRfqCandidates(rawText: string): ExtractedCandidate[] {
@@ -90,19 +92,27 @@ function splitIntoLines(text: string): string[] {
   // Split on newlines first
   let lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
 
-  // If only 1 line, try splitting on commas (but not within product specs)
-  if (lines.length === 1) {
+  // If only 1 line, try splitting on commas
+  if (lines.length <= 2) {
     const commaSplit = text.split(/,\s*/).map((l) => l.trim()).filter(Boolean);
-    if (commaSplit.length > 1) lines = commaSplit;
+    if (commaSplit.length > 2) lines = commaSplit;
+  }
+
+  // If still 1 line, try splitting on "Nx " pattern boundaries
+  // This handles continuous text like "6x coupling 40mm 8x adapter 15mm 10x pipe"
+  if (lines.length <= 2) {
+    const qtyBoundary = text.split(/(?=\b\d+\s*[xX×]\s)/);
+    const filtered = qtyBoundary.map((l) => l.trim()).filter((l) => l.length > 2);
+    if (filtered.length > 2) lines = filtered;
   }
 
   // If still 1 line, try splitting on numbered patterns "1. ... 2. ..."
-  if (lines.length === 1) {
+  if (lines.length <= 2) {
     const numbered = text.split(/(?:\d+[.)]\s*)/).filter((l) => l.trim().length > 2);
-    if (numbered.length > 1) lines = numbered;
+    if (numbered.length > 2) lines = numbered;
   }
 
-  // Handle bullet points and dashes
+  // Handle bullet points and dashes within each line
   const expanded: string[] = [];
   for (const line of lines) {
     const bulletSplit = line.split(/\s*[-•]\s+/).filter((l) => l.trim().length > 2);
