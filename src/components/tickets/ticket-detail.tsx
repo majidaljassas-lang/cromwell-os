@@ -374,6 +374,28 @@ export function TicketDetail({
     }
   }
 
+  const [creatingPOs, setCreatingPOs] = useState(false);
+
+  // Check if quote is accepted (procurement can proceed)
+  const hasAcceptedQuote = (quotes || []).some((q: { status: string }) => q.status === "APPROVED");
+  const hasSuppliers = ticket.lines.some((l) => l.supplierId);
+  const canCreatePurchasePlan = hasAcceptedQuote && hasSuppliers && ticket.status !== "ORDERED" && ticket.status !== "CLOSED";
+
+  async function handleCreatePurchasePlan() {
+    setCreatingPOs(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/create-purchase-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        router.refresh();
+      }
+    } finally {
+      setCreatingPOs(false);
+    }
+  }
+
   async function handleSaveLineEdit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!editingLine) return;
@@ -519,10 +541,24 @@ export function TicketDetail({
               {creatingQuote ? "Creating..." : "Create Quote"}
             </Button>
           )}
-          {!isQuoteReady && ticket.lines.length > 0 && (
+          {!isQuoteReady && ticket.lines.length > 0 && ticket.status !== "QUOTED" && ticket.status !== "ORDERED" && (
             <div className="text-[10px] text-[#888888] bb-mono">
               {ticket.lines.filter((l) => l.status === "READY_FOR_QUOTE").length}/{ticket.lines.length} LINES READY
             </div>
+          )}
+          {canCreatePurchasePlan && (
+            <Button
+              onClick={handleCreatePurchasePlan}
+              disabled={creatingPOs}
+              className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
+            >
+              {creatingPOs ? "Creating POs..." : "Create Purchase Plan"}
+            </Button>
+          )}
+          {ticket.status === "ORDERED" && (
+            <Badge className="text-[9px] uppercase tracking-wider font-bold px-2 py-1 text-[#00CC66] bg-[#00CC66]/10">
+              POs CREATED
+            </Badge>
           )}
         </div>
       </div>
