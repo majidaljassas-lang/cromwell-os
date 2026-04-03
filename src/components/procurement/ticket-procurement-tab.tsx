@@ -478,7 +478,7 @@ export function TicketProcurementTab({
                       {ca.ticketLine.description}
                     </TableCell>
                     <TableCell className="max-w-[150px] truncate">
-                      {ca.supplierBillLine.description}
+                      {ca.supplierBillLine?.description || ca.notes || "PO allocation"}
                     </TableCell>
                     <TableCell>{ca.supplier.name}</TableCell>
                     <TableCell className="text-right tabular-nums">
