@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Send, FileText } from "lucide-react";
+import { ArrowLeft, Send, FileText, Eye, Download, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -97,6 +97,15 @@ export function QuoteBuilder({ quote }: { quote: Quote }) {
     }
   }
 
+  async function handleStatusChange(newStatus: string) {
+    const res = await fetch(`/api/quotes/${quote.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (res.ok) router.refresh();
+  }
+
   const statusColor =
     quote.status === "DRAFT" ? "text-[#FF9900] bg-[#FF9900]/10" :
     quote.status === "SENT" ? "text-[#3399FF] bg-[#3399FF]/10" :
@@ -137,11 +146,40 @@ export function QuoteBuilder({ quote }: { quote: Quote }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <a href={`/quotes/${quote.id}/view`} target="_blank">
+            <Button variant="outline" size="sm" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+              <Eye className="size-4 mr-1" />
+              Preview
+            </Button>
+          </a>
+          <a href={`/api/quotes/${quote.id}/generate-pdf`} target="_blank">
+            <Button variant="outline" size="sm" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+              <Download className="size-4 mr-1" />
+              PDF
+            </Button>
+          </a>
           {quote.status === "DRAFT" && (
             <Button onClick={handleSend} disabled={sending} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
               <Send className="size-4 mr-1" />
-              {sending ? "Sending..." : "Mark as Sent"}
+              {sending ? "Sending..." : "Send Quote"}
             </Button>
+          )}
+          {quote.status === "SENT" && (
+            <>
+              <Button onClick={() => handleStatusChange("APPROVED")} className="bg-[#00CC66] text-black hover:bg-[#00AA55]" size="sm">
+                <CheckCircle className="size-4 mr-1" />
+                Accepted
+              </Button>
+              <Button onClick={() => handleStatusChange("REJECTED")} variant="outline" size="sm" className="bg-[#222222] text-[#FF3333] border-[#333333] hover:bg-[#2A2A2A]">
+                <XCircle className="size-4 mr-1" />
+                Rejected
+              </Button>
+            </>
+          )}
+          {quote.issuedAt && (
+            <span className="text-[10px] text-[#888888] bb-mono">
+              Sent: {new Date(quote.issuedAt).toLocaleDateString()}
+            </span>
           )}
         </div>
       </div>
