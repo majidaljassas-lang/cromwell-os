@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChevronDown, ChevronRight, Send, CheckCircle } from "lucide-react";
+import Link from "next/link";
+import { Plus, ChevronDown, ChevronRight, Send, CheckCircle, ExternalLink, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -253,6 +254,12 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                         </span>
                       )}
                       <div className="flex gap-1">
+                        <Link href={`/quotes/${quote.id}`}>
+                          <Button size="sm" variant="outline" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+                            <ExternalLink className="size-3.5 mr-1" />
+                            Open
+                          </Button>
+                        </Link>
                         {quote.status === "DRAFT" && (
                           <Button
                             size="sm"
