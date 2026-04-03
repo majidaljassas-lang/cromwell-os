@@ -90,6 +90,31 @@ export async function POST(
         },
       });
 
+      // Create cost allocations: PO line → ticket line
+      for (const poLine of po.lines) {
+        if (poLine.ticketLineId) {
+          await prisma.costAllocation.create({
+            data: {
+              ticketLineId: poLine.ticketLineId,
+              procurementOrderLineId: poLine.id,
+              supplierId,
+              qtyAllocated: poLine.qty,
+              unitCost: poLine.unitCost,
+              totalCost: poLine.lineTotal,
+              allocationStatus: "MATCHED",
+              confidenceScore: 100,
+              notes: `Auto-allocated from ${po.poNo}`,
+            },
+          });
+
+          // Update ticket line actualCostTotal
+          await prisma.ticketLine.update({
+            where: { id: poLine.ticketLineId },
+            data: { actualCostTotal: poLine.lineTotal },
+          });
+        }
+      }
+
       createdPOs.push(po);
     }
 

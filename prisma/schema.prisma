@@ -968,6 +968,7 @@ model ProcurementOrderLine {
   procurementOrder ProcurementOrder @relation(fields: [procurementOrderId], references: [id])
   ticketLine       TicketLine       @relation(fields: [ticketLineId], references: [id])
   supplierOption   SupplierOption?  @relation(fields: [supplierOptionId], references: [id])
+  costAllocations  CostAllocation[]
 }
 
 model SupplierBill {
@@ -1032,22 +1033,24 @@ model SupplierBillLine {
 }
 
 model CostAllocation {
-  id                 String           @id @default(uuid())
-  ticketLineId       String
-  supplierBillLineId String
-  supplierId         String
-  qtyAllocated       Decimal          @db.Decimal(14, 4)
-  unitCost           Decimal          @db.Decimal(14, 4)
-  totalCost          Decimal          @db.Decimal(14, 2)
-  allocationStatus   AllocationStatus
-  confidenceScore    Decimal?         @db.Decimal(5, 2)
-  notes              String?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  id                      String           @id @default(uuid())
+  ticketLineId            String
+  supplierBillLineId      String?
+  procurementOrderLineId  String?
+  supplierId              String
+  qtyAllocated            Decimal          @db.Decimal(14, 4)
+  unitCost                Decimal          @db.Decimal(14, 4)
+  totalCost               Decimal          @db.Decimal(14, 2)
+  allocationStatus        AllocationStatus
+  confidenceScore         Decimal?         @db.Decimal(5, 2)
+  notes                   String?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
 
-  ticketLine       TicketLine       @relation(fields: [ticketLineId], references: [id])
-  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
-  supplier         Supplier         @relation(fields: [supplierId], references: [id])
+  ticketLine       TicketLine            @relation(fields: [ticketLineId], references: [id])
+  supplierBillLine SupplierBillLine?     @relation(fields: [supplierBillLineId], references: [id])
+  supplier         Supplier              @relation(fields: [supplierId], references: [id])
+  procurementLine  ProcurementOrderLine? @relation(fields: [procurementOrderLineId], references: [id])
 }
 
 // ─── CUSTOMER POs & DRAWDOWNS ───────────────────────────────────────────────

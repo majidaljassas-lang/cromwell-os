@@ -56,7 +56,6 @@ export async function POST(request: Request) {
 
     if (
       !ticketLineId ||
-      !supplierBillLineId ||
       !supplierId ||
       qtyAllocated === undefined ||
       unitCost === undefined ||
@@ -65,17 +64,20 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error:
-            "Missing required fields: ticketLineId, supplierBillLineId, supplierId, qtyAllocated, unitCost, totalCost",
+            "Missing required fields: ticketLineId, supplierId, qtyAllocated, unitCost, totalCost",
         },
         { status: 400 }
       );
     }
 
+    const { procurementOrderLineId } = body;
+
     const allocation = await prisma.$transaction(async (tx) => {
       const created = await tx.costAllocation.create({
         data: {
           ticketLineId,
-          supplierBillLineId,
+          supplierBillLineId: supplierBillLineId || undefined,
+          procurementOrderLineId: procurementOrderLineId || undefined,
           supplierId,
           qtyAllocated,
           unitCost,
@@ -86,23 +88,21 @@ export async function POST(request: Request) {
         },
         include: {
           ticketLine: true,
-          supplierBillLine: {
-            include: {
-              supplierBill: true,
-            },
-          },
+          supplierBillLine: supplierBillLineId ? { include: { supplierBill: true } } : false,
           supplier: true,
         },
       });
 
-      // Update the supplier bill line's allocation status
-      await tx.supplierBillLine.update({
-        where: { id: supplierBillLineId },
-        data: {
-          allocationStatus:
-            allocationStatus === "MATCHED" ? "MATCHED" : "PARTIAL",
-        },
-      });
+      // Update the supplier bill line's allocation status (only if linked)
+      if (supplierBillLineId) {
+        await tx.supplierBillLine.update({
+          where: { id: supplierBillLineId },
+          data: {
+            allocationStatus:
+              allocationStatus === "MATCHED" ? "MATCHED" : "PARTIAL",
+          },
+        });
+      }
 
       return created;
     });
