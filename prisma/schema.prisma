@@ -1,0 +1,1428 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum TicketMode {
+  DIRECT_ORDER
+  PRICING_FIRST
+  SPEC_DRIVEN
+  COMPETITIVE_BID
+  RECOVERY
+  CASH_SALE
+  LABOUR_ONLY
+  PROJECT_WORK
+  NON_SITE
+}
+
+enum TicketStatus {
+  CAPTURED
+  PRICING
+  QUOTED
+  APPROVED
+  ORDERED
+  DELIVERED
+  COSTED
+  PENDING_PO
+  RECOVERY
+  VERIFIED
+  LOCKED
+  INVOICED
+  CLOSED
+}
+
+enum TicketLineType {
+  MATERIAL
+  LABOUR
+  PLANT
+  SERVICE
+  DELIVERY
+  CASH_SALE
+  RETURN_ADJUSTMENT
+}
+
+enum InquiryStatus {
+  OPEN
+  AWAITING_SITE
+  AWAITING_CUSTOMER
+  PRICING
+  QUOTE_SENT
+  AWAITING_RESPONSE
+  READY_TO_CONVERT
+  CONVERTED
+  CLOSED_LOST
+  CLOSED_NO_ACTION
+}
+
+enum CustomerPOType {
+  STANDARD_FIXED
+  DRAWDOWN_LABOUR
+  DRAWDOWN_MATERIALS
+}
+
+enum RecoveryStatus {
+  OPEN
+  EVIDENCE_BUILDING
+  PACK_READY
+  PACK_SENT_FOR_PO
+  AWAITING_PO
+  PO_RECEIVED
+  PO_MISMATCH
+  PO_ALLOCATED
+  INVOICE_READY
+  INVOICE_SENT
+  PAYMENT_PENDING
+  CLOSED
+}
+
+enum CostClassification {
+  BILLABLE
+  ABSORBED
+  REALLOCATABLE
+  STOCK
+  MOQ_EXCESS
+  WRITE_OFF
+  CREDIT
+}
+
+enum EvidenceType {
+  INSTRUCTION
+  APPROVAL
+  PRICING
+  DELIVERY
+  DISPUTE
+  PO_REQUEST
+  PO_RECEIVED
+  SUPPLIER_CONFIRMATION
+  PHOTO
+  CALL_NOTE
+}
+
+enum SourceType {
+  WHATSAPP
+  OUTLOOK
+  ZOHO_BOOKS
+  EMAIL
+  PDF_UPLOAD
+  IMAGE_UPLOAD
+  MANUAL
+  API
+}
+
+enum EnquiryType {
+  DIRECT_ORDER
+  QUOTE_REQUEST
+  PRICING_FIRST
+  SPEC_REQUEST
+  COMPETITIVE_BID
+  APPROVAL
+  FOLLOW_UP
+  DELIVERY_UPDATE
+  DISPUTE
+  OTHER
+}
+
+enum AllocationStatus {
+  MATCHED
+  PARTIAL
+  SUGGESTED
+  EXCEPTION
+  UNALLOCATED
+}
+
+enum BundleType {
+  SINGLE_ITEM
+  GROUPED_MATERIALS
+  LABOUR_BUNDLE
+  MIXED_SCOPE
+}
+
+enum BundlePricingMode {
+  COST_PLUS
+  MANUAL_FIXED
+  BENCHMARK_MATCHED
+  STRATEGIC
+}
+
+enum DrawdownDayType {
+  WEEKDAY
+  WEEKEND
+  CUSTOM
+}
+
+enum EventType {
+  ENQUIRY_LOGGED
+  QUOTE_REQUESTED
+  QUOTE_SENT
+  QUOTE_APPROVED
+  PO_REQUESTED
+  PO_RECEIVED
+  PURCHASE_ORDER_SENT
+  SUPPLIER_CONFIRMED
+  GOODS_DELIVERED
+  BILL_RECEIVED
+  INVOICE_RAISED
+  PAYMENT_RECEIVED
+  RETURN_CREATED
+  CREDIT_RECEIVED
+  RECOVERY_TRIGGERED
+  EVIDENCE_PACK_GENERATED
+  TASK_GENERATED
+  PACK_SENT_FOR_PO
+  PO_FOLLOWUP_SENT
+  INVOICE_UNLOCKED
+}
+
+// ─── AUTH ────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          String    @default("user")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── COMMERCIAL SPINE ───────────────────────────────────────────────────────
+
+model ParentJob {
+  id                 String    @id @default(uuid())
+  name               String
+  description        String?
+  primarySiteId      String?
+  status             String
+  startDate          DateTime?
+  endDate            DateTime?
+  expectedTotalSell  Decimal   @default(0) @db.Decimal(14, 2)
+  expectedTotalCost  Decimal   @default(0) @db.Decimal(14, 2)
+  actualTotalSell    Decimal   @default(0) @db.Decimal(14, 2)
+  actualTotalCost    Decimal   @default(0) @db.Decimal(14, 2)
+  expectedMargin     Decimal   @default(0) @db.Decimal(14, 2)
+  actualMargin       Decimal   @default(0) @db.Decimal(14, 2)
+  isArchived         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  primarySite      Site?             @relation("PrimarySite", fields: [primarySiteId], references: [id])
+  enquiries        Enquiry[]
+  inquiryWorkItems InquiryWorkItem[]
+  tickets          Ticket[]
+}
+
+model Site {
+  id           String   @id @default(uuid())
+  siteName     String
+  siteCode     String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  postcode     String?
+  country      String?
+  notes        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  primaryForJobs      ParentJob[]           @relation("PrimarySite")
+  siteCommercialLinks SiteCommercialLink[]
+  siteContactLinks    SiteContactLink[]
+  enquirySuggestions  Enquiry[]             @relation("SuggestedSite")
+  workItems           InquiryWorkItem[]
+  tickets             Ticket[]
+  ticketLines         TicketLine[]
+  customerPOs         CustomerPO[]
+  labourDrawdowns     LabourDrawdownEntry[]
+  logisticsEvents     LogisticsEvent[]
+  sitePacks           SitePack[]
+  supplierBillLines   SupplierBillLine[]
+  quotes              Quote[]
+  salesInvoices       SalesInvoice[]
+
+  @@index([siteName])
+  @@index([siteCode])
+}
+
+model Customer {
+  id                  String   @id @default(uuid())
+  name                String
+  legalName           String?
+  billingAddress      String?
+  vatNumber           String?
+  paymentTerms        String?
+  defaultCustomerMode String?
+  poRequiredDefault   Boolean  @default(false)
+  isCashCustomer      Boolean  @default(false)
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  siteCommercialLinks SiteCommercialLink[]
+  siteContactLinks    SiteContactLink[]
+  enquirySuggestions  Enquiry[]             @relation("SuggestedCustomer")
+  workItems           InquiryWorkItem[]
+  ticketsAsPayer      Ticket[]              @relation("PayingCustomer")
+  ticketLinesAsPayer  TicketLine[]          @relation("TicketLinePayingCustomer")
+  quotes              Quote[]
+  customerPOs         CustomerPO[]
+  invoices            SalesInvoice[]
+  supplierBillLines   SupplierBillLine[]
+
+  @@index([name])
+}
+
+model Contact {
+  id        String   @id @default(uuid())
+  fullName  String
+  phone     String?
+  email     String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  siteContactLinks     SiteContactLink[]
+  enquiries            Enquiry[]
+  workItems            InquiryWorkItem[]    @relation("WorkItemRequestedBy")
+  ticketsRequested     Ticket[]             @relation("TicketRequestedBy")
+  ticketsActingFor     Ticket[]             @relation("TicketActingFor")
+  ticketLinesRequested TicketLine[]         @relation("TicketLineRequestedBy")
+  evidenceFragments    EvidenceFragment[]
+  labourDrawdowns      LabourDrawdownEntry[]
+  logisticsEvents      LogisticsEvent[]
+
+  @@index([fullName])
+}
+
+model SiteCommercialLink {
+  id                     String    @id @default(uuid())
+  siteId                 String
+  customerId             String
+  role                   String
+  billingAllowed         Boolean   @default(false)
+  defaultBillingCustomer Boolean   @default(false)
+  commercialNotes        String?
+  activeFrom             DateTime?
+  activeTo               DateTime?
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  site             Site              @relation(fields: [siteId], references: [id])
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  siteContactLinks SiteContactLink[]
+  enquiries        Enquiry[]         @relation("SuggestedSiteCommercialLink")
+  workItems        InquiryWorkItem[]
+  tickets          Ticket[]
+  ticketLines      TicketLine[]
+  quotes           Quote[]
+  customerPOs      CustomerPO[]
+  invoices         SalesInvoice[]
+  supplierBillLines SupplierBillLine[]
+
+  @@unique([siteId, customerId, role])
+  @@index([siteId])
+  @@index([customerId])
+}
+
+model SiteContactLink {
+  id                   String    @id @default(uuid())
+  siteId               String
+  contactId            String
+  customerId           String?
+  siteCommercialLinkId String?
+  roleOnSite           String?
+  isPrimary            Boolean   @default(false)
+  activeFrom           DateTime?
+  activeTo             DateTime?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  site               Site                @relation(fields: [siteId], references: [id])
+  contact            Contact             @relation(fields: [contactId], references: [id])
+  customer           Customer?           @relation(fields: [customerId], references: [id])
+  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+
+  @@index([siteId, contactId])
+}
+
+// ─── INGESTION ──────────────────────────────────────────────────────────────
+
+model IngestionSource {
+  id               String     @id @default(uuid())
+  sourceType       SourceType
+  externalRef      String?
+  connectedAccount String?
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  ingestionEvents IngestionEvent[]
+}
+
+model IngestionEvent {
+  id                String    @id @default(uuid())
+  sourceId          String
+  externalMessageId String?
+  rawPayload        Json
+  payloadHash       String?
+  receivedAt        DateTime
+  processedAt       DateTime?
+  status            String
+  createdAt         DateTime  @default(now())
+
+  source         IngestionSource @relation(fields: [sourceId], references: [id])
+  parsedMessages ParsedMessage[]
+
+  @@unique([sourceId, externalMessageId])
+  @@index([status])
+}
+
+model ParsedMessage {
+  id               String   @id @default(uuid())
+  ingestionEventId String
+  extractedText    String
+  structuredData   Json?
+  messageType      String
+  confidenceScore  Decimal? @db.Decimal(5, 2)
+  createdAt        DateTime @default(now())
+
+  ingestionEvent    IngestionEvent   @relation(fields: [ingestionEventId], references: [id])
+  extractedEntities ExtractedEntity[]
+  ingestionLinks    IngestionLink[]
+}
+
+model ExtractedEntity {
+  id              String   @id @default(uuid())
+  parsedMessageId String
+  entityType      String
+  value           String
+  confidenceScore Decimal? @db.Decimal(5, 2)
+
+  parsedMessage ParsedMessage @relation(fields: [parsedMessageId], references: [id])
+}
+
+model IngestionLink {
+  id                 String  @id @default(uuid())
+  parsedMessageId    String
+  enquiryId          String?
+  ticketId           String?
+  evidenceFragmentId String?
+
+  parsedMessage    ParsedMessage     @relation(fields: [parsedMessageId], references: [id])
+  enquiry          Enquiry?          @relation(fields: [enquiryId], references: [id])
+  ticket           Ticket?           @relation(fields: [ticketId], references: [id])
+  evidenceFragment EvidenceFragment? @relation(fields: [evidenceFragmentId], references: [id])
+}
+
+// ─── ENQUIRIES & WORK ITEMS ────────────────────────────────────────────────
+
+model Enquiry {
+  id                            String      @id @default(uuid())
+  parentJobId                   String?
+  sourceType                    SourceType
+  channelThreadRef              String?
+  sourceContactId               String?
+  receivedAt                    DateTime
+  subjectOrLabel                String?
+  rawText                       String
+  suggestedSiteId               String?
+  suggestedCustomerId           String?
+  suggestedSiteCommercialLinkId String?
+  enquiryType                   EnquiryType
+  confidenceScore               Decimal?    @db.Decimal(5, 2)
+  status                        String
+  createdAt                     DateTime    @default(now())
+  updatedAt                     DateTime    @updatedAt
+
+  parentJob                   ParentJob?          @relation(fields: [parentJobId], references: [id])
+  sourceContact               Contact?            @relation(fields: [sourceContactId], references: [id])
+  suggestedSite               Site?               @relation("SuggestedSite", fields: [suggestedSiteId], references: [id])
+  suggestedCustomer           Customer?           @relation("SuggestedCustomer", fields: [suggestedCustomerId], references: [id])
+  suggestedSiteCommercialLink SiteCommercialLink? @relation("SuggestedSiteCommercialLink", fields: [suggestedSiteCommercialLinkId], references: [id])
+  workItems                   InquiryWorkItem[]
+  ingestionLinks              IngestionLink[]
+
+  @@index([status])
+  @@index([sourceType])
+}
+
+model InquiryWorkItem {
+  id                   String        @id @default(uuid())
+  enquiryId            String
+  parentJobId          String?
+  siteId               String?
+  siteCommercialLinkId String?
+  customerId           String?
+  requestedByContactId String?
+  mode                 TicketMode
+  status               InquiryStatus
+  confidenceScore      Decimal?      @db.Decimal(5, 2)
+  notes                String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  enquiry            Enquiry             @relation(fields: [enquiryId], references: [id])
+  parentJob          ParentJob?          @relation(fields: [parentJobId], references: [id])
+  site               Site?               @relation(fields: [siteId], references: [id])
+  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+  customer           Customer?           @relation(fields: [customerId], references: [id])
+  requestedByContact Contact?            @relation("WorkItemRequestedBy", fields: [requestedByContactId], references: [id])
+
+  @@index([status])
+}
+
+// ─── TICKETS ────────────────────────────────────────────────────────────────
+
+model Ticket {
+  id                        String       @id @default(uuid())
+  parentJobId               String?
+  siteId                    String?
+  siteCommercialLinkId      String?
+  payingCustomerId          String
+  requestedByContactId      String?
+  actingOnBehalfOfContactId String?
+  title                     String
+  description               String?
+  ticketMode                TicketMode
+  scopeType                 String?
+  status                    TicketStatus
+  quoteRequired             Boolean      @default(false)
+  quoteStatus               String?
+  poRequired                Boolean      @default(false)
+  poStatus                  String?
+  recoveryRequired          Boolean      @default(false)
+  isLocked                  Boolean      @default(false)
+  createdAt                 DateTime     @default(now())
+  closedAt                  DateTime?
+  updatedAt                 DateTime     @updatedAt
+
+  parentJob               ParentJob?          @relation(fields: [parentJobId], references: [id])
+  site                    Site?               @relation(fields: [siteId], references: [id])
+  siteCommercialLink      SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+  payingCustomer          Customer            @relation("PayingCustomer", fields: [payingCustomerId], references: [id])
+  requestedByContact      Contact?            @relation("TicketRequestedBy", fields: [requestedByContactId], references: [id])
+  actingOnBehalfOfContact Contact?            @relation("TicketActingFor", fields: [actingOnBehalfOfContactId], references: [id])
+
+  phases                  TicketPhase[]
+  lines                   TicketLine[]
+  dealSheets              DealSheet[]
+  salesBundles            SalesBundle[]
+  quotes                  Quote[]
+  customerPOs             CustomerPO[]
+  procurementOrders       ProcurementOrder[]
+  evidenceFragments       EvidenceFragment[]
+  events                  Event[]
+  tasks                   Task[]
+  recoveryCases           RecoveryCase[]
+  evidencePacks           EvidencePack[]
+  logisticsEvents         LogisticsEvent[]
+  invoices                SalesInvoice[]
+  returns                 Return[]
+  absorbedCostAllocations AbsorbedCostAllocation[]
+  cashSales               CashSale[]
+  ingestionLinks          IngestionLink[]
+  supplierBillLines       SupplierBillLine[]
+  compSheets              CompSheet[]
+  sitePackItems           SitePackItem[]
+  workLabourDrawdowns     LabourDrawdownEntry[]
+  workMaterialsDrawdowns  MaterialsDrawdownEntry[]
+
+  @@index([status])
+  @@index([payingCustomerId])
+  @@index([siteId])
+  @@index([ticketMode])
+}
+
+model TicketPhase {
+  id            String    @id @default(uuid())
+  ticketId      String
+  phaseName     String
+  phaseType     String
+  versionNo     Int
+  status        String
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  ticket Ticket      @relation(fields: [ticketId], references: [id])
+  lines  TicketLine[]
+  quotes Quote[]
+}
+
+model TicketLine {
+  id                   String         @id @default(uuid())
+  ticketId             String
+  ticketPhaseId        String?
+  lineType             TicketLineType
+  description          String
+  normalizedItemName   String?
+  productCode          String?
+  specification        String?
+  qty                  Decimal        @db.Decimal(14, 4)
+  unit                 String
+  siteId               String?
+  siteCommercialLinkId String?
+  payingCustomerId     String
+  requestedByContactId String?
+  supplierStrategyType String?
+  status               String
+  expectedCostUnit     Decimal?       @db.Decimal(14, 4)
+  expectedCostTotal    Decimal?       @db.Decimal(14, 2)
+  actualCostTotal      Decimal?       @db.Decimal(14, 2)
+  benchmarkUnit        Decimal?       @db.Decimal(14, 4)
+  benchmarkTotal       Decimal?       @db.Decimal(14, 2)
+  suggestedSaleUnit    Decimal?       @db.Decimal(14, 4)
+  actualSaleUnit       Decimal?       @db.Decimal(14, 4)
+  actualSaleTotal      Decimal?       @db.Decimal(14, 2)
+  expectedMarginTotal  Decimal?       @db.Decimal(14, 2)
+  actualMarginTotal    Decimal?       @db.Decimal(14, 2)
+  varianceTotal        Decimal?       @db.Decimal(14, 2)
+  evidenceStatus       String?
+  costStatus           String?
+  salesStatus          String?
+  isLocked             Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  ticket             Ticket              @relation(fields: [ticketId], references: [id])
+  ticketPhase        TicketPhase?        @relation(fields: [ticketPhaseId], references: [id])
+  site               Site?               @relation(fields: [siteId], references: [id])
+  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+  payingCustomer     Customer            @relation("TicketLinePayingCustomer", fields: [payingCustomerId], references: [id])
+  requestedByContact Contact?            @relation("TicketLineRequestedBy", fields: [requestedByContactId], references: [id])
+
+  supplierOptions       SupplierOption[]
+  dealSheetSnapshots    DealSheetLineSnapshot[]
+  benchmarks            Benchmark[]
+  compSheetLines        CompSheetLine[]
+  poLines               CustomerPOLine[]
+  poAllocations         CustomerPOAllocation[]
+  procurementLines      ProcurementOrderLine[]
+  costAllocations       CostAllocation[]
+  evidenceFragments     EvidenceFragment[]
+  events                Event[]
+  tasks                 Task[]
+  returnLines           ReturnLine[]
+  creditNoteAllocations CreditNoteAllocation[]
+  absorbedCosts         AbsorbedCostAllocation[]
+  stockExcessRecords    StockExcessRecord[]
+  reallocationsFrom     ReallocationRecord[]     @relation("ReallocationsFrom")
+  reallocationsTo       ReallocationRecord[]     @relation("ReallocationsTo")
+  labourEntries         LabourEntry[]
+  salesBundleLinks      SalesBundleCostLink[]
+  invoiceLines          SalesInvoiceLine[]
+  materialsDrawdowns    MaterialsDrawdownEntry[]
+  quoteLines            QuoteLine[]
+
+  @@index([ticketId])
+  @@index([status])
+  @@index([payingCustomerId])
+}
+
+// ─── SALES BUNDLES ──────────────────────────────────────────────────────────
+
+model SalesBundle {
+  id              String            @id @default(uuid())
+  ticketId        String
+  name            String
+  description     String?
+  bundleType      BundleType
+  pricingMode     BundlePricingMode
+  targetSellTotal Decimal?          @db.Decimal(14, 2)
+  actualSellTotal Decimal?          @db.Decimal(14, 2)
+  status          String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  ticket    Ticket               @relation(fields: [ticketId], references: [id])
+  costLinks SalesBundleCostLink[]
+}
+
+model SalesBundleCostLink {
+  id               String   @id @default(uuid())
+  salesBundleId    String
+  ticketLineId     String
+  linkedCostValue  Decimal? @db.Decimal(14, 2)
+  linkedQty        Decimal? @db.Decimal(14, 4)
+  contributionType String
+
+  salesBundle SalesBundle @relation(fields: [salesBundleId], references: [id])
+  ticketLine  TicketLine  @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── DEAL SHEETS & PRICING ─────────────────────────────────────────────────
+
+model DealSheet {
+  id                  String   @id @default(uuid())
+  ticketId            String
+  versionNo           Int
+  mode                String
+  benchmarkContext    String?
+  strategyNotes       String?
+  totalExpectedCost   Decimal  @default(0) @db.Decimal(14, 2)
+  totalExpectedSell   Decimal  @default(0) @db.Decimal(14, 2)
+  totalExpectedMargin Decimal  @default(0) @db.Decimal(14, 2)
+  totalActualCost     Decimal  @default(0) @db.Decimal(14, 2)
+  totalActualSell     Decimal  @default(0) @db.Decimal(14, 2)
+  totalActualMargin   Decimal  @default(0) @db.Decimal(14, 2)
+  varianceTotal       Decimal  @default(0) @db.Decimal(14, 2)
+  status              String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  ticket        Ticket                  @relation(fields: [ticketId], references: [id])
+  lineSnapshots DealSheetLineSnapshot[]
+}
+
+model DealSheetLineSnapshot {
+  id                    String   @id @default(uuid())
+  dealSheetId           String
+  ticketLineId          String
+  versionNo             Int
+  supplierSourceSummary String?
+  benchmarkUnit         Decimal? @db.Decimal(14, 4)
+  expectedCostUnit      Decimal? @db.Decimal(14, 4)
+  suggestedSaleUnit     Decimal? @db.Decimal(14, 4)
+  actualSaleUnit        Decimal? @db.Decimal(14, 4)
+  expectedMarginUnit    Decimal? @db.Decimal(14, 4)
+  notes                 String?
+
+  dealSheet  DealSheet  @relation(fields: [dealSheetId], references: [id])
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+model Benchmark {
+  id              String    @id @default(uuid())
+  ticketLineId    String
+  benchmarkSource String
+  sourceRef       String?
+  unitPrice       Decimal?  @db.Decimal(14, 4)
+  qty             Decimal?  @db.Decimal(14, 4)
+  totalPrice      Decimal?  @db.Decimal(14, 2)
+  capturedAt      DateTime?
+  notes           String?
+
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+model CompSheet {
+  id        String @id @default(uuid())
+  ticketId  String
+  versionNo Int
+  name      String
+  status    String
+  notes     String?
+
+  ticket Ticket          @relation(fields: [ticketId], references: [id])
+  lines  CompSheetLine[]
+}
+
+model CompSheetLine {
+  id             String   @id @default(uuid())
+  compSheetId    String
+  ticketLineId   String
+  benchmarkTotal Decimal? @db.Decimal(14, 2)
+  ourCostTotal   Decimal? @db.Decimal(14, 2)
+  ourSaleTotal   Decimal? @db.Decimal(14, 2)
+  savingTotal    Decimal? @db.Decimal(14, 2)
+  marginTotal    Decimal? @db.Decimal(14, 2)
+  notes          String?
+
+  compSheet  CompSheet  @relation(fields: [compSheetId], references: [id])
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── QUOTES ─────────────────────────────────────────────────────────────────
+
+model Quote {
+  id                   String    @id @default(uuid())
+  ticketId             String
+  ticketPhaseId        String?
+  quoteNo              String
+  versionNo            Int
+  quoteType            String
+  customerId           String
+  siteId               String?
+  siteCommercialLinkId String?
+  status               String
+  issuedAt             DateTime?
+  expiresAt            DateTime?
+  totalSell            Decimal   @default(0) @db.Decimal(14, 2)
+  notes                String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  ticket             Ticket              @relation(fields: [ticketId], references: [id])
+  ticketPhase        TicketPhase?        @relation(fields: [ticketPhaseId], references: [id])
+  customer           Customer            @relation(fields: [customerId], references: [id])
+  site               Site?               @relation(fields: [siteId], references: [id])
+  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+  lines              QuoteLine[]
+
+  @@index([quoteNo])
+}
+
+model QuoteLine {
+  id           String  @id @default(uuid())
+  quoteId      String
+  ticketLineId String
+  description  String
+  qty          Decimal @db.Decimal(14, 4)
+  unitPrice    Decimal @db.Decimal(14, 4)
+  lineTotal    Decimal @db.Decimal(14, 2)
+
+  quote      Quote      @relation(fields: [quoteId], references: [id])
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── SUPPLIERS & PROCUREMENT ────────────────────────────────────────────────
+
+model Supplier {
+  id        String  @id @default(uuid())
+  name      String
+  legalName String?
+  email     String?
+  phone     String?
+  notes     String?
+
+  options           SupplierOption[]
+  procurementOrders ProcurementOrder[]
+  supplierBills     SupplierBill[]
+  returns           Return[]
+  creditNotes       CreditNote[]
+  costAllocations   CostAllocation[]
+
+  @@index([name])
+}
+
+model SupplierOption {
+  id           String    @id @default(uuid())
+  ticketLineId String
+  supplierId   String
+  sourceType   String
+  costUnit     Decimal   @db.Decimal(14, 4)
+  qtyAvailable Decimal?  @db.Decimal(14, 4)
+  leadTimeDays Int?
+  isPreferred  Boolean   @default(false)
+  capturedAt   DateTime?
+  notes        String?
+
+  ticketLine       TicketLine           @relation(fields: [ticketLineId], references: [id])
+  supplier         Supplier             @relation(fields: [supplierId], references: [id])
+  procurementLines ProcurementOrderLine[]
+}
+
+model ProcurementOrder {
+  id                   String    @id @default(uuid())
+  ticketId             String
+  supplierId           String
+  poNo                 String
+  supplierRef          String?
+  issuedAt             DateTime?
+  status               String
+  siteRef              String?
+  deliveryDateExpected DateTime?
+  totalCostExpected    Decimal   @default(0) @db.Decimal(14, 2)
+
+  ticket   Ticket                 @relation(fields: [ticketId], references: [id])
+  supplier Supplier               @relation(fields: [supplierId], references: [id])
+  lines    ProcurementOrderLine[]
+
+  @@index([poNo])
+}
+
+model ProcurementOrderLine {
+  id                 String  @id @default(uuid())
+  procurementOrderId String
+  ticketLineId       String
+  supplierOptionId   String?
+  description        String
+  qty                Decimal @db.Decimal(14, 4)
+  unitCost           Decimal @db.Decimal(14, 4)
+  lineTotal          Decimal @db.Decimal(14, 2)
+
+  procurementOrder ProcurementOrder @relation(fields: [procurementOrderId], references: [id])
+  ticketLine       TicketLine       @relation(fields: [ticketLineId], references: [id])
+  supplierOption   SupplierOption?  @relation(fields: [supplierOptionId], references: [id])
+}
+
+model SupplierBill {
+  id                  String   @id @default(uuid())
+  supplierId          String
+  billNo              String
+  billDate            DateTime
+  siteRef             String?
+  customerRef         String?
+  status              String
+  totalCost           Decimal  @db.Decimal(14, 2)
+  sourceAttachmentRef String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  supplier Supplier           @relation(fields: [supplierId], references: [id])
+  lines    SupplierBillLine[]
+
+  @@index([billNo])
+}
+
+model SupplierBillLine {
+  id                   String             @id @default(uuid())
+  supplierBillId       String
+  description          String
+  normalizedItemName   String?
+  productCode          String?
+  qty                  Decimal            @db.Decimal(14, 4)
+  unitCost             Decimal            @db.Decimal(14, 4)
+  lineTotal            Decimal            @db.Decimal(14, 2)
+  siteId               String?
+  siteCommercialLinkId String?
+  customerId           String?
+  ticketId             String?
+  costClassification   CostClassification @default(BILLABLE)
+  allocationStatus     AllocationStatus
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  supplierBill        SupplierBill              @relation(fields: [supplierBillId], references: [id])
+  site                Site?                     @relation(fields: [siteId], references: [id])
+  siteCommercialLink  SiteCommercialLink?       @relation(fields: [siteCommercialLinkId], references: [id])
+  customer            Customer?                 @relation(fields: [customerId], references: [id])
+  ticket              Ticket?                   @relation(fields: [ticketId], references: [id])
+  costAllocations     CostAllocation[]
+  returnLines         ReturnLine[]
+  absorbedAllocations AbsorbedCostAllocation[]
+  stockExcessRecords  StockExcessRecord[]
+
+  @@index([allocationStatus])
+}
+
+model CostAllocation {
+  id                 String           @id @default(uuid())
+  ticketLineId       String
+  supplierBillLineId String
+  supplierId         String
+  qtyAllocated       Decimal          @db.Decimal(14, 4)
+  unitCost           Decimal          @db.Decimal(14, 4)
+  totalCost          Decimal          @db.Decimal(14, 2)
+  allocationStatus   AllocationStatus
+  confidenceScore    Decimal?         @db.Decimal(5, 2)
+  notes              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  ticketLine       TicketLine       @relation(fields: [ticketLineId], references: [id])
+  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
+  supplier         Supplier         @relation(fields: [supplierId], references: [id])
+}
+
+// ─── CUSTOMER POs & DRAWDOWNS ───────────────────────────────────────────────
+
+model CustomerPO {
+  id                      String         @id @default(uuid())
+  ticketId                String?
+  customerId              String
+  siteId                  String?
+  siteCommercialLinkId    String?
+  poNo                    String
+  poType                  CustomerPOType
+  poDate                  DateTime?
+  status                  String
+  totalValue              Decimal?       @db.Decimal(14, 2)
+  poLimitValue            Decimal?       @db.Decimal(14, 2)
+  poCommittedValue        Decimal        @default(0) @db.Decimal(14, 2)
+  poConsumedValue         Decimal        @default(0) @db.Decimal(14, 2)
+  poRemainingValue        Decimal        @default(0) @db.Decimal(14, 2)
+  overheadPct             Decimal?       @db.Decimal(6, 3)
+  overheadBasis           String?
+  weekdaySellRate         Decimal?       @db.Decimal(14, 2)
+  weekendSellRate         Decimal?       @db.Decimal(14, 2)
+  weekdayCostRate         Decimal?       @db.Decimal(14, 2)
+  weekendCostRate         Decimal?       @db.Decimal(14, 2)
+  profitToDate            Decimal        @default(0) @db.Decimal(14, 2)
+  expectedProfitRemaining Decimal        @default(0) @db.Decimal(14, 2)
+  sourceAttachmentRef     String?
+  notes                   String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  ticket             Ticket?              @relation(fields: [ticketId], references: [id])
+  customer           Customer             @relation(fields: [customerId], references: [id])
+  site               Site?                @relation(fields: [siteId], references: [id])
+  siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
+  lines              CustomerPOLine[]
+  allocations        CustomerPOAllocation[]
+  labourDrawdowns    LabourDrawdownEntry[]
+  materialsDrawdowns MaterialsDrawdownEntry[]
+
+  @@index([poNo])
+}
+
+model CustomerPOLine {
+  id              String   @id @default(uuid())
+  customerPOId    String
+  ticketLineId    String?
+  description     String
+  qty             Decimal? @db.Decimal(14, 4)
+  agreedUnitPrice Decimal? @db.Decimal(14, 4)
+  agreedTotal     Decimal? @db.Decimal(14, 2)
+  consumedQty     Decimal  @default(0) @db.Decimal(14, 4)
+  consumedValue   Decimal  @default(0) @db.Decimal(14, 2)
+  remainingQty    Decimal? @db.Decimal(14, 4)
+  remainingValue  Decimal? @db.Decimal(14, 2)
+
+  customerPO CustomerPO  @relation(fields: [customerPOId], references: [id])
+  ticketLine TicketLine? @relation(fields: [ticketLineId], references: [id])
+}
+
+model CustomerPOAllocation {
+  id             String  @id @default(uuid())
+  customerPOId   String
+  ticketLineId   String
+  salesInvoiceId String?
+  allocatedValue Decimal @db.Decimal(14, 2)
+  status         String
+
+  customerPO   CustomerPO    @relation(fields: [customerPOId], references: [id])
+  ticketLine   TicketLine    @relation(fields: [ticketLineId], references: [id])
+  salesInvoice SalesInvoice? @relation(fields: [salesInvoiceId], references: [id])
+}
+
+model LabourDrawdownEntry {
+  id                String          @id @default(uuid())
+  customerPOId      String
+  ticketId          String
+  siteId            String
+  weekEndingDate    DateTime?
+  workDate          DateTime
+  plumberContactId  String?
+  dayType           DrawdownDayType
+  plumberCount      Int
+  daysWorked        Decimal         @db.Decimal(8, 2)
+  billableDayRate   Decimal         @db.Decimal(14, 2)
+  billableValue     Decimal         @db.Decimal(14, 2)
+  internalDayCost   Decimal         @db.Decimal(14, 2)
+  internalCostValue Decimal         @db.Decimal(14, 2)
+  overheadPct       Decimal?        @db.Decimal(6, 3)
+  overheadValue     Decimal?        @db.Decimal(14, 2)
+  grossProfitValue  Decimal?        @db.Decimal(14, 2)
+  invoiceLineId     String?
+  status            String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  customerPO     CustomerPO @relation(fields: [customerPOId], references: [id])
+  ticket         Ticket     @relation(fields: [ticketId], references: [id])
+  site           Site       @relation(fields: [siteId], references: [id])
+  plumberContact Contact?   @relation(fields: [plumberContactId], references: [id])
+}
+
+model MaterialsDrawdownEntry {
+  id               String   @id @default(uuid())
+  customerPOId     String
+  ticketId         String
+  ticketLineId     String?
+  drawdownDate     DateTime
+  description      String
+  qty              Decimal? @db.Decimal(14, 4)
+  unitSell         Decimal? @db.Decimal(14, 4)
+  sellValue        Decimal? @db.Decimal(14, 2)
+  unitCostExpected Decimal? @db.Decimal(14, 4)
+  costValueActual  Decimal? @db.Decimal(14, 2)
+  overheadPct      Decimal? @db.Decimal(6, 3)
+  overheadValue    Decimal? @db.Decimal(14, 2)
+  grossProfitValue Decimal? @db.Decimal(14, 2)
+  invoiceLineId    String?
+  status           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  customerPO CustomerPO  @relation(fields: [customerPOId], references: [id])
+  ticket     Ticket      @relation(fields: [ticketId], references: [id])
+  ticketLine TicketLine? @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── INVOICES ───────────────────────────────────────────────────────────────
+
+model SalesInvoice {
+  id                   String    @id @default(uuid())
+  ticketId             String
+  invoiceNo            String?
+  customerId           String
+  siteId               String?
+  siteCommercialLinkId String?
+  poNo                 String?
+  invoiceType          String
+  status               String
+  issuedAt             DateTime?
+  paidAt               DateTime?
+  totalSell            Decimal   @default(0) @db.Decimal(14, 2)
+  notes                String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  ticket             Ticket               @relation(fields: [ticketId], references: [id])
+  customer           Customer             @relation(fields: [customerId], references: [id])
+  site               Site?                @relation(fields: [siteId], references: [id])
+  siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
+  lines              SalesInvoiceLine[]
+  poAllocations      CustomerPOAllocation[]
+  sitePackItems      SitePackItem[]
+
+  @@index([invoiceNo])
+  @@index([status])
+}
+
+model SalesInvoiceLine {
+  id             String   @id @default(uuid())
+  salesInvoiceId String
+  ticketLineId   String
+  description    String
+  qty            Decimal  @db.Decimal(14, 4)
+  unitPrice      Decimal  @db.Decimal(14, 4)
+  lineTotal      Decimal  @db.Decimal(14, 2)
+  displayMode    String
+  poMatched      Boolean  @default(false)
+  poMatchStatus  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
+  ticketLine   TicketLine   @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── EVIDENCE & EVENTS ─────────────────────────────────────────────────────
+
+model EvidenceFragment {
+  id                String       @id @default(uuid())
+  ticketId          String
+  ticketLineId      String?
+  sourceType        SourceType
+  sourceRef         String?
+  sourceContactId   String?
+  timestamp         DateTime
+  fragmentType      EvidenceType
+  fragmentText      String?
+  attachmentUrl     String?
+  confidenceScore   Decimal?     @db.Decimal(5, 2)
+  isPrimaryEvidence Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  ticket            Ticket             @relation(fields: [ticketId], references: [id])
+  ticketLine        TicketLine?        @relation(fields: [ticketLineId], references: [id])
+  sourceContact     Contact?           @relation(fields: [sourceContactId], references: [id])
+  ingestionLinks    IngestionLink[]
+  evidencePackItems EvidencePackItem[]
+}
+
+model Event {
+  id           String    @id @default(uuid())
+  ticketId     String
+  ticketLineId String?
+  eventType    EventType
+  timestamp    DateTime
+  sourceRef    String?
+  notes        String?
+  createdAt    DateTime  @default(now())
+
+  ticket            Ticket           @relation(fields: [ticketId], references: [id])
+  ticketLine        TicketLine?      @relation(fields: [ticketLineId], references: [id])
+  evidencePackItems EvidencePackItem[]
+}
+
+model Task {
+  id              String    @id @default(uuid())
+  ticketId        String
+  ticketLineId    String?
+  taskType        String
+  priority        String
+  status          String
+  generatedReason String?
+  dueAt           DateTime?
+  assignedTo      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ticket     Ticket      @relation(fields: [ticketId], references: [id])
+  ticketLine TicketLine? @relation(fields: [ticketLineId], references: [id])
+}
+
+// ─── RECOVERY ───────────────────────────────────────────────────────────────
+
+model RecoveryCase {
+  id                    String         @id @default(uuid())
+  ticketId              String
+  reasonType            String
+  recoveryStatus        RecoveryStatus
+  currentStageStartedAt DateTime?
+  packSentAt            DateTime?
+  poRequestedAt         DateTime?
+  poReceivedAt          DateTime?
+  invoiceUnlockedAt     DateTime?
+  invoiceSentAt         DateTime?
+  nextAction            String?
+  stuckValue            Decimal        @default(0) @db.Decimal(14, 2)
+  openedAt              DateTime?
+  closedAt              DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  ticket        Ticket         @relation(fields: [ticketId], references: [id])
+  evidencePacks EvidencePack[]
+}
+
+model EvidencePack {
+  id             String    @id @default(uuid())
+  ticketId       String
+  recoveryCaseId String?
+  packType       String
+  status         String
+  generatedAt    DateTime?
+  finalizedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  ticket        Ticket           @relation(fields: [ticketId], references: [id])
+  recoveryCase  RecoveryCase?    @relation(fields: [recoveryCaseId], references: [id])
+  items         EvidencePackItem[]
+  sitePackItems SitePackItem[]
+}
+
+model EvidencePackItem {
+  id                 String  @id @default(uuid())
+  evidencePackId     String
+  evidenceFragmentId String?
+  eventId            String?
+  documentRef        String?
+  summaryText        String?
+  sortOrder          Int
+
+  evidencePack     EvidencePack      @relation(fields: [evidencePackId], references: [id])
+  evidenceFragment EvidenceFragment? @relation(fields: [evidenceFragmentId], references: [id])
+  event            Event?            @relation(fields: [eventId], references: [id])
+}
+
+// ─── LOGISTICS ──────────────────────────────────────────────────────────────
+
+model LogisticsEvent {
+  id            String   @id @default(uuid())
+  ticketId      String
+  siteId        String?
+  eventType     String
+  contactId     String?
+  timestamp     DateTime
+  costTotal     Decimal? @db.Decimal(14, 2)
+  notes         String?
+  attachmentRef String?
+
+  ticket  Ticket   @relation(fields: [ticketId], references: [id])
+  site    Site?    @relation(fields: [siteId], references: [id])
+  contact Contact? @relation(fields: [contactId], references: [id])
+}
+
+// ─── RETURNS, CREDITS, ADJUSTMENTS ─────────────────────────────────────────
+
+model Return {
+  id         String   @id @default(uuid())
+  ticketId   String
+  supplierId String
+  returnDate DateTime
+  status     String
+  notes      String?
+
+  ticket   Ticket      @relation(fields: [ticketId], references: [id])
+  supplier Supplier    @relation(fields: [supplierId], references: [id])
+  lines    ReturnLine[]
+}
+
+model ReturnLine {
+  id                 String   @id @default(uuid())
+  returnId           String
+  supplierBillLineId String?
+  ticketLineId       String
+  qtyReturned        Decimal  @db.Decimal(14, 4)
+  expectedCredit     Decimal? @db.Decimal(14, 2)
+  actualCredit       Decimal? @db.Decimal(14, 2)
+  status             String
+
+  return            Return                @relation(fields: [returnId], references: [id])
+  supplierBillLine  SupplierBillLine?     @relation(fields: [supplierBillLineId], references: [id])
+  ticketLine        TicketLine            @relation(fields: [ticketLineId], references: [id])
+  creditAllocations CreditNoteAllocation[]
+}
+
+model CreditNote {
+  id                  String   @id @default(uuid())
+  supplierId          String
+  creditNoteNo        String
+  dateReceived        DateTime
+  totalCredit         Decimal  @db.Decimal(14, 2)
+  status              String
+  sourceAttachmentRef String?
+
+  supplier    Supplier               @relation(fields: [supplierId], references: [id])
+  allocations CreditNoteAllocation[]
+
+  @@index([creditNoteNo])
+}
+
+model CreditNoteAllocation {
+  id              String  @id @default(uuid())
+  creditNoteId    String
+  returnLineId    String
+  ticketLineId    String
+  allocatedCredit Decimal @db.Decimal(14, 2)
+
+  creditNote CreditNote @relation(fields: [creditNoteId], references: [id])
+  returnLine ReturnLine @relation(fields: [returnLineId], references: [id])
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+model AbsorbedCostAllocation {
+  id                 String   @id @default(uuid())
+  supplierBillLineId String
+  ticketId           String
+  ticketLineId       String?
+  description        String
+  amount             Decimal  @db.Decimal(14, 2)
+  allocationBasis    String?
+  createdAt          DateTime @default(now())
+
+  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
+  ticket           Ticket           @relation(fields: [ticketId], references: [id])
+  ticketLine       TicketLine?      @relation(fields: [ticketLineId], references: [id])
+}
+
+model StockExcessRecord {
+  id                 String   @id @default(uuid())
+  supplierBillLineId String
+  ticketLineId       String?
+  purchasedCost      Decimal  @db.Decimal(14, 2)
+  usedCost           Decimal  @db.Decimal(14, 2)
+  excessCost         Decimal  @db.Decimal(14, 2)
+  treatment          String
+  status             String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
+  ticketLine       TicketLine?      @relation(fields: [ticketLineId], references: [id])
+}
+
+model ReallocationRecord {
+  id               String   @id @default(uuid())
+  fromTicketLineId String
+  toTicketLineId   String
+  amount           Decimal  @db.Decimal(14, 2)
+  reason           String?
+  createdAt        DateTime @default(now())
+
+  fromTicketLine TicketLine @relation("ReallocationsFrom", fields: [fromTicketLineId], references: [id])
+  toTicketLine   TicketLine @relation("ReallocationsTo", fields: [toTicketLineId], references: [id])
+}
+
+model LabourEntry {
+  id             String   @id @default(uuid())
+  ticketLineId   String
+  labourType     String
+  qtyDaysOrHours Decimal? @db.Decimal(10, 2)
+  costTotal      Decimal? @db.Decimal(14, 2)
+  sellTotal      Decimal? @db.Decimal(14, 2)
+  notes          String?
+
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
+}
+
+model CashSale {
+  id             String   @id @default(uuid())
+  ticketId       String
+  receivedAmount Decimal  @db.Decimal(14, 2)
+  receivedAt     DateTime
+  paymentMethod  String
+  receiptRef     String?
+  status         String
+  createdAt      DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+}
+
+// ─── SITE PACKS ─────────────────────────────────────────────────────────────
+
+model SitePack {
+  id           String   @id @default(uuid())
+  siteId       String
+  packDate     DateTime
+  status       String
+  summaryNotes String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  site  Site           @relation(fields: [siteId], references: [id])
+  items SitePackItem[]
+}
+
+model SitePackItem {
+  id             String  @id @default(uuid())
+  sitePackId     String
+  ticketId       String
+  salesInvoiceId String?
+  evidencePackId String?
+  status         String
+
+  sitePack     SitePack      @relation(fields: [sitePackId], references: [id])
+  ticket       Ticket        @relation(fields: [ticketId], references: [id])
+  salesInvoice SalesInvoice? @relation(fields: [salesInvoiceId], references: [id])
+  evidencePack EvidencePack? @relation(fields: [evidencePackId], references: [id])
+}
