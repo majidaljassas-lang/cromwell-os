@@ -6,7 +6,8 @@ export async function POST(
 ) {
   const { id: enquiryId } = await params;
   try {
-    const { mode, ...rest } = await request.json();
+    const body = await request.json();
+    const { mode, notes } = body;
 
     if (!mode) {
       return Response.json(
@@ -23,19 +24,26 @@ export async function POST(
       return Response.json({ error: "Enquiry not found" }, { status: 404 });
     }
 
-    const workItem = await prisma.inquiryWorkItem.create({
-      data: {
-        enquiryId,
-        parentJobId: enquiry.parentJobId,
-        siteId: enquiry.suggestedSiteId,
-        siteCommercialLinkId: enquiry.suggestedSiteCommercialLinkId,
-        customerId: enquiry.suggestedCustomerId,
-        requestedByContactId: enquiry.sourceContactId,
-        mode,
-        status: "OPEN",
-        ...rest,
-      },
-    });
+    // Transaction: create work item AND update enquiry status
+    const [workItem] = await prisma.$transaction([
+      prisma.inquiryWorkItem.create({
+        data: {
+          enquiryId,
+          parentJobId: enquiry.parentJobId,
+          siteId: enquiry.suggestedSiteId,
+          siteCommercialLinkId: enquiry.suggestedSiteCommercialLinkId,
+          customerId: enquiry.suggestedCustomerId,
+          requestedByContactId: enquiry.sourceContactId,
+          mode: mode as "DIRECT_ORDER" | "PRICING_FIRST" | "SPEC_DRIVEN" | "COMPETITIVE_BID" | "RECOVERY" | "CASH_SALE" | "LABOUR_ONLY" | "PROJECT_WORK" | "NON_SITE",
+          status: "OPEN",
+          notes,
+        },
+      }),
+      prisma.enquiry.update({
+        where: { id: enquiryId },
+        data: { status: "READY_TO_CONVERT" },
+      }),
+    ]);
 
     return Response.json(workItem, { status: 201 });
   } catch (error) {

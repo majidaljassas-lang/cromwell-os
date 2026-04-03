@@ -162,9 +162,12 @@ export function EnquiriesTable({
     }
   }
 
+  const [convertError, setConvertError] = useState<string | null>(null);
+
   async function handleConvert() {
     if (!convertingEnquiryId) return;
     setConverting(true);
+    setConvertError(null);
 
     try {
       const res = await fetch(
@@ -180,7 +183,12 @@ export function EnquiriesTable({
         setConvertDialogOpen(false);
         setConvertingEnquiryId(null);
         router.refresh();
+      } else {
+        const data = await res.json();
+        setConvertError(data.error || `Failed with status ${res.status}`);
       }
+    } catch (err) {
+      setConvertError(err instanceof Error ? err.message : "Network error");
     } finally {
       setConverting(false);
     }
@@ -306,8 +314,13 @@ export function EnquiriesTable({
               </SelectContent>
             </Select>
           </div>
+          {convertError && (
+            <div className="text-[#FF3333] text-xs border border-[#FF3333]/30 bg-[#FF3333]/10 px-3 py-2">
+              {convertError}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConvertDialogOpen(false)} className="bg-[#222222] text-[#E0E0E0] border border-[#333333] hover:bg-[#2A2A2A]">
+            <Button variant="outline" onClick={() => { setConvertDialogOpen(false); setConvertError(null); }} className="bg-[#222222] text-[#E0E0E0] border border-[#333333] hover:bg-[#2A2A2A]">
               Cancel
             </Button>
             <Button onClick={handleConvert} disabled={converting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
