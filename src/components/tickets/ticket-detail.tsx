@@ -339,6 +339,51 @@ export function TicketDetail({
   const [submittingLine, setSubmittingLine] = useState(false);
   const [lineType, setLineType] = useState<string>("MATERIAL");
   const [lineUnit, setLineUnit] = useState<string>("EA");
+  const [editingLine, setEditingLine] = useState<TicketLine | null>(null);
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  async function handleSaveLineEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingLine) return;
+    setSavingEdit(true);
+
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+
+    const body: Record<string, unknown> = {};
+    const desc = fd.get("edit-description") as string;
+    if (desc && desc !== editingLine.description) body.description = desc;
+    const notes = fd.get("edit-internalNotes") as string;
+    if (notes !== (editingLine.internalNotes || "")) body.internalNotes = notes || null;
+    const qty = Number(fd.get("edit-qty"));
+    if (qty && qty !== Number(editingLine.qty)) body.qty = qty;
+    const unit = fd.get("edit-unit") as string;
+    if (unit && unit !== editingLine.unit) body.unit = unit;
+    const expCost = fd.get("edit-expectedCostUnit") as string;
+    if (expCost !== "") body.expectedCostUnit = Number(expCost);
+    const actCost = fd.get("edit-actualCostTotal") as string;
+    if (actCost !== "") body.actualCostTotal = Number(actCost);
+    const suggSale = fd.get("edit-suggestedSaleUnit") as string;
+    if (suggSale !== "") body.suggestedSaleUnit = Number(suggSale);
+    const actSale = fd.get("edit-actualSaleUnit") as string;
+    if (actSale !== "") body.actualSaleUnit = Number(actSale);
+
+    try {
+      const res = await fetch(`/api/ticket-lines/${editingLine.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setEditSheetOpen(false);
+        setEditingLine(null);
+        router.refresh();
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   const statusIndex = STATUS_ORDER.indexOf(ticket.status);
   const progressPercent =
@@ -658,7 +703,7 @@ export function TicketDetail({
                       ? "text-[#FF9900] bg-[#FF9900]/10"
                       : "text-[#888888] bg-[#333333]";
                     return (
-                    <TableRow key={line.id}>
+                    <TableRow key={line.id} className="cursor-pointer hover:bg-[#222222]" onClick={() => { setEditingLine(line); setEditSheetOpen(true); }}>
                       <TableCell className="font-medium max-w-[250px]">
                         <div>{line.description}</div>
                         {line.internalNotes && (
@@ -700,6 +745,79 @@ export function TicketDetail({
               </TableBody>
             </Table>
           </div>
+
+          {/* Edit Line Drawer */}
+          <Sheet open={editSheetOpen} onOpenChange={(open) => { setEditSheetOpen(open); if (!open) setEditingLine(null); }}>
+            <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333] w-[420px] sm:max-w-[420px]">
+              <SheetHeader>
+                <SheetTitle className="text-[#E0E0E0]">Edit Line</SheetTitle>
+                <SheetDescription className="text-[#666666]">
+                  {editingLine?.description}
+                </SheetDescription>
+              </SheetHeader>
+              {editingLine && (
+                <form onSubmit={handleSaveLineEdit} className="flex flex-col gap-3 px-4 flex-1 overflow-y-auto">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-description">Description</Label>
+                    <Input id="edit-description" name="edit-description" defaultValue={editingLine.description} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-internalNotes">Internal Notes / Breakdown</Label>
+                    <Textarea id="edit-internalNotes" name="edit-internalNotes" rows={4} defaultValue={editingLine.internalNotes || ""} placeholder={"e.g.\n10x 15mm lengths\n10x 22mm lengths"} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-qty">Qty</Label>
+                      <Input id="edit-qty" name="edit-qty" type="number" step="0.01" defaultValue={Number(editingLine.qty)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Unit of Measure</Label>
+                      <select name="edit-unit" defaultValue={editingLine.unit} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                        {["EA", "M", "LENGTH", "PACK", "LOT", "SET"].map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="border-t border-[#333333] pt-3 mt-1">
+                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">PRICING (EX VAT)</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-expectedCostUnit">Expected Cost / Unit</Label>
+                        <Input id="edit-expectedCostUnit" name="edit-expectedCostUnit" type="number" step="0.01" defaultValue={Number(editingLine.expectedCostUnit) || ""} placeholder="0.00" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-actualCostTotal">Actual Cost Total</Label>
+                        <Input id="edit-actualCostTotal" name="edit-actualCostTotal" type="number" step="0.01" defaultValue={Number(editingLine.actualCostTotal) || ""} placeholder="0.00" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-suggestedSaleUnit">Suggested Sale / Unit</Label>
+                        <Input id="edit-suggestedSaleUnit" name="edit-suggestedSaleUnit" type="number" step="0.01" defaultValue={Number(editingLine.suggestedSaleUnit) || ""} placeholder="0.00" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-actualSaleUnit">Actual Sale / Unit</Label>
+                        <Input id="edit-actualSaleUnit" name="edit-actualSaleUnit" type="number" step="0.01" defaultValue={Number(editingLine.actualSaleUnit) || ""} placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-t border-[#333333] pt-3 mt-1">
+                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-1">CURRENT STATUS</div>
+                    <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${
+                      editingLine.status === "READY_FOR_QUOTE" ? "text-[#00CC66] bg-[#00CC66]/10" :
+                      editingLine.status === "PRICED" ? "text-[#FF9900] bg-[#FF9900]/10" :
+                      "text-[#888888] bg-[#333333]"
+                    }`}>{editingLine.status.replace(/_/g, " ")}</Badge>
+                    <p className="text-[10px] text-[#666666] mt-1">Status auto-updates on save based on pricing completeness.</p>
+                  </div>
+                  <SheetFooter className="mt-2">
+                    <Button type="submit" disabled={savingEdit} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                      {savingEdit ? "Saving..." : "Save Changes"}
+                    </Button>
+                  </SheetFooter>
+                </form>
+              )}
+            </SheetContent>
+          </Sheet>
         </TabsContent>
 
         {/* ── EVIDENCE TAB ─────────────────────────────────────────── */}
