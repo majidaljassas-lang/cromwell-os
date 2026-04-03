@@ -62,9 +62,10 @@ function fmt(val: number | null | undefined): string {
   return `£${Number(val).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function QuoteBuilder({ quote }: { quote: Quote }) {
+export function QuoteBuilder({ quote }: { quote: Quote & { pdfFileName?: string; pdfPath?: string; pdfGeneratedAt?: string } }) {
   const router = useRouter();
   const [sending, setSending] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   // Compute totals
   const totalSale = quote.lines.reduce((s, l) => s + Number(l.lineTotal), 0);
@@ -95,6 +96,25 @@ export function QuoteBuilder({ quote }: { quote: Quote }) {
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleGeneratePdf() {
+    setGeneratingPdf(true);
+    try {
+      const res = await fetch(`/api/quotes/${quote.id}/generate-pdf`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        // Download the generated PDF
+        window.open(`/api/quotes/${quote.id}/generate-pdf`, "_blank");
+        router.refresh();
+      }
+    } finally {
+      setGeneratingPdf(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    window.open(`/api/quotes/${quote.id}/generate-pdf`, "_blank");
   }
 
   async function handleStatusChange(newStatus: string) {
@@ -152,17 +172,25 @@ export function QuoteBuilder({ quote }: { quote: Quote }) {
               Preview
             </Button>
           </a>
-          <a href={`/api/quotes/${quote.id}/generate-pdf`} target="_blank">
-            <Button variant="outline" size="sm" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+          {quote.pdfPath ? (
+            <Button variant="outline" size="sm" onClick={handleDownloadPdf} className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
               <Download className="size-4 mr-1" />
-              PDF
+              Download PDF
             </Button>
-          </a>
-          {quote.status === "DRAFT" && (
+          ) : (
+            <Button variant="outline" size="sm" onClick={handleGeneratePdf} disabled={generatingPdf} className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+              <FileText className="size-4 mr-1" />
+              {generatingPdf ? "Generating..." : "Generate PDF"}
+            </Button>
+          )}
+          {quote.status === "DRAFT" && quote.pdfPath && (
             <Button onClick={handleSend} disabled={sending} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
               <Send className="size-4 mr-1" />
               {sending ? "Sending..." : "Send Quote"}
             </Button>
+          )}
+          {quote.status === "DRAFT" && !quote.pdfPath && (
+            <span className="text-[10px] text-[#888888] bb-mono">Generate PDF before sending</span>
           )}
           {quote.status === "SENT" && (
             <>

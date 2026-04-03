@@ -865,6 +865,9 @@ model Quote {
   expiresAt            DateTime?
   totalSell            Decimal   @default(0) @db.Decimal(14, 2)
   notes                String?
+  pdfFileName          String?
+  pdfPath              String?
+  pdfGeneratedAt       DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
