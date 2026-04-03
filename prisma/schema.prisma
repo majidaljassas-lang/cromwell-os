@@ -47,6 +47,29 @@ enum TicketLineType {
   RETURN_ADJUSTMENT
 }
 
+enum UnitOfMeasure {
+  EA
+  M
+  LENGTH
+  PACK
+  LOT
+  SET
+}
+
+enum TicketLineStatus {
+  CAPTURED
+  PRICED
+  READY_FOR_QUOTE
+  PARTIALLY_ORDERED
+  ORDERED
+  PARTIALLY_COSTED
+  FULLY_COSTED
+  INVOICED
+  RETURNED
+  DISPUTED
+  CLOSED
+}
+
 enum InquiryStatus {
   OPEN
   AWAITING_SITE
@@ -650,14 +673,15 @@ model TicketLine {
   normalizedItemName   String?
   productCode          String?
   specification        String?
+  internalNotes        String?
   qty                  Decimal        @db.Decimal(14, 4)
-  unit                 String
+  unit                 UnitOfMeasure  @default(EA)
   siteId               String?
   siteCommercialLinkId String?
   payingCustomerId     String
   requestedByContactId String?
   supplierStrategyType String?
-  status               String
+  status               TicketLineStatus @default(CAPTURED)
   expectedCostUnit     Decimal?       @db.Decimal(14, 4)
   expectedCostTotal    Decimal?       @db.Decimal(14, 2)
   actualCostTotal      Decimal?       @db.Decimal(14, 2)

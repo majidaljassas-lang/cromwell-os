@@ -71,6 +71,7 @@ type TicketLine = {
   id: string;
   lineType: string;
   description: string;
+  internalNotes: string | null;
   qty: Decimal;
   unit: string;
   payingCustomerId: string;
@@ -82,6 +83,7 @@ type TicketLine = {
   actualSaleTotal: Decimal;
   expectedMarginTotal: Decimal;
   actualMarginTotal: Decimal;
+  varianceTotal: Decimal;
   status: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
@@ -336,6 +338,7 @@ export function TicketDetail({
   const [lineSheetOpen, setLineSheetOpen] = useState(false);
   const [submittingLine, setSubmittingLine] = useState(false);
   const [lineType, setLineType] = useState<string>("MATERIAL");
+  const [lineUnit, setLineUnit] = useState<string>("EA");
 
   const statusIndex = STATUS_ORDER.indexOf(ticket.status);
   const progressPercent =
@@ -354,12 +357,12 @@ export function TicketDetail({
       lineType,
       description: formData.get("description") as string,
       qty: Number(formData.get("qty")) || 1,
-      unit: (formData.get("unit") as string) || "EA",
+      unit: lineUnit,
       payingCustomerId: ticket.payingCustomer.id,
+      internalNotes: (formData.get("internalNotes") as string) || undefined,
       expectedCostUnit: Number(formData.get("expectedCostUnit")) || undefined,
-      suggestedSaleUnit:
-        Number(formData.get("suggestedSaleUnit")) || undefined,
-      status: "CAPTURED",
+      suggestedSaleUnit: Number(formData.get("suggestedSaleUnit")) || undefined,
+      actualSaleUnit: Number(formData.get("actualSaleUnit")) || undefined,
     };
 
     try {
@@ -373,6 +376,7 @@ export function TicketDetail({
         form.reset();
         setLineSheetOpen(false);
         setLineType("MATERIAL");
+        setLineUnit("EA");
         router.refresh();
       }
     } finally {
@@ -556,38 +560,59 @@ export function TicketDetail({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="unit">Unit</Label>
-                      <Input
-                        id="unit"
-                        name="unit"
-                        defaultValue="EA"
-                        placeholder="EA, M, KG, HR..."
-                      />
+                      <Label>Unit of Measure</Label>
+                      <Select value={lineUnit} onValueChange={(v) => setLineUnit(v ?? "EA")}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select UOM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(["EA", "M", "LENGTH", "PACK", "LOT", "SET"] as const).map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="expectedCostUnit">
-                      Expected Cost / Unit
-                    </Label>
-                    <Input
-                      id="expectedCostUnit"
-                      name="expectedCostUnit"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
+                    <Label htmlFor="internalNotes">Internal Breakdown / Notes</Label>
+                    <Textarea
+                      id="internalNotes"
+                      name="internalNotes"
+                      rows={3}
+                      placeholder={"e.g.\n10x 15mm lengths\n10x 22mm lengths\n2x 28mm lengths"}
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="suggestedSaleUnit">
-                      Suggested Sale / Unit
-                    </Label>
-                    <Input
-                      id="suggestedSaleUnit"
-                      name="suggestedSaleUnit"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                    />
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="expectedCostUnit">Cost / Unit</Label>
+                      <Input
+                        id="expectedCostUnit"
+                        name="expectedCostUnit"
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="suggestedSaleUnit">Sugg. Sale / Unit</Label>
+                      <Input
+                        id="suggestedSaleUnit"
+                        name="suggestedSaleUnit"
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="actualSaleUnit">Actual Sale / Unit</Label>
+                      <Input
+                        id="actualSaleUnit"
+                        name="actualSaleUnit"
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
                   <SheetFooter>
                     <Button type="submit" disabled={submittingLine}>
@@ -625,20 +650,30 @@ export function TicketDetail({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  ticket.lines.map((line) => (
+                  ticket.lines.map((line) => {
+                    const margin = Number(line.actualMarginTotal || 0);
+                    const sc = line.status === "READY_FOR_QUOTE"
+                      ? "text-[#00CC66] bg-[#00CC66]/10"
+                      : line.status === "PRICED"
+                      ? "text-[#FF9900] bg-[#FF9900]/10"
+                      : "text-[#888888] bg-[#333333]";
+                    return (
                     <TableRow key={line.id}>
-                      <TableCell className="font-medium max-w-[200px] truncate">
-                        {line.description}
+                      <TableCell className="font-medium max-w-[250px]">
+                        <div>{line.description}</div>
+                        {line.internalNotes && (
+                          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight">{line.internalNotes}</div>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">
+                        <Badge variant="outline" className="text-[9px]">
                           {line.lineType.replace(/_/g, " ")}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {dec(line.qty)}
                       </TableCell>
-                      <TableCell className="text-[#888888]">
+                      <TableCell className="text-[#888888] text-[10px]">
                         {line.unit}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -651,15 +686,16 @@ export function TicketDetail({
                         {dec(line.actualSaleTotal)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {dec(line.actualMarginTotal)}
+                        <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>{dec(line.actualMarginTotal)}</span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">
+                        <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
                           {line.status.replace(/_/g, " ")}
                         </Badge>
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
