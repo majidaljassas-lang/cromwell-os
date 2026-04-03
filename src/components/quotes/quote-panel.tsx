@@ -135,7 +135,7 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Quotes</h2>
+        <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Quotes</h2>
         <Sheet open={createOpen} onOpenChange={setCreateOpen}>
           <SheetTrigger
             render={
@@ -207,7 +207,7 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
 
       {quotes.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
+          <CardContent className="py-8 text-center text-[#888888]">
             No quotes generated yet.
           </CardContent>
         </Card>
@@ -226,9 +226,9 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                       className="flex items-center gap-2 text-left"
                     >
                       {isExpanded ? (
-                        <ChevronDown className="size-4 text-muted-foreground" />
+                        <ChevronDown className="size-4 text-[#888888]" />
                       ) : (
-                        <ChevronRight className="size-4 text-muted-foreground" />
+                        <ChevronRight className="size-4 text-[#888888]" />
                       )}
                       <span className="font-medium text-sm">
                         {quote.quoteNo}
@@ -240,14 +240,14 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                       </Badge>
                     </button>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-sm text-[#888888]">
                         {quote.customer.name}
                       </span>
                       <span className="text-sm font-medium tabular-nums">
                         {dec(quote.totalSell)}
                       </span>
                       {quote.issuedAt && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-[#888888]">
                           Issued:{" "}
                           {new Date(quote.issuedAt).toLocaleDateString()}
                         </span>
@@ -277,7 +277,7 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                     </div>
                   </div>
                   {isExpanded && quote.lines.length > 0 && (
-                    <div className="mt-3 rounded-md border">
+                    <div className="mt-3 border border-[#333333]">
                       <Table>
                         <TableHeader>
                           <TableRow className="text-xs">

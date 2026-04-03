@@ -190,24 +190,24 @@ export function EnquiriesTable({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Enquiries</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Enquiries</h1>
+          <p className="text-xs text-[#666666] mt-1">
             Incoming enquiries from all channels
           </p>
         </div>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button>
+              <Button className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                 <Plus className="size-4 mr-1" />
                 Add Enquiry
               </Button>
             }
           />
-          <SheetContent side="right">
+          <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
             <SheetHeader>
-              <SheetTitle>Add New Enquiry</SheetTitle>
-              <SheetDescription>
+              <SheetTitle className="text-[#E0E0E0]">Add New Enquiry</SheetTitle>
+              <SheetDescription className="text-[#666666]">
                 Log a new enquiry from any source channel.
               </SheetDescription>
             </SheetHeader>
@@ -273,7 +273,7 @@ export function EnquiriesTable({
                 />
               </div>
               <SheetFooter>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                   {submitting ? "Creating..." : "Create Enquiry"}
                 </Button>
               </SheetFooter>
@@ -284,7 +284,7 @@ export function EnquiriesTable({
 
       {/* Convert to Work Item Dialog */}
       <Dialog open={convertDialogOpen} onOpenChange={setConvertDialogOpen}>
-        <DialogContent>
+        <DialogContent className="bg-[#1A1A1A] border-[#333333]">
           <DialogHeader>
             <DialogTitle>Convert to Work Item</DialogTitle>
             <DialogDescription>
@@ -307,17 +307,17 @@ export function EnquiriesTable({
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConvertDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setConvertDialogOpen(false)} className="bg-[#222222] text-[#E0E0E0] border border-[#333333] hover:bg-[#2A2A2A]">
               Cancel
             </Button>
-            <Button onClick={handleConvert} disabled={converting}>
+            <Button onClick={handleConvert} disabled={converting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
               {converting ? "Converting..." : "Convert"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -337,7 +337,7 @@ export function EnquiriesTable({
               <TableRow>
                 <TableCell
                   colSpan={9}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No enquiries found. Add your first enquiry to get started.
                 </TableCell>
@@ -353,16 +353,16 @@ export function EnquiriesTable({
                       {enq.sourceType.replace(/_/g, " ")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {enq.enquiryType.replace(/_/g, " ")}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {enq.sourceContact?.fullName || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {enq.suggestedSite?.siteName || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {enq.suggestedCustomer?.name || "\u2014"}
                   </TableCell>
                   <TableCell>
@@ -370,7 +370,7 @@ export function EnquiriesTable({
                       {enq.status.replace(/_/g, " ")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
+                  <TableCell className="text-[#888888] tabular-nums">
                     {new Date(enq.receivedAt).toLocaleDateString()}
                   </TableCell>
                   <TableCell>

@@ -40,9 +40,9 @@ function poTypeBadge(poType: string) {
 }
 
 function utilisationColor(pct: number): string {
-  if (pct > 90) return "bg-red-500";
-  if (pct > 75) return "bg-yellow-500";
-  return "bg-green-500";
+  if (pct > 90) return "bg-[#FF3333]";
+  if (pct > 75) return "bg-[#FF9900]";
+  return "bg-[#00CC66]";
 }
 
 type CustomerPOForTicket = {
@@ -88,13 +88,13 @@ export function TicketPOTab({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-medium">Purchase Orders</h2>
+      <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Purchase Orders</h2>
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total PO Value
             </p>
             <p className="text-xl font-semibold tabular-nums mt-1">
@@ -104,7 +104,7 @@ export function TicketPOTab({
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total Consumed
             </p>
             <p className="text-xl font-semibold tabular-nums mt-1">
@@ -114,7 +114,7 @@ export function TicketPOTab({
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total Remaining
             </p>
             <p className="text-xl font-semibold tabular-nums mt-1">
@@ -126,7 +126,7 @@ export function TicketPOTab({
 
       {customerPOs.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
+          <CardContent className="py-8 text-center text-[#888888]">
             No purchase orders linked to this ticket.
           </CardContent>
         </Card>
@@ -148,13 +148,13 @@ export function TicketPOTab({
                       <span className="font-medium">{po.poNo}</span>
                       {poTypeBadge(po.poType)}
                       <Badge variant="outline">{po.status}</Badge>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-sm text-[#888888]">
                         {po.customer.name}
                       </span>
                     </div>
                     <span
                       className={`text-sm font-medium tabular-nums ${
-                        profit >= 0 ? "text-green-600" : "text-red-600"
+                        profit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
                       }`}
                     >
                       Profit: {fmt(profit)}
@@ -164,9 +164,9 @@ export function TicketPOTab({
                   {/* Utilisation bar */}
                   <div className="flex items-center gap-3">
                     <div className="flex-1">
-                      <div className="h-2 w-full rounded-full bg-muted">
+                      <div className="h-2 w-full bg-[#333333]">
                         <div
-                          className={`h-full rounded-full transition-all ${utilisationColor(
+                          className={`h-full transition-all ${utilisationColor(
                             utilPct
                           )}`}
                           style={{
@@ -175,7 +175,7 @@ export function TicketPOTab({
                         />
                       </div>
                     </div>
-                    <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                    <span className="text-xs tabular-nums text-[#888888] w-10 text-right">
                       {utilPct.toFixed(0)}%
                     </span>
                   </div>
@@ -183,15 +183,15 @@ export function TicketPOTab({
                   {/* Financials row */}
                   <div className="flex gap-6 text-sm tabular-nums">
                     <span>
-                      <span className="text-muted-foreground">Limit:</span>{" "}
+                      <span className="text-[#888888]">Limit:</span>{" "}
                       {fmt(limit)}
                     </span>
                     <span>
-                      <span className="text-muted-foreground">Consumed:</span>{" "}
+                      <span className="text-[#888888]">Consumed:</span>{" "}
                       {fmt(consumed)}
                     </span>
                     <span>
-                      <span className="text-muted-foreground">Remaining:</span>{" "}
+                      <span className="text-[#888888]">Remaining:</span>{" "}
                       {fmt(remaining)}
                     </span>
                   </div>
@@ -200,10 +200,10 @@ export function TicketPOTab({
                   {po.poType === "DRAWDOWN_LABOUR" &&
                     po.labourDrawdowns.length > 0 && (
                       <div className="mt-2">
-                        <p className="text-xs text-muted-foreground mb-1">
+                        <p className="text-xs text-[#888888] mb-1">
                           Recent Labour ({po.labourDrawdowns.length} entries)
                         </p>
-                        <div className="rounded border bg-background">
+                        <div className="border border-[#333333] bg-[#1A1A1A]">
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -248,8 +248,8 @@ export function TicketPOTab({
                                   <TableCell
                                     className={`text-right tabular-nums ${
                                       n(d.grossProfitValue) >= 0
-                                        ? "text-green-600"
-                                        : "text-red-600"
+                                        ? "text-[#00CC66]"
+                                        : "text-[#FF3333]"
                                     }`}
                                   >
                                     {fmt(d.grossProfitValue)}
@@ -265,11 +265,11 @@ export function TicketPOTab({
                   {po.poType === "DRAWDOWN_MATERIALS" &&
                     po.materialsDrawdowns.length > 0 && (
                       <div className="mt-2">
-                        <p className="text-xs text-muted-foreground mb-1">
+                        <p className="text-xs text-[#888888] mb-1">
                           Recent Materials ({po.materialsDrawdowns.length}{" "}
                           entries)
                         </p>
-                        <div className="rounded border bg-background">
+                        <div className="border border-[#333333] bg-[#1A1A1A]">
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -308,8 +308,8 @@ export function TicketPOTab({
                                     <TableCell
                                       className={`text-right tabular-nums ${
                                         n(d.grossProfitValue) >= 0
-                                          ? "text-green-600"
-                                          : "text-red-600"
+                                          ? "text-[#00CC66]"
+                                          : "text-[#FF3333]"
                                       }`}
                                     >
                                       {fmt(d.grossProfitValue)}

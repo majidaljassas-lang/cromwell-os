@@ -163,7 +163,7 @@ export function SalesBundlesPanel({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Sales Bundles</h2>
+        <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Sales Bundles</h2>
         <Sheet open={createOpen} onOpenChange={setCreateOpen}>
           <SheetTrigger
             render={
@@ -254,7 +254,7 @@ export function SalesBundlesPanel({
 
       {bundles.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
+          <CardContent className="py-8 text-center text-[#888888]">
             No sales bundles yet. Create one to group cost lines.
           </CardContent>
         </Card>
@@ -368,7 +368,7 @@ export function SalesBundlesPanel({
                     </SheetContent>
                   </Sheet>
                 </div>
-                <div className="flex gap-4 text-sm text-muted-foreground mt-1">
+                <div className="flex gap-4 text-sm text-[#888888] mt-1">
                   <span>
                     Target: <strong>{dec(bundle.targetSellTotal)}</strong>
                   </span>
@@ -379,7 +379,7 @@ export function SalesBundlesPanel({
               </CardHeader>
               {bundle.costLinks.length > 0 && (
                 <CardContent className="pt-0">
-                  <div className="rounded-md border">
+                  <div className="border border-[#333333]">
                     <Table>
                       <TableHeader>
                         <TableRow className="text-xs">

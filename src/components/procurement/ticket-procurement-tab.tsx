@@ -222,25 +222,25 @@ export function TicketProcurementTab({
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Total Ordered Cost</p>
+            <p className="text-xs text-[#888888]">Total Ordered Cost</p>
             <p className="text-xl font-semibold tabular-nums">{dec(totalOrdered)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Total Allocated Cost</p>
+            <p className="text-xs text-[#888888]">Total Allocated Cost</p>
             <p className="text-xl font-semibold tabular-nums">{dec(totalAllocated)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Total Absorbed</p>
+            <p className="text-xs text-[#888888]">Total Absorbed</p>
             <p className="text-xl font-semibold tabular-nums">{dec(totalAbsorbed)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Unallocated</p>
+            <p className="text-xs text-[#888888]">Unallocated</p>
             <p className="text-xl font-semibold tabular-nums">{unallocatedCount}</p>
           </CardContent>
         </Card>
@@ -321,12 +321,12 @@ export function TicketProcurementTab({
                   {poLines.map((line, idx) => (
                     <div
                       key={idx}
-                      className="rounded border p-3 space-y-2 relative"
+                      className="border border-[#333333] p-3 space-y-2 relative"
                     >
                       {poLines.length > 1 && (
                         <button
                           type="button"
-                          className="absolute top-1 right-2 text-xs text-muted-foreground hover:text-destructive"
+                          className="absolute top-1 right-2 text-xs text-[#888888] hover:text-[#FF3333]"
                           onClick={() => removePoLine(idx)}
                         >
                           Remove
@@ -381,7 +381,7 @@ export function TicketProcurementTab({
                           step="0.01"
                           value={line.lineTotal}
                           readOnly
-                          className="bg-muted"
+                          className="bg-[#222222]"
                         />
                       </div>
                     </div>
@@ -398,7 +398,7 @@ export function TicketProcurementTab({
           </Sheet>
         </div>
 
-        <div className="rounded-lg border bg-background">
+        <div className="border border-[#333333] bg-[#1A1A1A]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -414,7 +414,7 @@ export function TicketProcurementTab({
                 <TableRow>
                   <TableCell
                     colSpan={5}
-                    className="text-center py-6 text-muted-foreground"
+                    className="text-center py-6 text-[#888888]"
                   >
                     No procurement orders for this ticket.
                   </TableCell>
@@ -448,7 +448,7 @@ export function TicketProcurementTab({
         <h3 className="text-base font-medium">
           Cost Allocations ({costAllocations.length})
         </h3>
-        <div className="rounded-lg border bg-background">
+        <div className="border border-[#333333] bg-[#1A1A1A]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -466,7 +466,7 @@ export function TicketProcurementTab({
                 <TableRow>
                   <TableCell
                     colSpan={7}
-                    className="text-center py-6 text-muted-foreground"
+                    className="text-center py-6 text-[#888888]"
                   >
                     No cost allocations for this ticket.
                   </TableCell>
@@ -510,12 +510,12 @@ export function TicketProcurementTab({
         </h3>
         {absorbedCosts.length === 0 ? (
           <Card>
-            <CardContent className="py-6 text-center text-muted-foreground">
+            <CardContent className="py-6 text-center text-[#888888]">
               No absorbed costs for this ticket.
             </CardContent>
           </Card>
         ) : (
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -537,7 +537,7 @@ export function TicketProcurementTab({
                     <TableCell className="text-right tabular-nums">
                       {dec(ac.amount)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="text-[#888888]">
                       {ac.allocationBasis || "\u2014"}
                     </TableCell>
                   </TableRow>

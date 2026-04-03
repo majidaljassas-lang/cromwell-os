@@ -392,7 +392,7 @@ export function TicketDetail({
                 Back
               </Button>
             </Link>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight text-[#E0E0E0]">
               {ticket.title}
             </h1>
           </div>
@@ -403,18 +403,18 @@ export function TicketDetail({
             <Badge variant={statusVariant(ticket.status)}>
               {ticket.status.replace(/_/g, " ")}
             </Badge>
-            <span className="text-sm text-muted-foreground">
+            <span className="text-sm text-[#888888]">
               {ticket.payingCustomer.name}
             </span>
             {ticket.site && (
               <>
-                <span className="text-muted-foreground">/</span>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-[#888888]">/</span>
+                <span className="text-sm text-[#888888]">
                   {ticket.site.siteName}
                 </span>
               </>
             )}
-            <span className="text-xs text-muted-foreground ml-2">
+            <span className="text-xs text-[#888888] ml-2">
               ID: {ticket.id.slice(0, 8)}
             </span>
           </div>
@@ -423,15 +423,15 @@ export function TicketDetail({
 
       {/* Status Progress Bar */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-[#888888]">
           <span>Progress</span>
           <span>
             {ticket.status.replace(/_/g, " ")} ({progressPercent}%)
           </span>
         </div>
-        <div className="h-2 w-full rounded-full bg-muted">
+        <div className="h-2 w-full bg-[#333333]">
           <div
-            className="h-full rounded-full bg-primary transition-all"
+            className="h-full bg-[#FF6600] transition-all"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
@@ -439,8 +439,8 @@ export function TicketDetail({
           {STATUS_ORDER.map((s, i) => (
             <div
               key={s}
-              className={`h-1.5 w-1.5 rounded-full ${
-                i <= statusIndex ? "bg-primary" : "bg-muted-foreground/30"
+              className={`h-1.5 w-1.5  ${
+                i <= statusIndex ? "bg-primary" : "bg-[#333333]"
               }`}
               title={s.replace(/_/g, " ")}
             />
@@ -452,7 +452,7 @@ export function TicketDetail({
       {ticket.description && (
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-[#888888]">
               {ticket.description}
             </p>
           </CardContent>
@@ -499,7 +499,7 @@ export function TicketDetail({
         {/* ── LINES TAB ────────────────────────────────────────────── */}
         <TabsContent value="lines" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Ticket Lines</h2>
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Ticket Lines</h2>
             <Sheet open={lineSheetOpen} onOpenChange={setLineSheetOpen}>
               <SheetTrigger
                 render={
@@ -599,7 +599,7 @@ export function TicketDetail({
             </Sheet>
           </div>
 
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -619,7 +619,7 @@ export function TicketDetail({
                   <TableRow>
                     <TableCell
                       colSpan={9}
-                      className="text-center py-8 text-muted-foreground"
+                      className="text-center py-8 text-[#888888]"
                     >
                       No lines yet. Add your first line item.
                     </TableCell>
@@ -638,7 +638,7 @@ export function TicketDetail({
                       <TableCell className="text-right tabular-nums">
                         {dec(line.qty)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {line.unit}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -681,15 +681,15 @@ export function TicketDetail({
 
         {/* ── TASKS TAB ────────────────────────────────────────────── */}
         <TabsContent value="tasks" className="mt-4">
-          <h2 className="text-lg font-medium mb-4">Tasks</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Tasks</h2>
           {ticket.tasks.length === 0 ? (
             <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
+              <CardContent className="py-8 text-center text-[#888888]">
                 No tasks generated yet.
               </CardContent>
             </Card>
           ) : (
-            <div className="rounded-lg border bg-background">
+            <div className="border border-[#333333] bg-[#1A1A1A]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -715,15 +715,15 @@ export function TicketDetail({
                       <TableCell>
                         <Badge variant="outline">{task.status}</Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                      <TableCell className="text-[#888888] max-w-[200px] truncate">
                         {task.generatedReason || "\u2014"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground tabular-nums">
+                      <TableCell className="text-[#888888] tabular-nums">
                         {task.dueAt
                           ? new Date(task.dueAt).toLocaleDateString()
                           : "\u2014"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {task.assignedTo || "\u2014"}
                       </TableCell>
                     </TableRow>
@@ -736,10 +736,10 @@ export function TicketDetail({
 
         {/* ── EVENTS TAB ───────────────────────────────────────────── */}
         <TabsContent value="events" className="mt-4">
-          <h2 className="text-lg font-medium mb-4">Events</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Events</h2>
           {ticket.events.length === 0 ? (
             <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
+              <CardContent className="py-8 text-center text-[#888888]">
                 No events recorded yet.
               </CardContent>
             </Card>
@@ -748,24 +748,24 @@ export function TicketDetail({
               {ticket.events.map((ev) => (
                 <div
                   key={ev.id}
-                  className="flex items-start gap-3 border-l-2 border-muted pl-4 py-2"
+                  className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2"
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline">
                         {ev.eventType.replace(/_/g, " ")}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-[#888888]">
                         {new Date(ev.timestamp).toLocaleString()}
                       </span>
                     </div>
                     {ev.notes && (
-                      <p className="text-sm text-muted-foreground mt-1">
+                      <p className="text-sm text-[#888888] mt-1">
                         {ev.notes}
                       </p>
                     )}
                     {ev.sourceRef && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
+                      <p className="text-xs text-[#888888] mt-0.5">
                         Ref: {ev.sourceRef}
                       </p>
                     )}
@@ -778,7 +778,7 @@ export function TicketDetail({
 
         {/* ── TIMELINE TAB ─────────────────────────────────────────── */}
         <TabsContent value="timeline" className="mt-4">
-          <h2 className="text-lg font-medium mb-4">Timeline</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Timeline</h2>
           {(() => {
             const items = [
               ...ticket.events.map((ev) => ({
@@ -809,7 +809,7 @@ export function TicketDetail({
             if (items.length === 0) {
               return (
                 <Card>
-                  <CardContent className="py-8 text-center text-muted-foreground">
+                  <CardContent className="py-8 text-center text-[#888888]">
                     No timeline entries yet.
                   </CardContent>
                 </Card>
@@ -821,7 +821,7 @@ export function TicketDetail({
                 {items.map((item) => (
                   <div
                     key={`${item.type}-${item.id}`}
-                    className="flex items-start gap-3 border-l-2 border-muted pl-4 py-2"
+                    className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2"
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
@@ -839,12 +839,12 @@ export function TicketDetail({
                         <span className="text-sm font-medium">
                           {item.label}
                         </span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-[#888888]">
                           {item.timestamp.toLocaleString()}
                         </span>
                       </div>
                       {item.notes && (
-                        <p className="text-sm text-muted-foreground mt-1">
+                        <p className="text-sm text-[#888888] mt-1">
                           {item.notes}
                         </p>
                       )}
@@ -859,7 +859,7 @@ export function TicketDetail({
         {/* ── DEAL SHEET TAB ──────────────────────────────────────── */}
         <TabsContent value="deal-sheet" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Deal Sheet</h2>
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Deal Sheet</h2>
             <Link href={`/tickets/${ticket.id}/deal-sheet`}>
               <Button size="sm" variant="outline">
                 Open Full Deal Sheet
@@ -868,11 +868,11 @@ export function TicketDetail({
           </div>
           {ticket.dealSheets.length === 0 ? (
             <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
+              <CardContent className="py-8 text-center text-[#888888]">
                 No deal sheet versions yet.{" "}
                 <Link
                   href={`/tickets/${ticket.id}/deal-sheet`}
-                  className="text-primary underline"
+                  className="text-[#FF6600] underline"
                 >
                   Create one
                 </Link>
@@ -887,7 +887,7 @@ export function TicketDetail({
                       <div className="flex items-center gap-2">
                         <Badge variant="secondary">v{ds.versionNo}</Badge>
                         <Badge variant="outline">{ds.status}</Badge>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-[#888888]">
                           {ds.mode}
                         </span>
                       </div>
@@ -897,8 +897,8 @@ export function TicketDetail({
                         <span
                           className={
                             Number(ds.totalExpectedMargin?.toString() || 0) >= 0
-                              ? "text-green-600"
-                              : "text-red-600"
+                              ? "text-[#00CC66]"
+                              : "text-[#FF3333]"
                           }
                         >
                           Margin: {dec(ds.totalExpectedMargin)}
@@ -963,10 +963,10 @@ export function TicketDetail({
 
         {/* ── INVOICES TAB ──────────────────────────────────────── */}
         <TabsContent value="invoices" className="mt-4">
-          <h2 className="text-lg font-medium mb-4">Sales Invoices</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Sales Invoices</h2>
           {salesInvoices.length === 0 ? (
             <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
+              <CardContent className="py-8 text-center text-[#888888]">
                 No invoices for this ticket yet.
               </CardContent>
             </Card>
@@ -993,11 +993,11 @@ export function TicketDetail({
                         >
                           {inv.status}
                         </Badge>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-[#888888]">
                           {inv.customer.name}
                         </span>
                         {inv.poNo && (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-[#888888]">
                             PO: {inv.poNo}
                           </span>
                         )}
@@ -1015,7 +1015,7 @@ export function TicketDetail({
                       </div>
                     </div>
                     {inv.lines.length > 0 && (
-                      <div className="mt-2 text-xs text-muted-foreground">
+                      <div className="mt-2 text-xs text-[#888888]">
                         {inv.lines.length} line{inv.lines.length !== 1 ? "s" : ""} |{" "}
                         {inv.lines.filter((l) => l.poMatched).length} PO matched
                       </div>
@@ -1029,10 +1029,10 @@ export function TicketDetail({
 
         {/* ── RECOVERY TAB ─────────────────────────────────────── */}
         <TabsContent value="recovery" className="mt-4">
-          <h2 className="text-lg font-medium mb-4">Recovery Cases</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Recovery Cases</h2>
           {ticket.recoveryCases.length === 0 ? (
             <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
+              <CardContent className="py-8 text-center text-[#888888]">
                 No recovery cases for this ticket.
               </CardContent>
             </Card>
@@ -1063,16 +1063,16 @@ export function TicketDetail({
                           >
                             {rc.recoveryStatus.replace(/_/g, " ")}
                           </Badge>
-                          <span className="text-sm text-muted-foreground">
+                          <span className="text-sm text-[#888888]">
                             {daysInStage}d in stage
                           </span>
                         </div>
-                        <span className="text-sm font-medium tabular-nums text-red-600">
+                        <span className="text-sm font-medium tabular-nums text-[#FF3333]">
                           {dec(rc.stuckValue)}
                         </span>
                       </div>
                       {rc.nextAction && (
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-[#888888]">
                           Next: {rc.nextAction}
                         </p>
                       )}

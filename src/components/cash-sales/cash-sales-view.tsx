@@ -71,19 +71,19 @@ function statusBadge(status: string) {
   switch (status) {
     case "RECEIVED":
       return (
-        <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+        <Badge className="bg-[#00CC66]/10 text-[#00CC66]">
           {status}
         </Badge>
       );
     case "PENDING":
       return (
-        <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+        <Badge className="bg-[#FF9900]/10 text-[#FF9900]">
           {status}
         </Badge>
       );
     case "REFUNDED":
       return (
-        <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+        <Badge className="bg-[#FF3333]/10 text-[#FF3333]">
           {status}
         </Badge>
       );
@@ -157,19 +157,19 @@ export function CashSalesView({
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Total Cash Sales</p>
+            <p className="text-sm text-[#888888]">Total Cash Sales</p>
             <p className="text-2xl font-bold">{money(totalAll)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">This Month</p>
+            <p className="text-sm text-[#888888]">This Month</p>
             <p className="text-2xl font-bold">{money(totalThisMonth)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Count</p>
+            <p className="text-sm text-[#888888]">Count</p>
             <p className="text-2xl font-bold">{cashSales.length}</p>
           </CardContent>
         </Card>
@@ -286,7 +286,7 @@ export function CashSalesView({
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -304,7 +304,7 @@ export function CashSalesView({
               <TableRow>
                 <TableCell
                   colSpan={7}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No cash sales recorded yet.
                 </TableCell>
@@ -315,7 +315,7 @@ export function CashSalesView({
                   <TableCell className="font-medium max-w-[200px] truncate">
                     {cs.ticket.title}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {cs.ticket.payingCustomer?.name ?? "\u2014"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-medium">
@@ -326,10 +326,10 @@ export function CashSalesView({
                       {cs.paymentMethod.replace(/_/g, " ")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {cs.receiptRef || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
+                  <TableCell className="text-[#888888] tabular-nums">
                     {new Date(cs.receivedAt).toLocaleDateString("en-GB")}
                   </TableCell>
                   <TableCell>{statusBadge(cs.status)}</TableCell>

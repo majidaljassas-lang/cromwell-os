@@ -128,17 +128,17 @@ type TicketLineOption = {
 
 function evidenceTypeBadgeColor(type: string): string {
   switch (type) {
-    case "INSTRUCTION": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    case "APPROVAL": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
-    case "PRICING": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-    case "DELIVERY": return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
-    case "SUPPLIER_CONFIRMATION": return "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300";
-    case "PO_RECEIVED": return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
-    case "DISPUTE": return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
-    case "PO_REQUEST": return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
-    case "PHOTO": return "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300";
-    case "CALL_NOTE": return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
-    default: return "bg-gray-100 text-gray-800";
+    case "INSTRUCTION": return "bg-[#3399FF]/10 text-[#3399FF]";
+    case "APPROVAL": return "bg-[#00CC66]/10 text-[#00CC66]";
+    case "PRICING": return "bg-[#9966FF]/10 text-[#9966FF]";
+    case "DELIVERY": return "bg-[#FF9900]/10 text-[#FF9900]";
+    case "SUPPLIER_CONFIRMATION": return "bg-[#00CC66]/10 text-[#00CC66]";
+    case "PO_RECEIVED": return "bg-[#9966FF]/10 text-[#9966FF]";
+    case "DISPUTE": return "bg-[#FF3333]/10 text-[#FF3333]";
+    case "PO_REQUEST": return "bg-[#FF9900]/10 text-[#FF9900]";
+    case "PHOTO": return "bg-[#FF3333]/10 text-[#FF3333]";
+    case "CALL_NOTE": return "bg-[#333333] text-[#888888]";
+    default: return "bg-[#333333] text-[#888888]";
   }
 }
 
@@ -234,11 +234,11 @@ export function EvidencePanel({
               return (
                 <div key={type} className="flex items-center gap-2 text-sm">
                   {present ? (
-                    <Check className="size-4 text-green-600" />
+                    <Check className="size-4 text-[#00CC66]" />
                   ) : (
-                    <X className="size-4 text-red-400" />
+                    <X className="size-4 text-[#FF3333]" />
                   )}
-                  <span className={present ? "text-foreground" : "text-muted-foreground"}>
+                  <span className={present ? "text-[#E0E0E0]" : "text-[#888888]"}>
                     {type.replace(/_/g, " ")}
                   </span>
                 </div>
@@ -350,7 +350,7 @@ export function EvidencePanel({
                     id="is-primary"
                     checked={isPrimary}
                     onChange={(e) => setIsPrimary(e.target.checked)}
-                    className="rounded border-gray-300"
+                    className="rounded border-[#333333]"
                   />
                   <Label htmlFor="is-primary">Primary Evidence</Label>
                 </div>
@@ -364,7 +364,7 @@ export function EvidencePanel({
           </Sheet>
         </div>
 
-        <div className="rounded-lg border bg-background">
+        <div className="border border-[#333333] bg-[#1A1A1A]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -380,7 +380,7 @@ export function EvidencePanel({
             <TableBody>
               {evidenceFragments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-[#888888]">
                     No evidence fragments recorded yet.
                   </TableCell>
                 </TableRow>
@@ -388,28 +388,28 @@ export function EvidencePanel({
                 evidenceFragments.map((ef) => (
                   <TableRow key={ef.id}>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${evidenceTypeBadgeColor(ef.fragmentType)}`}>
+                      <span className={`inline-flex items-center  px-2 py-0.5 text-xs font-medium ${evidenceTypeBadgeColor(ef.fragmentType)}`}>
                         {ef.fragmentType.replace(/_/g, " ")}
                       </span>
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{ef.sourceType.replace(/_/g, " ")}</Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
+                    <TableCell className="text-[#888888] text-sm">
                       {ef.sourceContact?.fullName || "\u2014"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
+                    <TableCell className="text-[#888888] text-xs">
                       {new Date(ef.timestamp).toLocaleString()}
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
+                    <TableCell className="max-w-[200px] truncate text-sm text-[#888888]">
                       {ef.fragmentText || "\u2014"}
                     </TableCell>
                     <TableCell>
                       {ef.isPrimaryEvidence && (
-                        <Star className="size-4 text-yellow-500 fill-yellow-500" />
+                        <Star className="size-4 text-[#FF9900] fill-[#FF9900]" />
                       )}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
+                    <TableCell className="text-sm text-[#888888] max-w-[120px] truncate">
                       {ef.ticketLine?.description || "\u2014"}
                     </TableCell>
                   </TableRow>
@@ -425,7 +425,7 @@ export function EvidencePanel({
         <h3 className="text-lg font-medium mb-3">Evidence Packs ({evidencePacks.length})</h3>
         {evidencePacks.length === 0 ? (
           <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
+            <CardContent className="py-8 text-center text-[#888888]">
               No evidence packs compiled yet.
             </CardContent>
           </Card>
@@ -450,16 +450,16 @@ export function EvidencePanel({
                         <Badge variant={pack.status === "FINALIZED" ? "default" : "secondary"}>
                           {pack.status}
                         </Badge>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-[#888888]">
                           {pack.items.length} items
                         </span>
                         {pack.generatedAt && (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-[#888888]">
                             Generated: {new Date(pack.generatedAt).toLocaleDateString()}
                           </span>
                         )}
                         {pack.finalizedAt && (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-[#888888]">
                             Finalized: {new Date(pack.finalizedAt).toLocaleDateString()}
                           </span>
                         )}
@@ -484,7 +484,7 @@ export function EvidencePanel({
 
                     {isExpanded && (
                       <div className="mt-3 border-t pt-3">
-                        <div className="rounded border bg-background">
+                        <div className="border border-[#333333] bg-[#1A1A1A]">
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -497,7 +497,7 @@ export function EvidencePanel({
                             <TableBody>
                               {pack.items.length === 0 ? (
                                 <TableRow>
-                                  <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
+                                  <TableCell colSpan={4} className="text-center py-4 text-[#888888]">
                                     No items in this pack.
                                   </TableCell>
                                 </TableRow>
@@ -518,13 +518,13 @@ export function EvidencePanel({
                                         <Badge variant="outline">Document</Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="max-w-[300px] truncate text-sm text-muted-foreground">
+                                    <TableCell className="max-w-[300px] truncate text-sm text-[#888888]">
                                       {item.summaryText ||
                                         item.evidenceFragment?.fragmentText ||
                                         item.event?.notes ||
                                         "\u2014"}
                                     </TableCell>
-                                    <TableCell className="text-sm text-muted-foreground">
+                                    <TableCell className="text-sm text-[#888888]">
                                       {item.documentRef || "\u2014"}
                                     </TableCell>
                                   </TableRow>

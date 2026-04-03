@@ -32,9 +32,9 @@ function pct(val: Decimal): string {
 }
 
 function marginColor(margin: number): string {
-  if (margin >= 20) return "text-green-600 dark:text-green-400";
-  if (margin >= 10) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
+  if (margin >= 20) return "text-[#00CC66]";
+  if (margin >= 10) return "text-[#FF9900]";
+  return "text-[#FF3333]";
 }
 
 type SiteProfit = {
@@ -112,21 +112,21 @@ type UnallocatedCost = {
 function statusBadgeColor(status: string): string {
   switch (status) {
     case "OPEN":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+      return "bg-[#3399FF]/10 text-[#3399FF]";
     case "EVIDENCE_BUILDING":
-      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
+      return "bg-[#FF9900]/10 text-[#FF9900]";
     case "PACK_READY":
     case "PACK_SENT_FOR_PO":
-      return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
+      return "bg-[#9966FF]/10 text-[#9966FF]";
     case "AWAITING_PO":
-      return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
+      return "bg-[#FF9900]/10 text-[#FF9900]";
     case "PO_RECEIVED":
     case "PO_ALLOCATED":
-      return "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300";
+      return "bg-[#00CC66]/10 text-[#00CC66]";
     case "CLOSED":
-      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
+      return "bg-[#00CC66]/10 text-[#00CC66]";
     default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
+      return "bg-[#333333] text-[#888888]";
   }
 }
 
@@ -176,7 +176,7 @@ export function ReportsView({
 
       {/* Site Profitability */}
       <TabsContent value="site-profitability">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -191,7 +191,7 @@ export function ReportsView({
             <TableBody>
               {siteProfitability.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-[#888888]">
                     No site profitability data available.
                   </TableCell>
                 </TableRow>
@@ -230,7 +230,7 @@ export function ReportsView({
 
       {/* Customer Profitability */}
       <TabsContent value="customer-profitability">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -245,7 +245,7 @@ export function ReportsView({
             <TableBody>
               {customerProfitability.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-[#888888]">
                     No customer profitability data available.
                   </TableCell>
                 </TableRow>
@@ -284,7 +284,7 @@ export function ReportsView({
 
       {/* PO Utilisation */}
       <TabsContent value="po-utilisation">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -302,7 +302,7 @@ export function ReportsView({
             <TableBody>
               {poUtilisation.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-[#888888]">
                     No PO utilisation data available.
                   </TableCell>
                 </TableRow>
@@ -314,7 +314,7 @@ export function ReportsView({
                       <Badge variant="outline">{po.poType}</Badge>
                     </TableCell>
                     <TableCell>{po.customerName}</TableCell>
-                    <TableCell className="max-w-[150px] truncate text-muted-foreground">
+                    <TableCell className="max-w-[150px] truncate text-[#888888]">
                       {po.ticketTitle || "\u2014"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{money(po.limit)}</TableCell>
@@ -323,19 +323,19 @@ export function ReportsView({
                     <TableCell className="text-right tabular-nums font-medium">{money(po.profit)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div className="flex-1 h-2 bg-[#333333] overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${
+                            className={`h-full  ${
                               po.utilisationPct >= 90
-                                ? "bg-red-500"
+                                ? "bg-[#FF3333]"
                                 : po.utilisationPct >= 75
-                                ? "bg-amber-500"
-                                : "bg-green-500"
+                                ? "bg-[#FF9900]"
+                                : "bg-[#00CC66]"
                             }`}
                             style={{ width: `${Math.min(po.utilisationPct, 100)}%` }}
                           />
                         </div>
-                        <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                        <span className="text-xs tabular-nums text-[#888888] w-10 text-right">
                           {po.utilisationPct}%
                         </span>
                       </div>
@@ -350,7 +350,7 @@ export function ReportsView({
 
       {/* Recovery Ageing */}
       <TabsContent value="recovery-ageing">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -366,7 +366,7 @@ export function ReportsView({
             <TableBody>
               {recoveryAgeing.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-[#888888]">
                     No recovery ageing data available.
                   </TableCell>
                 </TableRow>
@@ -378,20 +378,20 @@ export function ReportsView({
                     </TableCell>
                     <TableCell>{rc.customerName}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeColor(rc.recoveryStatus)}`}>
+                      <span className={`inline-flex items-center  px-2.5 py-0.5 text-xs font-medium ${statusBadgeColor(rc.recoveryStatus)}`}>
                         {rc.recoveryStatus.replace(/_/g, " ")}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium text-red-600">
+                    <TableCell className="text-right tabular-nums font-medium text-[#FF3333]">
                       {money(rc.stuckValue)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {rc.daysOpen !== null ? `${rc.daysOpen}d` : "\u2014"}
                     </TableCell>
-                    <TableCell className={`text-right tabular-nums ${rc.daysInCurrentStage !== null && rc.daysInCurrentStage > 14 ? "text-red-600 font-bold" : rc.daysInCurrentStage !== null && rc.daysInCurrentStage > 7 ? "text-amber-600 font-medium" : ""}`}>
+                    <TableCell className={`text-right tabular-nums ${rc.daysInCurrentStage !== null && rc.daysInCurrentStage > 14 ? "text-[#FF3333] font-bold" : rc.daysInCurrentStage !== null && rc.daysInCurrentStage > 7 ? "text-[#FF9900] font-medium" : ""}`}>
                       {rc.daysInCurrentStage !== null ? `${rc.daysInCurrentStage}d` : "\u2014"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm max-w-[180px] truncate">
+                    <TableCell className="text-[#888888] text-sm max-w-[180px] truncate">
                       {rc.nextAction || "\u2014"}
                     </TableCell>
                   </TableRow>
@@ -404,7 +404,7 @@ export function ReportsView({
 
       {/* Absorbed Costs */}
       <TabsContent value="absorbed-costs">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -416,7 +416,7 @@ export function ReportsView({
             <TableBody>
               {absorbedCosts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={3} className="text-center py-8 text-[#888888]">
                     No absorbed costs data available.
                   </TableCell>
                 </TableRow>
@@ -426,7 +426,7 @@ export function ReportsView({
                   return (
                     <Fragment key={ac.ticketId}>
                       <TableRow
-                        className="cursor-pointer hover:bg-muted/50"
+                        className="cursor-pointer hover:bg-[#222222]"
                         onClick={() =>
                           setExpandedTicket(isExpanded ? null : ac.ticketId)
                         }
@@ -439,14 +439,14 @@ export function ReportsView({
                           )}
                         </TableCell>
                         <TableCell className="font-medium">{ac.ticketTitle}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium text-amber-600">
+                        <TableCell className="text-right tabular-nums font-medium text-[#FF9900]">
                           {money(ac.totalAbsorbed)}
                         </TableCell>
                       </TableRow>
                       {isExpanded && ac.lineItems.map((item) => (
-                        <TableRow key={item.id} className="bg-muted/30">
+                        <TableRow key={item.id} className="bg-[#1A1A1A]">
                           <TableCell />
-                          <TableCell className="text-sm text-muted-foreground pl-8">
+                          <TableCell className="text-sm text-[#888888] pl-8">
                             {item.description || item.supplierBillLine?.description || "Allocation"}
                             {item.basis && (
                               <span className="ml-2 text-xs">({item.basis})</span>
@@ -468,7 +468,7 @@ export function ReportsView({
 
       {/* Unallocated Costs */}
       <TabsContent value="unallocated-costs">
-        <div className="rounded-lg border bg-background mt-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] mt-4">
           <Table>
             <TableHeader>
               <TableRow>
@@ -485,7 +485,7 @@ export function ReportsView({
             <TableBody>
               {unallocatedCosts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-[#888888]">
                     No unallocated costs found.
                   </TableCell>
                 </TableRow>
@@ -494,19 +494,19 @@ export function ReportsView({
                   <TableRow key={uc.id}>
                     <TableCell className="font-medium">{uc.supplierBill.supplier.name}</TableCell>
                     <TableCell>{uc.supplierBill.billNo}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-muted-foreground">
+                    <TableCell className="max-w-[200px] truncate text-[#888888]">
                       {uc.description || "\u2014"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{num(uc.quantity)}</TableCell>
                     <TableCell className="text-right tabular-nums">{money(uc.unitCost)}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{money(uc.lineTotal)}</TableCell>
                     <TableCell>
-                      <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                      <Badge className="bg-[#FF3333]/10 text-[#FF3333]">
                         {uc.allocationStatus}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <a href="/procurement" className="text-sm text-primary underline underline-offset-2 hover:text-primary/80">
+                      <a href="/procurement" className="text-sm text-[#FF6600] underline underline-offset-2 hover:text-[#FF9900]">
                         Allocate
                       </a>
                     </TableCell>

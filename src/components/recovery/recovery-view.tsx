@@ -118,18 +118,18 @@ type RecoveryCase = {
 
 function statusColor(status: string): string {
   switch (status) {
-    case "OPEN": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    case "EVIDENCE_BUILDING": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
-    case "PACK_READY": return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
+    case "OPEN": return "bg-[#3399FF]/10 text-[#3399FF]";
+    case "EVIDENCE_BUILDING": return "bg-[#FF9900]/10 text-[#FF9900]";
+    case "PACK_READY": return "bg-[#9966FF]/10 text-[#9966FF]";
     case "PACK_SENT_FOR_PO":
-    case "AWAITING_PO": return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
+    case "AWAITING_PO": return "bg-[#FF9900]/10 text-[#FF9900]";
     case "PO_RECEIVED":
-    case "PO_ALLOCATED": return "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300";
+    case "PO_ALLOCATED": return "bg-[#00CC66]/10 text-[#00CC66]";
     case "INVOICE_READY":
-    case "INVOICE_SENT": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-    case "PAYMENT_PENDING": return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
-    case "CLOSED": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
-    default: return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
+    case "INVOICE_SENT": return "bg-[#9966FF]/10 text-[#9966FF]";
+    case "PAYMENT_PENDING": return "bg-[#FF9900]/10 text-[#FF9900]";
+    case "CLOSED": return "bg-[#00CC66]/10 text-[#00CC66]";
+    default: return "bg-[#333333] text-[#888888]";
   }
 }
 
@@ -238,26 +238,26 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Total Stuck Revenue</p>
-            <p className="text-2xl font-bold text-red-600">{dec(totalStuck)}</p>
+            <p className="text-sm text-[#888888]">Total Stuck Revenue</p>
+            <p className="text-2xl font-bold text-[#FF3333]">{dec(totalStuck)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Open Cases</p>
+            <p className="text-sm text-[#888888]">Open Cases</p>
             <p className="text-2xl font-bold">{openCases.length}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Avg Days in Recovery</p>
+            <p className="text-sm text-[#888888]">Avg Days in Recovery</p>
             <p className="text-2xl font-bold">{avgDays}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Packs Awaiting PO</p>
-            <p className="text-2xl font-bold text-orange-600">{awaitingPO}</p>
+            <p className="text-sm text-[#888888]">Packs Awaiting PO</p>
+            <p className="text-2xl font-bold text-[#FF9900]">{awaitingPO}</p>
           </CardContent>
         </Card>
       </div>
@@ -265,22 +265,22 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
       {/* Pipeline Rail */}
       <Card>
         <CardContent className="pt-4 pb-4">
-          <h3 className="text-sm font-medium mb-3 text-muted-foreground">Recovery Pipeline</h3>
+          <h3 className="text-sm font-medium mb-3 text-[#888888]">Recovery Pipeline</h3>
           <div className="flex items-center gap-1 overflow-x-auto pb-2">
             {STAGES.map((stage, i) => (
               <Fragment key={stage}>
                 <div className="flex flex-col items-center min-w-[80px]">
                   <div
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${statusColor(stage)}`}
+                    className={` px-3 py-1.5 text-xs font-semibold ${statusColor(stage)}`}
                   >
                     {stageCounts[stage]}
                   </div>
-                  <span className="text-[10px] text-muted-foreground mt-1 text-center leading-tight">
+                  <span className="text-[10px] text-[#888888] mt-1 text-center leading-tight">
                     {STAGE_LABELS[stage] || stage.replace(/_/g, " ")}
                   </span>
                 </div>
                 {i < STAGES.length - 1 && (
-                  <ArrowRight className="size-3 text-muted-foreground shrink-0" />
+                  <ArrowRight className="size-3 text-[#888888] shrink-0" />
                 )}
               </Fragment>
             ))}
@@ -306,7 +306,7 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
       </div>
 
       {/* Cases Table */}
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -324,7 +324,7 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-[#888888]">
                   No recovery cases found.
                 </TableCell>
               </TableRow>
@@ -337,7 +337,7 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
                 return (
                   <Fragment key={rc.id}>
                     <TableRow
-                      className="cursor-pointer hover:bg-muted/50"
+                      className="cursor-pointer hover:bg-[#222222]"
                       onClick={() => setExpandedId(isExpanded ? null : rc.id)}
                     >
                       <TableCell>
@@ -355,11 +355,11 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
                         <Badge variant="outline">{rc.reasonType.replace(/_/g, " ")}</Badge>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor(rc.recoveryStatus)}`}>
+                        <span className={`inline-flex items-center  px-2.5 py-0.5 text-xs font-medium ${statusColor(rc.recoveryStatus)}`}>
                           {STAGE_LABELS[rc.recoveryStatus] || rc.recoveryStatus.replace(/_/g, " ")}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums font-medium text-red-600">
+                      <TableCell className="text-right tabular-nums font-medium text-[#FF3333]">
                         {dec(rc.stuckValue)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -368,34 +368,34 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
                       <TableCell className="text-right tabular-nums">
                         {rc.evidencePacks.length}
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">
+                      <TableCell className="text-[#888888] text-sm max-w-[150px] truncate">
                         {rc.nextAction || getNextActionLabel(rc.recoveryStatus)}
                       </TableCell>
                     </TableRow>
 
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={9} className="bg-muted/30 p-4">
+                        <TableCell colSpan={9} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
                             {/* Timeline */}
                             <div>
                               <h4 className="text-sm font-medium mb-2">Recovery Timeline</h4>
                               {timeline.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">No timeline events recorded.</p>
+                                <p className="text-sm text-[#888888]">No timeline events recorded.</p>
                               ) : (
                                 <div className="space-y-0">
                                   {timeline.map((entry, i) => (
-                                    <div key={i} className="flex items-start gap-3 border-l-2 border-primary/30 pl-4 py-2">
+                                    <div key={i} className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2">
                                       <div className="flex-1">
                                         <div className="flex items-center gap-2">
-                                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(entry.stage)}`}>
+                                          <span className={`inline-flex items-center  px-2 py-0.5 text-xs font-medium ${statusColor(entry.stage)}`}>
                                             {STAGE_LABELS[entry.stage] || entry.stage.replace(/_/g, " ")}
                                           </span>
-                                          <span className="text-xs text-muted-foreground">
+                                          <span className="text-xs text-[#888888]">
                                             {entry.date ? new Date(entry.date).toLocaleString() : ""}
                                           </span>
                                           {entry.duration !== null && (
-                                            <span className="text-xs text-muted-foreground">
+                                            <span className="text-xs text-[#888888]">
                                               ({entry.duration}d)
                                             </span>
                                           )}
@@ -411,7 +411,7 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
                             <div>
                               <h4 className="text-sm font-medium mb-2">Evidence Packs</h4>
                               {rc.evidencePacks.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">No evidence packs.</p>
+                                <p className="text-sm text-[#888888]">No evidence packs.</p>
                               ) : (
                                 <div className="space-y-1">
                                   {rc.evidencePacks.map((pack) => (
@@ -420,14 +420,14 @@ export function RecoveryView({ cases }: { cases: RecoveryCase[] }) {
                                       <Badge variant={pack.status === "FINALIZED" ? "default" : "secondary"}>
                                         {pack.status}
                                       </Badge>
-                                      <span className="text-muted-foreground">{pack._count.items} items</span>
+                                      <span className="text-[#888888]">{pack._count.items} items</span>
                                       {pack.generatedAt && (
-                                        <span className="text-xs text-muted-foreground">
+                                        <span className="text-xs text-[#888888]">
                                           Generated: {new Date(pack.generatedAt).toLocaleDateString()}
                                         </span>
                                       )}
                                       {pack.finalizedAt && (
-                                        <span className="text-xs text-muted-foreground">
+                                        <span className="text-xs text-[#888888]">
                                           Finalized: {new Date(pack.finalizedAt).toLocaleDateString()}
                                         </span>
                                       )}

@@ -66,11 +66,11 @@ type Site = {
 function statusBadge(status: string) {
   switch (status) {
     case "DRAFT":
-      return <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300">{status}</Badge>;
+      return <Badge className="bg-[#333333] text-[#888888]">{status}</Badge>;
     case "FINALIZED":
-      return <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">{status}</Badge>;
+      return <Badge className="bg-[#00CC66]/10 text-[#00CC66]">{status}</Badge>;
     case "SENT":
-      return <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{status}</Badge>;
+      return <Badge className="bg-[#3399FF]/10 text-[#3399FF]">{status}</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -79,9 +79,9 @@ function statusBadge(status: string) {
 function itemStatusBadge(status: string) {
   switch (status) {
     case "INCLUDED":
-      return <Badge variant="outline" className="text-green-700 border-green-300 dark:text-green-400 dark:border-green-700">{status}</Badge>;
+      return <Badge variant="outline" className="text-[#00CC66] border-[#00CC66]/30">{status}</Badge>;
     case "EXCLUDED":
-      return <Badge variant="outline" className="text-red-700 border-red-300 dark:text-red-400 dark:border-red-700">{status}</Badge>;
+      return <Badge variant="outline" className="text-[#FF3333] border-[#FF3333]/30">{status}</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -217,8 +217,8 @@ export function SitePacksView({
                   rows={3}
                 />
               </div>
-              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3">
-                <div className="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <div className=" border border-[#FF9900]/30 bg-[#FF9900]/10 p-3">
+                <div className="flex items-center gap-2 text-sm text-[#FF9900]">
                   <Lock className="size-4 shrink-0" />
                   <span>Only LOCKED or VERIFIED tickets can be included in site packs.</span>
                 </div>
@@ -236,7 +236,7 @@ export function SitePacksView({
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -251,7 +251,7 @@ export function SitePacksView({
           <TableBody>
             {sitePacks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-8 text-[#888888]">
                   No site packs created yet.
                 </TableCell>
               </TableRow>
@@ -261,7 +261,7 @@ export function SitePacksView({
                 return (
                   <Fragment key={sp.id}>
                     <TableRow
-                      className="cursor-pointer hover:bg-muted/50"
+                      className="cursor-pointer hover:bg-[#222222]"
                       onClick={() => setExpandedId(isExpanded ? null : sp.id)}
                     >
                       <TableCell>
@@ -272,23 +272,23 @@ export function SitePacksView({
                         )}
                       </TableCell>
                       <TableCell className="font-medium">{sp.site.siteName}</TableCell>
-                      <TableCell className="tabular-nums text-muted-foreground">
+                      <TableCell className="tabular-nums text-[#888888]">
                         {new Date(sp.packDate).toLocaleDateString("en-GB")}
                       </TableCell>
                       <TableCell>{statusBadge(sp.status)}</TableCell>
                       <TableCell className="text-right tabular-nums">{sp.items.length}</TableCell>
-                      <TableCell className="max-w-[200px] truncate text-muted-foreground">
+                      <TableCell className="max-w-[200px] truncate text-[#888888]">
                         {sp.summaryNotes || "\u2014"}
                       </TableCell>
                     </TableRow>
 
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={6} className="bg-muted/30 p-4">
+                        <TableCell colSpan={6} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
                             {/* Items sub-table */}
                             {sp.items.length > 0 ? (
-                              <div className="rounded-md border bg-background">
+                              <div className="border border-[#333333] bg-[#1A1A1A]">
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
@@ -321,7 +321,7 @@ export function SitePacksView({
                                 </Table>
                               </div>
                             ) : (
-                              <p className="text-sm text-muted-foreground">No items in this pack.</p>
+                              <p className="text-sm text-[#888888]">No items in this pack.</p>
                             )}
 
                             {/* Actions */}

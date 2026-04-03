@@ -287,8 +287,8 @@ export function LabourDrawdownTable({
               </div>
 
               {/* Auto-calculated preview */}
-              <div className="rounded-md border bg-muted/50 p-3 space-y-1 text-sm">
-                <p className="font-medium text-xs uppercase tracking-wide text-muted-foreground mb-2">
+              <div className=" border bg-[#222222] p-3 space-y-1 text-sm">
+                <p className="font-medium text-xs uppercase tracking-wide text-[#888888] mb-2">
                   Preview
                 </p>
                 <div className="flex justify-between">
@@ -317,7 +317,7 @@ export function LabourDrawdownTable({
                   <span className="font-medium">Profit</span>
                   <span
                     className={`font-semibold tabular-nums ${
-                      previewProfit >= 0 ? "text-green-600" : "text-red-600"
+                      previewProfit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
                     }`}
                   >
                     {fmt(previewProfit)}
@@ -335,7 +335,7 @@ export function LabourDrawdownTable({
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -357,7 +357,7 @@ export function LabourDrawdownTable({
               <TableRow>
                 <TableCell
                   colSpan={11}
-                  className="text-center py-6 text-muted-foreground"
+                  className="text-center py-6 text-[#888888]"
                 >
                   No labour entries logged yet.
                 </TableCell>
@@ -404,8 +404,8 @@ export function LabourDrawdownTable({
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
                         n(entry.grossProfitValue) >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
+                          ? "text-[#00CC66]"
+                          : "text-[#FF3333]"
                       }`}
                     >
                       {fmt(entry.grossProfitValue)}
@@ -416,7 +416,7 @@ export function LabourDrawdownTable({
                   </TableRow>
                 ))}
                 {/* Summary row */}
-                <TableRow className="bg-muted/50 font-medium">
+                <TableRow className="bg-[#222222] font-medium">
                   <TableCell colSpan={6} className="text-right">
                     Totals
                   </TableCell>
@@ -431,7 +431,7 @@ export function LabourDrawdownTable({
                   </TableCell>
                   <TableCell
                     className={`text-right tabular-nums font-semibold ${
-                      totalProfit >= 0 ? "text-green-600" : "text-red-600"
+                      totalProfit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
                     }`}
                   >
                     {fmt(totalProfit)}

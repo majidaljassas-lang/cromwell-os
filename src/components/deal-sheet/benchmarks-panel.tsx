@@ -178,24 +178,24 @@ export function BenchmarksPanel({
       </CardHeader>
       <CardContent className="space-y-4">
         {Object.keys(grouped).length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className="text-sm text-[#888888] text-center py-4">
             No benchmarks yet.
           </p>
         ) : (
           Object.entries(grouped).map(([lineDesc, bms]) => (
             <div key={lineDesc}>
-              <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+              <p className="text-xs font-medium text-[#888888] mb-1.5 uppercase tracking-wide">
                 {lineDesc}
               </p>
               <div className="space-y-1.5">
                 {bms.map((bm) => (
                   <div
                     key={bm.id}
-                    className="flex items-center justify-between text-sm border rounded-md px-3 py-1.5"
+                    className="flex items-center justify-between text-sm border border-[#333333] px-3 py-1.5"
                   >
                     <span className="font-medium">{bm.benchmarkSource}</span>
-                    <div className="flex items-center gap-3 text-muted-foreground text-xs">
-                      <span className="tabular-nums font-medium text-foreground">
+                    <div className="flex items-center gap-3 text-[#888888] text-xs">
+                      <span className="tabular-nums font-medium text-[#E0E0E0]">
                         {dec(bm.unitPrice)}/unit
                       </span>
                       {bm.qty && <span>Qty: {dec(bm.qty)}</span>}

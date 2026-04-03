@@ -200,7 +200,7 @@ export function SupplierOptionsPanel({
                   id="isPreferred"
                   checked={isPreferred}
                   onChange={(e) => setIsPreferred(e.target.checked)}
-                  className="rounded border"
+                  className="border border-[#333333]"
                 />
                 <Label htmlFor="isPreferred">Preferred Supplier</Label>
               </div>
@@ -219,29 +219,29 @@ export function SupplierOptionsPanel({
       </CardHeader>
       <CardContent className="space-y-4">
         {Object.keys(grouped).length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className="text-sm text-[#888888] text-center py-4">
             No supplier options yet.
           </p>
         ) : (
           Object.entries(grouped).map(([lineDesc, opts]) => (
             <div key={lineDesc}>
-              <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+              <p className="text-xs font-medium text-[#888888] mb-1.5 uppercase tracking-wide">
                 {lineDesc}
               </p>
               <div className="space-y-1.5">
                 {opts.map((opt) => (
                   <div
                     key={opt.id}
-                    className="flex items-center justify-between text-sm border rounded-md px-3 py-1.5"
+                    className="flex items-center justify-between text-sm border border-[#333333] px-3 py-1.5"
                   >
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{opt.supplier.name}</span>
                       {opt.isPreferred && (
-                        <Star className="size-3.5 text-yellow-500 fill-yellow-500" />
+                        <Star className="size-3.5 text-[#FF9900] fill-[#FF9900]" />
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-muted-foreground text-xs">
-                      <span className="tabular-nums font-medium text-foreground">
+                    <div className="flex items-center gap-3 text-[#888888] text-xs">
+                      <span className="tabular-nums font-medium text-[#E0E0E0]">
                         {dec(opt.costUnit)}/unit
                       </span>
                       {opt.qtyAvailable && <span>Qty: {dec(opt.qtyAvailable)}</span>}

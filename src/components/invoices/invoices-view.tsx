@@ -179,29 +179,29 @@ export function InvoicesView({
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Drafts</p>
+            <p className="text-sm text-[#888888]">Drafts</p>
             <p className="text-2xl font-bold">{drafts.length}</p>
-            <p className="text-sm text-muted-foreground">{dec(draftTotal)}</p>
+            <p className="text-sm text-[#888888]">{dec(draftTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Sent</p>
+            <p className="text-sm text-[#888888]">Sent</p>
             <p className="text-2xl font-bold">{sent.length}</p>
-            <p className="text-sm text-muted-foreground">{dec(sentTotal)}</p>
+            <p className="text-sm text-[#888888]">{dec(sentTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Paid</p>
+            <p className="text-sm text-[#888888]">Paid</p>
             <p className="text-2xl font-bold">{paid.length}</p>
-            <p className="text-sm text-muted-foreground">{dec(paidTotal)}</p>
+            <p className="text-sm text-[#888888]">{dec(paidTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Total Outstanding</p>
-            <p className="text-2xl font-bold text-orange-600">{dec(outstandingTotal)}</p>
+            <p className="text-sm text-[#888888]">Total Outstanding</p>
+            <p className="text-2xl font-bold text-[#FF9900]">{dec(outstandingTotal)}</p>
           </CardContent>
         </Card>
       </div>
@@ -238,7 +238,7 @@ export function InvoicesView({
       </div>
 
       {/* Invoice Table */}
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -259,7 +259,7 @@ export function InvoicesView({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={12} className="text-center py-8 text-[#888888]">
                   No invoices found.
                 </TableCell>
               </TableRow>
@@ -272,7 +272,7 @@ export function InvoicesView({
                 return (
                   <Fragment key={inv.id}>
                     <TableRow
-                      className="cursor-pointer hover:bg-muted/50"
+                      className="cursor-pointer hover:bg-[#222222]"
                       onClick={() => setExpandedId(isExpanded ? null : inv.id)}
                     >
                       <TableCell>
@@ -296,29 +296,29 @@ export function InvoicesView({
                       </TableCell>
                       <TableCell>{inv.poNo || "\u2014"}</TableCell>
                       <TableCell className="text-right tabular-nums">{dec(inv.totalSell)}</TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString() : "\u2014"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {inv.paidAt ? new Date(inv.paidAt).toLocaleDateString() : "\u2014"}
                       </TableCell>
                       <TableCell>
                         {allMatched ? (
-                          <Check className="size-4 text-green-600" />
+                          <Check className="size-4 text-[#00CC66]" />
                         ) : (
-                          <AlertTriangle className="size-4 text-amber-500" />
+                          <AlertTriangle className="size-4 text-[#FF9900]" />
                         )}
                       </TableCell>
                     </TableRow>
 
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={12} className="bg-muted/30 p-4">
+                        <TableCell colSpan={12} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
                             {/* Invoice Lines */}
                             <div>
                               <h4 className="text-sm font-medium mb-2">Invoice Lines</h4>
-                              <div className="rounded border bg-background">
+                              <div className="border border-[#333333] bg-[#1A1A1A]">
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
@@ -332,7 +332,7 @@ export function InvoicesView({
                                   <TableBody>
                                     {inv.lines.length === 0 ? (
                                       <TableRow>
-                                        <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                                        <TableCell colSpan={5} className="text-center py-4 text-[#888888]">
                                           No lines
                                         </TableCell>
                                       </TableRow>
@@ -360,11 +360,11 @@ export function InvoicesView({
 
                             {/* Readiness warnings */}
                             {blockers.length > 0 && (
-                              <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
-                                <h4 className="text-sm font-medium text-amber-700 dark:text-amber-400 mb-1">
+                              <div className="rounded border border-[#FF9900]/30 bg-[#FF9900]/10 p-3">
+                                <h4 className="text-sm font-medium text-[#FF9900] mb-1">
                                   Invoice Readiness Blockers
                                 </h4>
-                                <ul className="text-sm text-amber-600 dark:text-amber-300 list-disc pl-4 space-y-0.5">
+                                <ul className="text-sm text-[#FF9900] list-disc pl-4 space-y-0.5">
                                   {blockers.map((b, i) => (
                                     <li key={i}>{b}</li>
                                   ))}

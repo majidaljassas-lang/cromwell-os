@@ -553,7 +553,7 @@ function SupplierBillsTab({
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className=" border bg-background">
         <Table>
           <TableHeader>
             <TableRow>
@@ -771,7 +771,7 @@ function CostAllocationsTab({
       {/* Unresolved Cost Lines */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium">Unresolved Cost Lines</h2>
-        <div className="rounded-lg border bg-background">
+        <div className=" border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
@@ -939,7 +939,7 @@ function CostAllocationsTab({
       {/* Recent Allocations */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium">Recent Allocations</h2>
-        <div className="rounded-lg border bg-background">
+        <div className=" border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1146,7 +1146,7 @@ function AbsorbedCostsTab({
         </Dialog>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className=" border bg-background">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1436,7 +1436,7 @@ function ReturnsTab({
           </Sheet>
         </div>
 
-        <div className="rounded-lg border bg-background">
+        <div className=" border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1560,7 +1560,7 @@ function StockTab({
       {/* Stock Excess Records */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium">Stock Excess Records</h2>
-        <div className="rounded-lg border bg-background">
+        <div className=" border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1676,7 +1676,7 @@ function StockTab({
           </Dialog>
         </div>
 
-        <div className="rounded-lg border bg-background">
+        <div className=" border bg-background">
           <Table>
             <TableHeader>
               <TableRow>

@@ -197,7 +197,7 @@ export function CompSheetPanel({
       </CardHeader>
       <CardContent className="space-y-6">
         {compSheets.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className="text-sm text-[#888888] text-center py-4">
             No comp sheets yet.
           </p>
         ) : (
@@ -273,7 +273,7 @@ export function CompSheetPanel({
                 </Sheet>
               </div>
               {cs.lines.length > 0 && (
-                <div className="rounded-lg border bg-background">
+                <div className="border border-[#333333] bg-[#1A1A1A]">
                   <Table>
                     <TableHeader>
                       <TableRow className="text-xs">
@@ -305,8 +305,8 @@ export function CompSheetPanel({
                             <span
                               className={
                                 num(line.savingTotal) >= 0
-                                  ? "text-green-600"
-                                  : "text-red-600"
+                                  ? "text-[#00CC66]"
+                                  : "text-[#FF3333]"
                               }
                             >
                               {dec(line.savingTotal)}
@@ -316,14 +316,14 @@ export function CompSheetPanel({
                             <span
                               className={
                                 num(line.marginTotal) >= 0
-                                  ? "text-green-600"
-                                  : "text-red-600"
+                                  ? "text-[#00CC66]"
+                                  : "text-[#FF3333]"
                               }
                             >
                               {dec(line.marginTotal)}
                             </span>
                           </TableCell>
-                          <TableCell className="text-muted-foreground text-xs max-w-[120px] truncate">
+                          <TableCell className="text-[#888888] text-xs max-w-[120px] truncate">
                             {line.notes || "\u2014"}
                           </TableCell>
                         </TableRow>

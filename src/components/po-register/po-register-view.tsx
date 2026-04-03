@@ -117,9 +117,9 @@ function statusBadge(status: string) {
 }
 
 function utilisationColor(pct: number): string {
-  if (pct > 90) return "bg-red-500";
-  if (pct > 75) return "bg-yellow-500";
-  return "bg-green-500";
+  if (pct > 90) return "bg-[#FF3333]";
+  if (pct > 75) return "bg-[#FF9900]";
+  return "bg-[#00CC66]";
 }
 
 export function PORegisterView({
@@ -230,8 +230,8 @@ export function PORegisterView({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <FileBarChart className="size-6 text-muted-foreground" />
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <FileBarChart className="size-6 text-[#888888]" />
+          <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">
             PO Register
           </h1>
         </div>
@@ -385,7 +385,7 @@ export function PORegisterView({
               </div>
 
               {poType === "DRAWDOWN_LABOUR" && (
-                <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-3 border border-[#333333] p-3">
                   <p className="text-sm font-medium">Labour Rates</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
@@ -455,7 +455,7 @@ export function PORegisterView({
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total PO Value
             </p>
             <p className="text-2xl font-semibold tabular-nums mt-1">
@@ -465,7 +465,7 @@ export function PORegisterView({
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total Consumed
             </p>
             <p className="text-2xl font-semibold tabular-nums mt-1">
@@ -475,7 +475,7 @@ export function PORegisterView({
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total Remaining
             </p>
             <p className="text-2xl font-semibold tabular-nums mt-1">
@@ -485,12 +485,12 @@ export function PORegisterView({
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-[#888888] uppercase tracking-wide">
               Total Profit to Date
             </p>
             <p
               className={`text-2xl font-semibold tabular-nums mt-1 ${
-                totalProfit >= 0 ? "text-green-600" : "text-red-600"
+                totalProfit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
               }`}
             >
               {fmt(totalProfit)}
@@ -551,13 +551,13 @@ export function PORegisterView({
           </SelectContent>
         </Select>
 
-        <span className="text-sm text-muted-foreground ml-auto">
+        <span className="text-sm text-[#888888] ml-auto">
           {filtered.length} PO{filtered.length !== 1 ? "s" : ""}
         </span>
       </div>
 
       {/* PO Table */}
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -582,7 +582,7 @@ export function PORegisterView({
               <TableRow>
                 <TableCell
                   colSpan={14}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No purchase orders found.
                 </TableCell>
@@ -625,14 +625,14 @@ export function PORegisterView({
                 return (
                   <Fragment key={po.id}>
                     <TableRow
-                      className="cursor-pointer hover:bg-muted/50"
+                      className="cursor-pointer hover:bg-[#222222]"
                       onClick={() => toggleExpand(po.id)}
                     >
                       <TableCell className="px-2">
                         {isExpanded ? (
-                          <ChevronDown className="size-4 text-muted-foreground" />
+                          <ChevronDown className="size-4 text-[#888888]" />
                         ) : (
-                          <ChevronRight className="size-4 text-muted-foreground" />
+                          <ChevronRight className="size-4 text-[#888888]" />
                         )}
                       </TableCell>
                       <TableCell className="font-medium">{po.poNo}</TableCell>
@@ -640,10 +640,10 @@ export function PORegisterView({
                       <TableCell className="max-w-[120px] truncate">
                         {po.customer.name}
                       </TableCell>
-                      <TableCell className="max-w-[100px] truncate text-muted-foreground">
+                      <TableCell className="max-w-[100px] truncate text-[#888888]">
                         {po.site?.siteName || "\u2014"}
                       </TableCell>
-                      <TableCell className="max-w-[120px] truncate text-muted-foreground">
+                      <TableCell className="max-w-[120px] truncate text-[#888888]">
                         {po.ticket?.title || "\u2014"}
                       </TableCell>
                       <TableCell>{statusBadge(po.status)}</TableCell>
@@ -661,7 +661,7 @@ export function PORegisterView({
                       </TableCell>
                       <TableCell
                         className={`text-right tabular-nums font-medium ${
-                          profit >= 0 ? "text-green-600" : "text-red-600"
+                          profit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
                         }`}
                       >
                         {fmt(profit)}
@@ -671,9 +671,9 @@ export function PORegisterView({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <div className="h-2 w-full rounded-full bg-muted">
+                          <div className="h-2 w-full bg-[#333333]">
                             <div
-                              className={`h-full rounded-full transition-all ${utilisationColor(
+                              className={`h-full transition-all ${utilisationColor(
                                 utilPct
                               )}`}
                               style={{
@@ -681,7 +681,7 @@ export function PORegisterView({
                               }}
                             />
                           </div>
-                          <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                          <span className="text-xs tabular-nums text-[#888888] w-10 text-right">
                             {utilPct.toFixed(0)}%
                           </span>
                         </div>
@@ -690,7 +690,7 @@ export function PORegisterView({
 
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={14} className="p-4 bg-muted/30">
+                        <TableCell colSpan={14} className="p-4 bg-[#1A1A1A]">
                           <ExpandedPODetail
                             po={po}
                             contacts={contacts}
@@ -729,9 +729,9 @@ function ExpandedPODetail({
           PO Lines ({po.lines.length})
         </h3>
         {po.lines.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No PO lines.</p>
+          <p className="text-sm text-[#888888]">No PO lines.</p>
         ) : (
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>

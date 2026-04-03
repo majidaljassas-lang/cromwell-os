@@ -190,7 +190,7 @@ export function DealSheetView({
         <DealSheetHeader ticket={ticket} dealSheet={null} />
         <Card>
           <CardContent className="py-16 text-center">
-            <p className="text-muted-foreground mb-4">
+            <p className="text-[#888888] mb-4">
               No deal sheet has been created for this ticket yet.
             </p>
             <Button onClick={() => createVersion()} disabled={creating}>
@@ -225,7 +225,7 @@ export function DealSheetView({
       />
 
       {/* Main Pricing Table */}
-      <div className="rounded-lg border bg-background overflow-x-auto">
+      <div className="border border-[#333333] bg-[#1A1A1A] overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="text-xs">
@@ -235,17 +235,17 @@ export function DealSheetView({
               <TableHead>Unit</TableHead>
               <TableHead className="text-right">Supplier Best</TableHead>
               <TableHead className="text-right">Benchmark</TableHead>
-              <TableHead className="text-right min-w-[100px] bg-blue-50/50 dark:bg-blue-950/20">
+              <TableHead className="text-right min-w-[100px] bg-[#222222]">
                 Exp. Cost/Unit
               </TableHead>
-              <TableHead className="text-right min-w-[100px] bg-blue-50/50 dark:bg-blue-950/20">
+              <TableHead className="text-right min-w-[100px] bg-[#222222]">
                 Sugg. Sell/Unit
               </TableHead>
-              <TableHead className="text-right min-w-[100px] bg-blue-50/50 dark:bg-blue-950/20">
+              <TableHead className="text-right min-w-[100px] bg-[#222222]">
                 Actual Sell/Unit
               </TableHead>
               <TableHead className="text-right">Margin/Unit</TableHead>
-              <TableHead className="min-w-[120px] bg-blue-50/50 dark:bg-blue-950/20">
+              <TableHead className="min-w-[120px] bg-[#222222]">
                 Notes
               </TableHead>
             </TableRow>
@@ -255,7 +255,7 @@ export function DealSheetView({
               <TableRow>
                 <TableCell
                   colSpan={11}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No line snapshots in this deal sheet version.
                 </TableCell>
@@ -317,8 +317,8 @@ function DealSheetHeader({
   return (
     <div className="flex items-start justify-between flex-wrap gap-4">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Deal Sheet</h1>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Deal Sheet</h1>
+        <div className="flex items-center gap-2 text-sm text-[#888888]">
           <span>{ticket.title}</span>
           <span>/</span>
           <span>{ticket.payingCustomer.name}</span>
@@ -424,23 +424,23 @@ function DealSheetLineRow({
       <TableCell className="text-right tabular-nums">
         {dec(snapshot.ticketLine.qty)}
       </TableCell>
-      <TableCell className="text-muted-foreground text-xs">
+      <TableCell className="text-[#888888] text-xs">
         {snapshot.ticketLine.unit}
       </TableCell>
       <TableCell className="text-right">
         {bestSupplier ? (
           <div>
             <span className="tabular-nums">{dec(bestSupplier.costUnit)}</span>
-            <div className="text-xs text-muted-foreground">{bestSupplier.name}</div>
+            <div className="text-xs text-[#888888]">{bestSupplier.name}</div>
           </div>
         ) : (
-          <span className="text-muted-foreground">&mdash;</span>
+          <span className="text-[#888888]">&mdash;</span>
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">
         {dec(snapshot.benchmarkUnit)}
       </TableCell>
-      <TableCell className="text-right bg-blue-50/30 dark:bg-blue-950/10">
+      <TableCell className="text-right bg-[#222222]">
         <Input
           type="number"
           step="0.01"
@@ -451,7 +451,7 @@ function DealSheetLineRow({
           placeholder="0.00"
         />
       </TableCell>
-      <TableCell className="text-right bg-blue-50/30 dark:bg-blue-950/10">
+      <TableCell className="text-right bg-[#222222]">
         <Input
           type="number"
           step="0.01"
@@ -462,7 +462,7 @@ function DealSheetLineRow({
           placeholder="0.00"
         />
       </TableCell>
-      <TableCell className="text-right bg-blue-50/30 dark:bg-blue-950/10">
+      <TableCell className="text-right bg-[#222222]">
         <Input
           type="number"
           step="0.01"
@@ -474,14 +474,14 @@ function DealSheetLineRow({
         />
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        <span className={marginUnit >= 0 ? "text-green-600" : "text-red-600"}>
+        <span className={marginUnit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
           {marginUnit.toLocaleString("en-GB", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })}
         </span>
       </TableCell>
-      <TableCell className="bg-blue-50/30 dark:bg-blue-950/10">
+      <TableCell className="bg-[#222222]">
         <Input
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
@@ -524,7 +524,7 @@ function TotalsRow({ snapshots }: { snapshots: LineSnapshot[] }) {
       </td>
       <td className="px-4 py-2" />
       <td className="px-4 py-2 text-right tabular-nums">
-        <span className={totalMargin >= 0 ? "text-green-600" : "text-red-600"}>
+        <span className={totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
           {dec(totalMargin)} ({marginPct}%)
         </span>
       </td>

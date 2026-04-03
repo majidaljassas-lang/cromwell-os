@@ -72,20 +72,20 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Suppliers</h1>
+        <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Suppliers</h1>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button size="sm">
+              <Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                 <Plus className="size-4 mr-1" />
                 Add Supplier
               </Button>
             }
           />
-          <SheetContent side="right">
+          <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
             <SheetHeader>
-              <SheetTitle>Add Supplier</SheetTitle>
-              <SheetDescription>
+              <SheetTitle className="text-[#E0E0E0]">Add Supplier</SheetTitle>
+              <SheetDescription className="text-[#666666]">
                 Add a new supplier to the system.
               </SheetDescription>
             </SheetHeader>
@@ -114,7 +114,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                 <Textarea id="s-notes" name="notes" placeholder="Optional" rows={3} />
               </div>
               <SheetFooter>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                   {submitting ? "Adding..." : "Add Supplier"}
                 </Button>
               </SheetFooter>
@@ -123,7 +123,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -136,7 +136,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
           <TableBody>
             {suppliers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={4} className="text-center py-8 text-[#888888]">
                   No suppliers yet. Add your first supplier.
                 </TableCell>
               </TableRow>
@@ -144,13 +144,13 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
               suppliers.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {s.legalName || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {s.email || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {s.phone || "\u2014"}
                   </TableCell>
                 </TableRow>
