@@ -70,7 +70,7 @@ export default async function ProcurementPage() {
   ]);
 
   return (
-    <div className="p-8">
+    <div className="p-4 space-y-4">
       <ProcurementView
         supplierBills={supplierBills as any}
         unresolvedAllocations={unresolvedAllocations as any}

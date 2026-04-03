@@ -51,7 +51,7 @@ export default async function WorkQueuePage() {
   ]);
 
   return (
-    <div className="p-8">
+    <div className="p-4 space-y-4">
       <WorkQueue
         workItems={workItems}
         activeTickets={activeTickets}

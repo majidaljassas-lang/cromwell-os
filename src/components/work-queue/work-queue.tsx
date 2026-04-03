@@ -120,20 +120,20 @@ function CollapsibleSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="rounded-lg border bg-background">
+    <div className="border border-[#333333] bg-[#1A1A1A]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+        className="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-[#222222] transition-colors"
       >
         <div className="flex items-center gap-2">
-          <Icon className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <Icon className="size-4 text-[#888888]" />
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">{title}</h2>
           <Badge variant="secondary">{count}</Badge>
         </div>
         {open ? (
-          <ChevronDown className="size-4 text-muted-foreground" />
+          <ChevronDown className="size-4 text-[#888888]" />
         ) : (
-          <ChevronRight className="size-4 text-muted-foreground" />
+          <ChevronRight className="size-4 text-[#888888]" />
         )}
       </button>
       {open && <div className="border-t">{children}</div>}
@@ -174,8 +174,8 @@ export function WorkQueue({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Work Queue</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Work Queue</h1>
+        <p className="text-xs text-[#666666] mt-1">
           Unified action list - all open work across enquiries, tickets, and
           recovery
         </p>
@@ -183,27 +183,27 @@ export function WorkQueue({
 
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-lg border bg-background p-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] p-4">
           <div className="flex items-center gap-2">
-            <Inbox className="size-4 text-muted-foreground" />
+            <Inbox className="size-4 text-[#888888]" />
             <span className="text-sm font-medium">Inquiry Work Items</span>
           </div>
           <p className="text-2xl font-bold mt-1 tabular-nums">
             {workItems.length}
           </p>
         </div>
-        <div className="rounded-lg border bg-background p-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] p-4">
           <div className="flex items-center gap-2">
-            <Ticket className="size-4 text-muted-foreground" />
+            <Ticket className="size-4 text-[#888888]" />
             <span className="text-sm font-medium">Active Tickets</span>
           </div>
           <p className="text-2xl font-bold mt-1 tabular-nums">
             {activeTickets.length}
           </p>
         </div>
-        <div className="rounded-lg border bg-background p-4">
+        <div className="border border-[#333333] bg-[#1A1A1A] p-4">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="size-4 text-muted-foreground" />
+            <AlertTriangle className="size-4 text-[#888888]" />
             <span className="text-sm font-medium">Recovery Cases</span>
           </div>
           <p className="text-2xl font-bold mt-1 tabular-nums">
@@ -236,7 +236,7 @@ export function WorkQueue({
               <TableRow>
                 <TableCell
                   colSpan={8}
-                  className="text-center py-6 text-muted-foreground"
+                  className="text-center py-6 text-[#888888]"
                 >
                   No open inquiry work items.
                 </TableCell>
@@ -258,18 +258,18 @@ export function WorkQueue({
                       {wi.status.replace(/_/g, " ")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {wi.site?.siteName || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {wi.customer?.name || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                  <TableCell className="text-right tabular-nums text-[#888888]">
                     {wi.confidenceScore
                       ? `${Number(wi.confidenceScore.toString())}%`
                       : "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground max-w-[150px] truncate">
+                  <TableCell className="text-[#888888] max-w-[150px] truncate">
                     {wi.notes || "\u2014"}
                   </TableCell>
                   <TableCell>
@@ -313,7 +313,7 @@ export function WorkQueue({
               <TableRow>
                 <TableCell
                   colSpan={7}
-                  className="text-center py-6 text-muted-foreground"
+                  className="text-center py-6 text-[#888888]"
                 >
                   No active tickets.
                 </TableCell>
@@ -322,7 +322,7 @@ export function WorkQueue({
               activeTickets.map((t) => (
                 <TableRow
                   key={t.id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className="cursor-pointer hover:bg-[#222222]"
                   onClick={() => router.push(`/tickets/${t.id}`)}
                 >
                   <TableCell className="font-medium max-w-[250px] truncate">
@@ -338,16 +338,16 @@ export function WorkQueue({
                       {t.status.replace(/_/g, " ")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {t.payingCustomer.name}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {t.site?.siteName || "\u2014"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {t._count.lines}
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
+                  <TableCell className="text-[#888888] tabular-nums">
                     {new Date(t.createdAt).toLocaleDateString()}
                   </TableCell>
                 </TableRow>
@@ -378,7 +378,7 @@ export function WorkQueue({
               <TableRow>
                 <TableCell
                   colSpan={5}
-                  className="text-center py-6 text-muted-foreground"
+                  className="text-center py-6 text-[#888888]"
                 >
                   No open recovery cases.
                 </TableCell>
@@ -389,7 +389,7 @@ export function WorkQueue({
                 return (
                   <TableRow
                     key={rc.id}
-                    className="cursor-pointer hover:bg-muted/50"
+                    className="cursor-pointer hover:bg-[#222222]"
                     onClick={() => router.push(`/tickets/${rc.ticket.id}`)}
                   >
                     <TableCell className="font-medium max-w-[250px] truncate">
@@ -409,7 +409,7 @@ export function WorkQueue({
                           className={
                             days > 7
                               ? "text-destructive font-medium"
-                              : "text-muted-foreground"
+                              : "text-[#888888]"
                           }
                         >
                           {days}d
@@ -418,7 +418,7 @@ export function WorkQueue({
                         "\u2014"
                       )}
                     </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                    <TableCell className="text-[#888888] max-w-[200px] truncate">
                       {rc.nextAction || "\u2014"}
                     </TableCell>
                   </TableRow>

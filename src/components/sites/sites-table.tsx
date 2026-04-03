@@ -85,26 +85,26 @@ export function SitesTable({ sites }: { sites: SiteWithLinks[] }) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">
             Jobs / Sites
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs text-[#666666] mt-1">
             Manage sites and their commercial relationships
           </p>
         </div>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button>
+              <Button className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                 <Plus className="size-4 mr-1" />
                 Add Site
               </Button>
             }
           />
-          <SheetContent side="right">
+          <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
             <SheetHeader>
-              <SheetTitle>Add New Site</SheetTitle>
-              <SheetDescription>
+              <SheetTitle className="text-[#E0E0E0]">Add New Site</SheetTitle>
+              <SheetDescription className="text-[#666666]">
                 Create a new site record. Fill in the details below.
               </SheetDescription>
             </SheetHeader>
@@ -144,7 +144,7 @@ export function SitesTable({ sites }: { sites: SiteWithLinks[] }) {
                 <Textarea id="notes" name="notes" placeholder="Any additional notes..." />
               </div>
               <SheetFooter>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                   {submitting ? "Creating..." : "Create Site"}
                 </Button>
               </SheetFooter>
@@ -153,7 +153,7 @@ export function SitesTable({ sites }: { sites: SiteWithLinks[] }) {
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -169,36 +169,36 @@ export function SitesTable({ sites }: { sites: SiteWithLinks[] }) {
           <TableBody>
             {sites.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={7} className="text-center py-8 text-[#666666]">
                   No sites found. Add your first site to get started.
                 </TableCell>
               </TableRow>
             ) : (
               sites.map((site) => (
-                <TableRow key={site.id} className="cursor-pointer hover:bg-muted/50">
+                <TableRow key={site.id} className="cursor-pointer hover:bg-[#222222] border-[#333333]">
                   <TableCell>
                     <Link
                       href={`/sites/${site.id}`}
-                      className="font-medium text-foreground hover:underline"
+                      className="font-medium text-[#FF6600] hover:text-[#FF9900] hover:underline"
                     >
                       {site.siteName}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {site.siteCode || "—"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {site.city || "—"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {site.postcode || "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={site.isActive ? "default" : "secondary"}>
+                    <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${site.isActive ? "bg-[#00CC66]/10 text-[#00CC66]" : "bg-[#888888]/10 text-[#888888]"}`}>
                       {site.isActive ? "Active" : "Inactive"}
-                    </Badge>
+                    </span>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right tabular-nums bb-mono text-[#E0E0E0]">
                     {site.siteCommercialLinks.length}
                   </TableCell>
                   <TableCell>

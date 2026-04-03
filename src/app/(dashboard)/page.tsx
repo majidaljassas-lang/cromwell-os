@@ -20,8 +20,8 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+    <div className="p-4 space-y-4 bg-[#0D0D0D]">
+      <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">DASHBOARD</h1>
       <DashboardView executive={execData} operations={opsData} />
     </div>
   );

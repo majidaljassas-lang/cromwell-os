@@ -88,24 +88,24 @@ export function CustomersTable({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Customers</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Customers</h1>
+          <p className="text-xs text-[#666666] mt-1">
             Manage customer accounts and their site relationships
           </p>
         </div>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button>
+              <Button className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                 <Plus className="size-4 mr-1" />
                 Add Customer
               </Button>
             }
           />
-          <SheetContent side="right">
+          <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
             <SheetHeader>
-              <SheetTitle>Add New Customer</SheetTitle>
-              <SheetDescription>
+              <SheetTitle className="text-[#E0E0E0]">Add New Customer</SheetTitle>
+              <SheetDescription className="text-[#666666]">
                 Create a new customer record. Fill in the details below.
               </SheetDescription>
             </SheetHeader>
@@ -181,7 +181,7 @@ export function CustomersTable({
                 />
               </div>
               <SheetFooter>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                   {submitting ? "Creating..." : "Create Customer"}
                 </Button>
               </SheetFooter>
@@ -190,7 +190,7 @@ export function CustomersTable({
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -208,7 +208,7 @@ export function CustomersTable({
               <TableRow>
                 <TableCell
                   colSpan={7}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No customers found. Add your first customer to get started.
                 </TableCell>
@@ -217,20 +217,20 @@ export function CustomersTable({
               customers.map((customer) => (
                 <TableRow
                   key={customer.id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className="cursor-pointer hover:bg-[#222222]"
                 >
                   <TableCell>
                     <Link
                       href={`/customers/${customer.id}`}
-                      className="font-medium text-foreground hover:underline"
+                      className="font-medium text-[#FF6600] hover:text-[#FF9900] hover:underline"
                     >
                       {customer.name}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {customer.legalName || "—"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {customer.paymentTerms || "—"}
                   </TableCell>
                   <TableCell>
@@ -249,7 +249,7 @@ export function CustomersTable({
                       {customer.isCashCustomer ? "Yes" : "No"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right tabular-nums bb-mono text-[#E0E0E0]">
                     {customer.siteCommercialLinks.length}
                   </TableCell>
                   <TableCell>

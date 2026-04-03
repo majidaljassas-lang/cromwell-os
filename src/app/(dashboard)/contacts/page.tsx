@@ -9,7 +9,7 @@ export default async function ContactsPage() {
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 space-y-4">
       <ContactsTable contacts={contacts} />
     </div>
   );

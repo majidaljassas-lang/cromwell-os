@@ -207,7 +207,7 @@ export function SiteDetail({
       <div className="mb-6">
         <Link
           href="/sites"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
+          className="inline-flex items-center gap-1 text-sm text-[#888888] hover:text-[#FF6600] mb-3"
         >
           <ArrowLeft className="size-3.5" />
           Back to Sites
@@ -215,18 +215,18 @@ export function SiteDetail({
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight">
+              <h1 className="text-2xl font-bold tracking-tight text-[#E0E0E0]">
                 {site.siteName}
               </h1>
               {site.siteCode && (
-                <Badge variant="outline">{site.siteCode}</Badge>
+                <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 bg-[#3399FF]/10 text-[#3399FF]">{site.siteCode}</span>
               )}
-              <Badge variant={site.isActive ? "default" : "secondary"}>
+              <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${site.isActive ? "bg-[#00CC66]/10 text-[#00CC66]" : "bg-[#888888]/10 text-[#888888]"}`}>
                 {site.isActive ? "Active" : "Inactive"}
-              </Badge>
+              </span>
             </div>
             {addressParts.length > 0 && (
-              <p className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1">
+              <p className="flex items-center gap-1.5 text-sm text-[#888888] mt-1">
                 <MapPin className="size-3.5" />
                 {addressParts.join(", ")}
               </p>
@@ -252,7 +252,7 @@ export function SiteDetail({
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-4">
-          <div className="rounded-lg border bg-background p-6 max-w-2xl">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-6 max-w-2xl">
             {editing ? (
               <form onSubmit={handleSiteUpdate} className="space-y-4">
                 <div className="space-y-1.5">
@@ -323,7 +323,7 @@ export function SiteDetail({
                   />
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <Button type="submit" disabled={saving}>
+                  <Button type="submit" disabled={saving} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                     <Check className="size-4 mr-1" />
                     {saving ? "Saving..." : "Save"}
                   </Button>
@@ -331,6 +331,7 @@ export function SiteDetail({
                     type="button"
                     variant="outline"
                     onClick={() => setEditing(false)}
+                    className="bg-[#222222] text-[#E0E0E0] border border-[#333333] hover:bg-[#2A2A2A]"
                   >
                     <X className="size-4 mr-1" />
                     Cancel
@@ -340,51 +341,52 @@ export function SiteDetail({
             ) : (
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-medium">Site Information</h2>
+                  <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Site Information</h2>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setEditing(true)}
+                    className="bg-[#222222] text-[#E0E0E0] border border-[#333333] hover:bg-[#2A2A2A]"
                   >
                     <Pencil className="size-3.5 mr-1" />
                     Edit
                   </Button>
                 </div>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm text-[#E0E0E0]">
                   <div>
-                    <dt className="text-muted-foreground">Site Name</dt>
+                    <dt className="text-[#888888]">Site Name</dt>
                     <dd className="font-medium">{site.siteName}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Site Code</dt>
+                    <dt className="text-[#888888]">Site Code</dt>
                     <dd className="font-medium">{site.siteCode || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Address Line 1</dt>
+                    <dt className="text-[#888888]">Address Line 1</dt>
                     <dd className="font-medium">
                       {site.addressLine1 || "—"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Address Line 2</dt>
+                    <dt className="text-[#888888]">Address Line 2</dt>
                     <dd className="font-medium">
                       {site.addressLine2 || "—"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">City</dt>
+                    <dt className="text-[#888888]">City</dt>
                     <dd className="font-medium">{site.city || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Postcode</dt>
+                    <dt className="text-[#888888]">Postcode</dt>
                     <dd className="font-medium">{site.postcode || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Country</dt>
+                    <dt className="text-[#888888]">Country</dt>
                     <dd className="font-medium">{site.country || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Status</dt>
+                    <dt className="text-[#888888]">Status</dt>
                     <dd>
                       <Badge
                         variant={site.isActive ? "default" : "secondary"}
@@ -395,7 +397,7 @@ export function SiteDetail({
                   </div>
                   {site.notes && (
                     <div className="col-span-2">
-                      <dt className="text-muted-foreground">Notes</dt>
+                      <dt className="text-[#888888]">Notes</dt>
                       <dd className="font-medium whitespace-pre-wrap">
                         {site.notes}
                       </dd>
@@ -410,20 +412,20 @@ export function SiteDetail({
         {/* Commercial Links Tab */}
         <TabsContent value="commercial-links" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Commercial Links</h2>
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Commercial Links</h2>
             <Sheet open={linkOpen} onOpenChange={setLinkOpen}>
               <SheetTrigger
                 render={
-                  <Button size="sm">
+                  <Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                     <Plus className="size-4 mr-1" />
                     Add Commercial Link
                   </Button>
                 }
               />
-              <SheetContent side="right">
+              <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
                 <SheetHeader>
-                  <SheetTitle>Add Commercial Link</SheetTitle>
-                  <SheetDescription>
+                  <SheetTitle className="text-[#E0E0E0]">Add Commercial Link</SheetTitle>
+                  <SheetDescription className="text-[#666666]">
                     Link a customer to this site with a commercial role.
                   </SheetDescription>
                 </SheetHeader>
@@ -484,6 +486,7 @@ export function SiteDetail({
                     <Button
                       type="submit"
                       disabled={linkSubmitting || !selectedCustomerId}
+                      className="bg-[#FF6600] text-black hover:bg-[#FF9900]"
                     >
                       {linkSubmitting ? "Adding..." : "Add Link"}
                     </Button>
@@ -493,7 +496,7 @@ export function SiteDetail({
             </Sheet>
           </div>
 
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -509,7 +512,7 @@ export function SiteDetail({
                   <TableRow>
                     <TableCell
                       colSpan={5}
-                      className="text-center py-8 text-muted-foreground"
+                      className="text-center py-8 text-[#888888]"
                     >
                       No commercial links. Add one to connect a customer to
                       this site.
@@ -560,10 +563,10 @@ export function SiteDetail({
         {/* Contacts Tab */}
         <TabsContent value="contacts" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Site Contacts</h2>
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Site Contacts</h2>
           </div>
 
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -580,7 +583,7 @@ export function SiteDetail({
                   <TableRow>
                     <TableCell
                       colSpan={6}
-                      className="text-center py-8 text-muted-foreground"
+                      className="text-center py-8 text-[#888888]"
                     >
                       No contacts linked to this site.
                     </TableCell>
@@ -591,16 +594,16 @@ export function SiteDetail({
                       <TableCell className="font-medium">
                         {link.contact.fullName}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {link.roleOnSite || "—"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {link.contact.phone || "—"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {link.contact.email || "—"}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {link.customer?.name || "—"}
                       </TableCell>
                       <TableCell>
@@ -619,10 +622,10 @@ export function SiteDetail({
         {/* Tickets Tab */}
         <TabsContent value="tickets" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Tickets</h2>
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Tickets</h2>
           </div>
 
-          <div className="rounded-lg border bg-background">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -638,18 +641,18 @@ export function SiteDetail({
                   <TableRow>
                     <TableCell
                       colSpan={5}
-                      className="text-center py-8 text-muted-foreground"
+                      className="text-center py-8 text-[#888888]"
                     >
                       No tickets on this site.
                     </TableCell>
                   </TableRow>
                 ) : (
                   site.tickets.map((ticket) => (
-                    <TableRow key={ticket.id} className="cursor-pointer hover:bg-muted/50">
+                    <TableRow key={ticket.id} className="cursor-pointer hover:bg-[#222222]">
                       <TableCell>
                         <Link
                           href={`/tickets/${ticket.id}`}
-                          className="font-medium hover:underline"
+                          className="font-medium text-[#FF6600] hover:text-[#FF9900] hover:underline"
                         >
                           {ticket.title}
                         </Link>
@@ -668,10 +671,10 @@ export function SiteDetail({
                           {ticket.status.replace(/_/g, " ")}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-[#888888]">
                         {ticket.payingCustomer.name}
                       </TableCell>
-                      <TableCell className="text-muted-foreground tabular-nums">
+                      <TableCell className="text-[#888888] tabular-nums">
                         {new Date(ticket.createdAt).toLocaleDateString(
                           "en-GB"
                         )}

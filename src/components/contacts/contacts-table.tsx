@@ -76,24 +76,24 @@ export function ContactsTable({ contacts }: { contacts: Contact[] }) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Contacts</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Contacts</h1>
+          <p className="text-xs text-[#666666] mt-1">
             Manage contacts across sites and customers
           </p>
         </div>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
-              <Button>
+              <Button className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                 <Plus className="size-4 mr-1" />
                 Add Contact
               </Button>
             }
           />
-          <SheetContent side="right">
+          <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
             <SheetHeader>
-              <SheetTitle>Add New Contact</SheetTitle>
-              <SheetDescription>
+              <SheetTitle className="text-[#E0E0E0]">Add New Contact</SheetTitle>
+              <SheetDescription className="text-[#666666]">
                 Create a new contact record.
               </SheetDescription>
             </SheetHeader>
@@ -136,7 +136,7 @@ export function ContactsTable({ contacts }: { contacts: Contact[] }) {
                 />
               </div>
               <SheetFooter>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                   {submitting ? "Creating..." : "Create Contact"}
                 </Button>
               </SheetFooter>
@@ -145,7 +145,7 @@ export function ContactsTable({ contacts }: { contacts: Contact[] }) {
         </Sheet>
       </div>
 
-      <div className="rounded-lg border bg-background">
+      <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -160,7 +160,7 @@ export function ContactsTable({ contacts }: { contacts: Contact[] }) {
               <TableRow>
                 <TableCell
                   colSpan={4}
-                  className="text-center py-8 text-muted-foreground"
+                  className="text-center py-8 text-[#888888]"
                 >
                   No contacts found. Add your first contact to get started.
                 </TableCell>
@@ -171,18 +171,16 @@ export function ContactsTable({ contacts }: { contacts: Contact[] }) {
                   <TableCell className="font-medium">
                     {contact.fullName}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {contact.phone || "\u2014"}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[#888888]">
                     {contact.email || "\u2014"}
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={contact.isActive ? "default" : "outline"}
-                    >
+                    <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${contact.isActive ? "bg-[#00CC66]/10 text-[#00CC66]" : "bg-[#888888]/10 text-[#888888]"}`}>
                       {contact.isActive ? "Active" : "Inactive"}
-                    </Badge>
+                    </span>
                   </TableCell>
                 </TableRow>
               ))

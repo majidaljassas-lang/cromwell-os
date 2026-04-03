@@ -9,8 +9,8 @@ export default async function CashSalesPage() {
     prisma.ticket.findMany({ select: { id: true, title: true }, orderBy: { title: "asc" } }),
   ]);
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Cash Sales</h1>
+    <div className="p-4 space-y-4">
+      <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">CASH SALES</h1>
       <CashSalesView cashSales={JSON.parse(JSON.stringify(cashSales))} tickets={JSON.parse(JSON.stringify(tickets))} />
     </div>
   );

@@ -65,69 +65,61 @@ export function DashboardView({
   executive: ExecutiveData | null;
   operations: OperationsData | null;
 }) {
-  const iconClass = "size-5 text-muted-foreground";
-
   const kpiCards: KpiCardDef[] = executive
     ? [
         {
           label: "Ready to Invoice",
           value: money(executive.readyToInvoice),
-          tint: "bg-green-50 border-green-200",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/invoices",
-          icon: <DollarSign className={iconClass} />,
+          icon: <DollarSign className="size-5 text-[#FF6600]" />,
         },
         {
           label: "Stuck Revenue",
           value: money(executive.stuckRevenue),
-          tint: "bg-red-50 border-red-200",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/recovery",
-          icon: <AlertTriangle className={iconClass} />,
+          icon: <AlertTriangle className="size-5 text-[#FF3333]" />,
         },
         {
           label: "Active PO Remaining",
           value: money(executive.activePORemaining),
-          tint: "bg-blue-50 border-blue-200",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/po-register",
-          icon: <FileBarChart className={iconClass} />,
+          icon: <FileBarChart className="size-5 text-[#3399FF]" />,
         },
         {
           label: "Gross Profit This Month",
           value: money(executive.grossProfitThisMonth),
-          tint: "bg-green-50 border-green-200",
-          icon: <TrendingUp className={iconClass} />,
+          tint: "bg-[#1A1A1A] border-[#333333]",
+          icon: <TrendingUp className="size-5 text-[#00CC66]" />,
         },
         {
           label: "Absorbed Cost This Month",
           value: money(executive.absorbedCostThisMonth),
-          tint: "bg-amber-50 border-amber-200",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/procurement",
-          icon: <ArrowDownCircle className={iconClass} />,
+          icon: <ArrowDownCircle className="size-5 text-[#FF9900]" />,
         },
         {
           label: "Cash Sales This Month",
           value: money(executive.cashSalesThisMonth),
-          tint: "bg-slate-50",
-          icon: <Banknote className={iconClass} />,
+          tint: "bg-[#1A1A1A] border-[#333333]",
+          icon: <Banknote className="size-5 text-[#FF6600]" />,
         },
         {
           label: "Open Recovery Cases",
           value: String(executive.openRecoveryCases ?? "\u2014"),
-          tint:
-            (executive.openRecoveryCases ?? 0) > 0
-              ? "bg-red-50 border-red-200"
-              : "bg-slate-50",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/recovery",
-          icon: <Clock className={iconClass} />,
+          icon: <Clock className={`size-5 ${(executive.openRecoveryCases ?? 0) > 0 ? "text-[#FF3333]" : "text-[#FF6600]"}`} />,
         },
         {
           label: "Unallocated Cost Value",
           value: money(executive.unallocatedCostValue),
-          tint:
-            Number(executive.unallocatedCostValue?.toString() ?? 0) > 0
-              ? "bg-red-50 border-red-200"
-              : "bg-slate-50",
+          tint: "bg-[#1A1A1A] border-[#333333]",
           href: "/procurement",
-          icon: <AlertCircle className={iconClass} />,
+          icon: <AlertCircle className={`size-5 ${Number(executive.unallocatedCostValue?.toString() ?? 0) > 0 ? "text-[#FF3333]" : "text-[#FF6600]"}`} />,
         },
       ]
     : [];
@@ -146,29 +138,29 @@ export function DashboardView({
     : [];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Executive KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {kpiCards.map((card) => {
           const inner = (
             <Card
               key={card.label}
-              className={`border ${card.tint} transition-shadow hover:shadow-md`}
+              className={`border ${card.tint} rounded-none shadow-none`}
             >
               <CardContent className="pt-4 pb-4">
                 <div className="flex items-center gap-2 mb-1">
                   {card.icon}
-                  <p className="text-xs font-medium text-muted-foreground">
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#888888]">
                     {card.label}
                   </p>
                 </div>
-                <p className="text-2xl font-bold tabular-nums">{card.value}</p>
+                <p className="text-xl font-bold bb-mono text-[#E0E0E0]">{card.value}</p>
               </CardContent>
             </Card>
           );
           if (card.href) {
             return (
-              <a key={card.label} href={card.href} className="block">
+              <a key={card.label} href={card.href} className="block hover:bg-[#222222] transition-colors">
                 {inner}
               </a>
             );
@@ -180,28 +172,28 @@ export function DashboardView({
       {/* Operations Alert Grid */}
       {alertCards.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold mb-3">Operations</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-[#888888] mb-3 bb-mono">Operations</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {alertCards.map((card) => {
               const active = card.count > 0;
               return (
                 <Card
                   key={card.label}
-                  className={`border-l-4 ${
-                    active ? "border-l-amber-400" : "border-l-gray-200"
+                  className={`border-l-4 rounded-none shadow-none bg-[#1A1A1A] border-[#333333] ${
+                    active ? "border-l-[#FF9900]" : "border-l-[#333333]"
                   }`}
                 >
                   <CardContent className="pt-3 pb-3">
                     <p
-                      className={`text-xs font-medium ${
-                        active ? "text-foreground" : "text-muted-foreground"
+                      className={`text-[10px] font-medium uppercase tracking-widest ${
+                        active ? "text-[#E0E0E0]" : "text-[#666666]"
                       }`}
                     >
                       {card.label}
                     </p>
                     <p
-                      className={`text-2xl font-bold tabular-nums ${
-                        active ? "text-foreground" : "text-muted-foreground"
+                      className={`text-xl font-bold bb-mono ${
+                        active ? "text-[#E0E0E0]" : "text-[#666666]"
                       }`}
                     >
                       {card.count}
@@ -215,8 +207,8 @@ export function DashboardView({
       )}
 
       {!executive && !operations && (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
+        <Card className="rounded-none shadow-none bg-[#1A1A1A] border-[#333333]">
+          <CardContent className="py-12 text-center text-[#888888]">
             Unable to load dashboard data. Please check the API routes are
             running.
           </CardContent>

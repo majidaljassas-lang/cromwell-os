@@ -25,8 +25,8 @@ export default async function SitePacksPage() {
   ]);
 
   return (
-    <div className="p-8 space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Site Packs</h1>
+    <div className="p-4 space-y-4">
+      <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">SITE PACKS</h1>
       <SitePacksView sitePacks={sitePacks as any} sites={sites} />
     </div>
   );

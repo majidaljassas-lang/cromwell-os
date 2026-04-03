@@ -48,7 +48,7 @@ export default async function PORegisterPage() {
   ]);
 
   return (
-    <div className="p-8">
+    <div className="p-4 space-y-4">
       <PORegisterView
         customerPOs={customerPOs as any}
         customers={customers as any}

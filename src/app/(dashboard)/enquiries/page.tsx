@@ -15,7 +15,7 @@ export default async function EnquiriesPage() {
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 space-y-4">
       <EnquiriesTable enquiries={enquiries} />
     </div>
   );
