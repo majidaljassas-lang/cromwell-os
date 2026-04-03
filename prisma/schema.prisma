@@ -1624,3 +1624,49 @@ model ReconstructionBatch {
   @@unique([monthYear])
   @@index([status])
 }
+
+// ─── RFQ EXTRACTION ─────────────────────────────────────────────────────────
+
+model ExtractionBatch {
+  id            String   @id @default(uuid())
+  ticketId      String?
+  enquiryId     String?
+  sourceText    String
+  status        String   @default("DRAFT")
+  extractedAt   DateTime @default(now())
+  reviewedAt    DateTime?
+  reviewedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  candidates ExtractedLineCandidate[]
+
+  @@index([ticketId])
+  @@index([enquiryId])
+  @@index([status])
+}
+
+model ExtractedLineCandidate {
+  id                String   @id @default(uuid())
+  batchId           String
+  rawText           String
+  extractedQty      Decimal? @db.Decimal(14, 4)
+  extractedUnit     String?
+  extractedProduct  String?
+  extractedSize     String?
+  extractedSpec     String?
+  suggestedLineType String?
+  confidence        Decimal? @db.Decimal(5, 2)
+  status            String   @default("PENDING")
+  groupLabel        String?
+  mergedIntoId      String?
+  resultTicketLineId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  batch ExtractionBatch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@index([status])
+  @@index([groupLabel])
+}

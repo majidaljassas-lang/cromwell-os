@@ -44,6 +44,7 @@ import Link from "next/link";
 import { SalesBundlesPanel } from "@/components/sales-bundles/sales-bundles-panel";
 import { QuotePanel } from "@/components/quotes/quote-panel";
 import { TicketProcurementTab } from "@/components/procurement/ticket-procurement-tab";
+import { RfqExploder } from "@/components/tickets/rfq-exploder";
 import { TicketPOTab } from "@/components/po-register/ticket-po-tab";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
 
@@ -607,6 +608,7 @@ export function TicketDetail({
           <TabsTrigger value="lines">
             Lines ({ticket.lines.length})
           </TabsTrigger>
+          <TabsTrigger value="rfq">RFQ Extract</TabsTrigger>
           <TabsTrigger value="evidence">
             Evidence ({ticket.evidenceFragments.length})
           </TabsTrigger>
@@ -929,6 +931,15 @@ export function TicketDetail({
               )}
             </SheetContent>
           </Sheet>
+        </TabsContent>
+
+        {/* ── RFQ EXTRACTION TAB ────────────────────────────────────── */}
+        <TabsContent value="rfq" className="mt-4">
+          <RfqExploder
+            ticketId={ticket.id}
+            payingCustomerId={ticket.payingCustomer.id}
+            sourceText={ticket.description || ""}
+          />
         </TabsContent>
 
         {/* ── EVIDENCE TAB ─────────────────────────────────────────── */}
