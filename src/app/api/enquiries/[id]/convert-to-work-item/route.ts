@@ -7,7 +7,7 @@ export async function POST(
   const { id: enquiryId } = await params;
   try {
     const body = await request.json();
-    const { mode, notes } = body;
+    const { mode, notes, customerId, createTicket } = body;
 
     if (!mode) {
       return Response.json(
@@ -18,51 +18,107 @@ export async function POST(
 
     const enquiry = await prisma.enquiry.findUnique({
       where: { id: enquiryId },
-      include: { workItems: { select: { id: true, status: true } } },
+      include: { workItems: { select: { id: true, status: true, customerId: true } } },
     });
 
     if (!enquiry) {
       return Response.json({ error: "Enquiry not found" }, { status: 404 });
     }
 
-    // Backward compatibility: if work item already exists from pre-fix convert,
-    // heal the enquiry status and return the existing work item
+    // Step 1: Get or create work item
+    let workItemId: string;
+    let workItemCustomerId: string | null;
+
     if (enquiry.workItems.length > 0) {
+      // Work item already exists — use it
+      workItemId = enquiry.workItems[0].id;
+      workItemCustomerId = enquiry.workItems[0].customerId;
+
+      // Heal enquiry status if stuck
       if (enquiry.status === "OPEN") {
         await prisma.enquiry.update({
           where: { id: enquiryId },
           data: { status: "READY_TO_CONVERT" },
         });
       }
-      return Response.json(enquiry.workItems[0], { status: 200 });
-    }
-
-    // Transaction: create work item AND update enquiry status
-    const [workItem] = await prisma.$transaction([
-      prisma.inquiryWorkItem.create({
+    } else {
+      // Create new work item
+      const workItem = await prisma.inquiryWorkItem.create({
         data: {
           enquiryId,
           parentJobId: enquiry.parentJobId,
           siteId: enquiry.suggestedSiteId,
           siteCommercialLinkId: enquiry.suggestedSiteCommercialLinkId,
-          customerId: enquiry.suggestedCustomerId,
+          customerId: customerId || enquiry.suggestedCustomerId,
           requestedByContactId: enquiry.sourceContactId,
           mode: mode as "DIRECT_ORDER" | "PRICING_FIRST" | "SPEC_DRIVEN" | "COMPETITIVE_BID" | "RECOVERY" | "CASH_SALE" | "LABOUR_ONLY" | "PROJECT_WORK" | "NON_SITE",
           status: "OPEN",
           notes,
         },
-      }),
-      prisma.enquiry.update({
+      });
+
+      await prisma.enquiry.update({
         where: { id: enquiryId },
         data: { status: "READY_TO_CONVERT" },
-      }),
-    ]);
+      });
 
-    return Response.json(workItem, { status: 201 });
+      workItemId = workItem.id;
+      workItemCustomerId = workItem.customerId;
+    }
+
+    // Step 2: If createTicket requested, convert work item → ticket
+    if (createTicket) {
+      const resolvedCustomerId = customerId || workItemCustomerId;
+
+      if (!resolvedCustomerId) {
+        return Response.json({
+          workItemId,
+          needsCustomer: true,
+          error: "Customer required to create ticket. Pass customerId in the request.",
+        }, { status: 422 });
+      }
+
+      // Update work item with customer if it was missing
+      if (!workItemCustomerId && resolvedCustomerId) {
+        await prisma.inquiryWorkItem.update({
+          where: { id: workItemId },
+          data: { customerId: resolvedCustomerId },
+        });
+      }
+
+      const [ticket] = await prisma.$transaction([
+        prisma.ticket.create({
+          data: {
+            parentJobId: enquiry.parentJobId,
+            siteId: enquiry.suggestedSiteId,
+            siteCommercialLinkId: enquiry.suggestedSiteCommercialLinkId,
+            payingCustomerId: resolvedCustomerId,
+            requestedByContactId: enquiry.sourceContactId,
+            title: enquiry.subjectOrLabel || enquiry.rawText.slice(0, 80),
+            description: enquiry.rawText,
+            ticketMode: mode as "DIRECT_ORDER" | "PRICING_FIRST" | "SPEC_DRIVEN" | "COMPETITIVE_BID" | "RECOVERY" | "CASH_SALE" | "LABOUR_ONLY" | "PROJECT_WORK" | "NON_SITE",
+            status: "CAPTURED",
+          },
+        }),
+        prisma.inquiryWorkItem.update({
+          where: { id: workItemId },
+          data: { status: "CONVERTED" },
+        }),
+        prisma.enquiry.update({
+          where: { id: enquiryId },
+          data: { status: "CONVERTED" },
+        }),
+      ]);
+
+      return Response.json({ workItemId, ticket, converted: true }, { status: 201 });
+    }
+
+    // If not creating ticket, just return the work item
+    return Response.json({ workItemId, converted: false }, { status: 201 });
   } catch (error) {
-    console.error("Failed to convert enquiry to work item:", error);
+    console.error("Failed to convert enquiry:", error);
     return Response.json(
-      { error: "Failed to convert enquiry to work item" },
+      { error: "Failed to convert enquiry" },
       { status: 500 }
     );
   }

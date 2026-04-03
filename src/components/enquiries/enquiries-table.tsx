@@ -112,8 +112,10 @@ function statusColor(status: string): "default" | "secondary" | "outline" | "des
 
 export function EnquiriesTable({
   enquiries,
+  customers = [],
 }: {
   enquiries: EnquiryRow[];
+  customers?: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -163,9 +165,14 @@ export function EnquiriesTable({
   }
 
   const [convertError, setConvertError] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
   async function handleConvert() {
     if (!convertingEnquiryId) return;
+    if (!selectedCustomerId) {
+      setConvertError("Select a customer before converting");
+      return;
+    }
     setConverting(true);
     setConvertError(null);
 
@@ -175,17 +182,29 @@ export function EnquiriesTable({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: selectedMode }),
+          body: JSON.stringify({
+            mode: selectedMode,
+            customerId: selectedCustomerId,
+            createTicket: true,
+          }),
         }
       );
 
-      if (res.ok) {
+      const data = await res.json();
+
+      if (res.ok && data.converted) {
         setConvertDialogOpen(false);
         setConvertingEnquiryId(null);
-        router.refresh();
-      } else {
-        const data = await res.json();
+        setSelectedCustomerId("");
+        router.push(`/tickets/${data.ticket.id}`);
+      } else if (data.needsCustomer) {
+        setConvertError("Customer is required to create a ticket");
+      } else if (!res.ok) {
         setConvertError(data.error || `Failed with status ${res.status}`);
+      } else {
+        // Work item created but no ticket — refresh to show updated state
+        setConvertDialogOpen(false);
+        router.refresh();
       }
     } catch (err) {
       setConvertError(err instanceof Error ? err.message : "Network error");
@@ -300,19 +319,36 @@ export function EnquiriesTable({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <Label>Ticket Mode</Label>
-            <Select value={selectedMode} onValueChange={(v) => setSelectedMode(v ?? "DIRECT_ORDER")}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select mode" />
-              </SelectTrigger>
-              <SelectContent>
-                {TICKET_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m.replace(/_/g, " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1.5">
+              <Label>Customer *</Label>
+              <Select value={selectedCustomerId} onValueChange={(v) => setSelectedCustomerId(v ?? "")}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select customer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {customers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Ticket Mode</Label>
+              <Select value={selectedMode} onValueChange={(v) => setSelectedMode(v ?? "DIRECT_ORDER")}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TICKET_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m.replace(/_/g, " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           {convertError && (
             <div className="text-[#FF3333] text-xs border border-[#FF3333]/30 bg-[#FF3333]/10 px-3 py-2">
@@ -394,17 +430,15 @@ export function EnquiriesTable({
                         setConvertingEnquiryId(enq.id);
                         setConvertDialogOpen(true);
                       }}
-                      disabled={enq.workItems.length > 0 && enq.status !== "OPEN"}
+                      disabled={enq.status === "CONVERTED"}
                       title={
-                        enq.workItems.length > 0 && enq.status !== "OPEN"
-                          ? "Already converted"
-                          : enq.workItems.length > 0 && enq.status === "OPEN"
-                          ? "Fix: update status for existing work item"
-                          : "Convert to Work Item"
+                        enq.status === "CONVERTED"
+                          ? "Already converted to ticket"
+                          : "Convert to Ticket"
                       }
                     >
                       <ArrowRightCircle className="size-4 mr-1" />
-                      {enq.workItems.length > 0 && enq.status === "OPEN" ? "Fix" : "Convert"}
+                      {enq.status === "CONVERTED" ? "Done" : "Convert"}
                     </Button>
                   </TableCell>
                 </TableRow>
