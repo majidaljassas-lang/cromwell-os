@@ -71,93 +71,60 @@ export default async function TicketDetailPage({
     orderBy: { name: "asc" },
   });
 
-  // Fetch procurement data, customer POs, evidence packs, and sales invoices for this ticket
-  const [procurementOrders, costAllocations, absorbedCostAllocations, allSuppliers, customerPOs, evidencePacks, salesInvoices] =
-    await Promise.all([
-      prisma.procurementOrder.findMany({
-        where: { ticketId: id },
-        include: {
-          supplier: true,
-          lines: {
-            include: { ticketLine: true },
-          },
-        },
-        orderBy: { issuedAt: "desc" },
-      }),
-      prisma.costAllocation.findMany({
-        where: { ticketLine: { ticketId: id } },
-        include: {
-          ticketLine: true,
-          supplierBillLine: {
-            include: { supplierBill: true },
-          },
-          supplier: true,
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.absorbedCostAllocation.findMany({
-        where: { ticketId: id },
-        include: {
-          supplierBillLine: true,
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.supplier.findMany({ orderBy: { name: "asc" } }),
-      prisma.customerPO.findMany({
-        where: { ticketId: id },
-        include: {
-          customer: true,
-          site: true,
-          lines: true,
-          labourDrawdowns: {
-            include: { plumberContact: true },
-            orderBy: { workDate: "desc" },
-          },
-          materialsDrawdowns: {
-            include: { ticketLine: true },
-            orderBy: { drawdownDate: "desc" },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.evidencePack.findMany({
-        where: { ticketId: id },
-        include: {
-          items: {
-            include: {
-              evidenceFragment: true,
-              event: true,
-            },
-            orderBy: { sortOrder: "asc" },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.salesInvoice.findMany({
-        where: { ticketId: id },
-        include: {
-          lines: true,
-          customer: true,
-          poAllocations: true,
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+  // Fetch additional data sequentially to avoid connection exhaustion on Prisma dev server
+  const procurementOrders = await prisma.procurementOrder.findMany({
+    where: { ticketId: id },
+    include: { supplier: true, lines: { include: { ticketLine: true } } },
+    orderBy: { issuedAt: "desc" },
+  });
+  const costAllocations = await prisma.costAllocation.findMany({
+    where: { ticketLine: { ticketId: id } },
+    include: { ticketLine: true, supplierBillLine: { include: { supplierBill: true } }, supplier: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const absorbedCostAllocations = await prisma.absorbedCostAllocation.findMany({
+    where: { ticketId: id },
+    include: { supplierBillLine: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const allSuppliers = await prisma.supplier.findMany({ orderBy: { name: "asc" } });
+  const customerPOs = await prisma.customerPO.findMany({
+    where: { ticketId: id },
+    include: {
+      customer: true, site: true, lines: true,
+      labourDrawdowns: { include: { plumberContact: true }, orderBy: { workDate: "desc" } },
+      materialsDrawdowns: { include: { ticketLine: true }, orderBy: { drawdownDate: "desc" } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const evidencePacks = await prisma.evidencePack.findMany({
+    where: { ticketId: id },
+    include: { items: { include: { evidenceFragment: true, event: true }, orderBy: { sortOrder: "asc" } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const salesInvoices = await prisma.salesInvoice.findMany({
+    where: { ticketId: id },
+    include: { lines: true, customer: true, poAllocations: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // Serialize to plain objects — Prisma Decimal/Date objects can't pass to client components
+  const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
     <div className="p-8">
       <TicketDetail
-        ticket={ticket}
-        salesBundles={salesBundles as any}
-        quotes={quotes as any}
-        customers={customers as any}
-        procurementOrders={procurementOrders as any}
-        costAllocations={costAllocations as any}
-        absorbedCostAllocations={absorbedCostAllocations as any}
-        suppliers={allSuppliers as any}
-        customerPOs={customerPOs as any}
-        evidencePacks={evidencePacks as any}
-        salesInvoices={salesInvoices as any}
+        ticket={s(ticket)}
+        salesBundles={s(salesBundles)}
+        quotes={s(quotes)}
+        customers={s(customers)}
+        procurementOrders={s(procurementOrders)}
+        costAllocations={s(costAllocations)}
+        absorbedCostAllocations={s(absorbedCostAllocations)}
+        suppliers={s(allSuppliers)}
+        customerPOs={s(customerPOs)}
+        evidencePacks={s(evidencePacks)}
+        salesInvoices={s(salesInvoices)}
       />
     </div>
   );
