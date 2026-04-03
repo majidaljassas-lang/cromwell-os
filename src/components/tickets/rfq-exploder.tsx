@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Wand2, Check, X, Merge, ChevronDown, ChevronRight } from "lucide-react";
+import { Wand2, Check, X, Merge, ChevronDown, ChevronRight, Package, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,50 @@ type Batch = {
   candidates: Candidate[];
 };
 
+// ─── Auto-group rules ───────────────────────────────────────────────────────
+
+const GROUP_RULES: Array<{ label: string; color: string; test: (text: string) => boolean }> = [
+  {
+    label: "Copper Pipe Package",
+    color: "#FF6600",
+    test: (t) => /\bcopp?er\s*(pipe|tube)\b/i.test(t) || /\blength\s*\d+mm\s*copp?er/i.test(t) || (/\bcopp?er\b/i.test(t) && /\blength\b/i.test(t)),
+  },
+  {
+    label: "MLCP Pipe & Press Fittings",
+    color: "#3399FF",
+    test: (t) => /\bmlcp\b/i.test(t) || (/\bpress\b/i.test(t) && !/\bcopp?er\b/i.test(t)),
+  },
+  {
+    label: "Valves / Controls",
+    color: "#00CC66",
+    test: (t) => /\bvalve\b/i.test(t) || /\blbv\b/i.test(t) || /\bmotorised\b/i.test(t) || /\bbypass\b/i.test(t),
+  },
+  {
+    label: "Cooper Press Fittings",
+    color: "#9966FF",
+    test: (t) => /\bcopp?er\s*press\b/i.test(t) || (/\bpress\b/i.test(t) && /\bcopp?er\b/i.test(t)),
+  },
+  {
+    label: "Taps & Mixers",
+    color: "#FF9900",
+    test: (t) => /\btap\b/i.test(t) || /\bmixer\b/i.test(t) || /\bshower\b/i.test(t) || /\bbasin\b/i.test(t) || /\bbath\b/i.test(t),
+  },
+  {
+    label: "Fixing / Sundries",
+    color: "#888888",
+    test: (t) => /\bclip\b/i.test(t) || /\bband\b/i.test(t) || /\bfix/i.test(t) || /\bptfe\b/i.test(t) || /\bflux\b/i.test(t) || /\bsolder\b/i.test(t) || /\bcement\b/i.test(t) || /\btape\b/i.test(t) || /\bsilicone\b/i.test(t) || /\bring\b/i.test(t),
+  },
+];
+
+function suggestGroup(text: string): { label: string; color: string } | null {
+  for (const rule of GROUP_RULES) {
+    if (rule.test(text)) return rule;
+  }
+  return null;
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
 export function RfqExploder({
   ticketId,
   payingCustomerId,
@@ -52,14 +96,43 @@ export function RfqExploder({
   const [showMerge, setShowMerge] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showSource, setShowSource] = useState(false);
+  const [filterGroup, setFilterGroup] = useState<string | null>(null);
 
-  // Auto-extract on mount if source text exists and no batch
+  // Auto-extract on mount
   useEffect(() => {
     if (customText.trim() && !batch && !extracting) {
       handleExtract();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Computed: candidates with suggested groups
+  const enriched = useMemo(() => {
+    if (!batch?.candidates) return [];
+    return batch.candidates.map((c) => ({
+      ...c,
+      suggestedGroup: suggestGroup(c.extractedProduct || c.rawText),
+    }));
+  }, [batch?.candidates]);
+
+  const pending = enriched.filter((c) => c.status === "PENDING");
+  const accepted = enriched.filter((c) => c.status === "ACCEPTED");
+  const discarded = enriched.filter((c) => c.status === "DISCARDED");
+
+  // Group counts for pending
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = { Ungrouped: 0 };
+    for (const c of pending) {
+      const label = c.suggestedGroup?.label || "Ungrouped";
+      counts[label] = (counts[label] || 0) + 1;
+    }
+    return counts;
+  }, [pending]);
+
+  // Filtered pending
+  const filteredPending = filterGroup
+    ? pending.filter((c) => (c.suggestedGroup?.label || "Ungrouped") === filterGroup)
+    : pending;
 
   async function handleExtract() {
     if (!customText.trim()) return;
@@ -70,10 +143,7 @@ export function RfqExploder({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceText: customText, ticketId }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setBatch(data);
-      }
+      if (res.ok) setBatch(await res.json());
     } finally {
       setExtracting(false);
     }
@@ -88,10 +158,7 @@ export function RfqExploder({
         body: JSON.stringify({ candidateIds: [candidateId], ticketId, payingCustomerId }),
       });
       if (res.ok) {
-        setBatch((prev) => prev ? {
-          ...prev,
-          candidates: prev.candidates.map((c) => c.id === candidateId ? { ...c, status: "ACCEPTED" } : c),
-        } : null);
+        setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => c.id === candidateId ? { ...c, status: "ACCEPTED" } : c) } : null);
         router.refresh();
       }
     } finally {
@@ -105,14 +172,11 @@ export function RfqExploder({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "DISCARDED" }),
     });
-    setBatch((prev) => prev ? {
-      ...prev,
-      candidates: prev.candidates.map((c) => c.id === candidateId ? { ...c, status: "DISCARDED" } : c),
-    } : null);
+    setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => c.id === candidateId ? { ...c, status: "DISCARDED" } : c) } : null);
   }
 
   async function handleMergeSelected() {
-    if (selected.size < 2 || !mergeLabel.trim()) return;
+    if (selected.size < 1 || !mergeLabel.trim()) return;
     setProcessing(true);
     try {
       const res = await fetch("/api/rfq/candidates/accept", {
@@ -128,12 +192,7 @@ export function RfqExploder({
         }),
       });
       if (res.ok) {
-        setBatch((prev) => prev ? {
-          ...prev,
-          candidates: prev.candidates.map((c) =>
-            selected.has(c.id) ? { ...c, status: "ACCEPTED", groupLabel: mergeLabel } : c
-          ),
-        } : null);
+        setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => selected.has(c.id) ? { ...c, status: "ACCEPTED", groupLabel: mergeLabel } : c) } : null);
         setSelected(new Set());
         setMergeLabel("");
         setMergeNotes("");
@@ -146,43 +205,47 @@ export function RfqExploder({
   }
 
   function toggleSelect(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
 
-  const pending = batch?.candidates.filter((c) => c.status === "PENDING") || [];
-  const accepted = batch?.candidates.filter((c) => c.status === "ACCEPTED") || [];
-  const discarded = batch?.candidates.filter((c) => c.status === "DISCARDED") || [];
+  function selectAllInGroup(groupLabel: string) {
+    const ids = pending.filter((c) => (c.suggestedGroup?.label || "Ungrouped") === groupLabel).map((c) => c.id);
+    setSelected(new Set(ids));
+    setMergeLabel(groupLabel === "Ungrouped" ? "" : groupLabel);
+  }
 
-  const confColor = (conf: number) =>
-    conf >= 70 ? "text-[#00CC66]" : conf >= 50 ? "text-[#FF9900]" : "text-[#FF3333]";
+  function selectAll() {
+    setSelected(new Set(filteredPending.map((c) => c.id)));
+  }
+
+  function selectNone() {
+    setSelected(new Set());
+  }
+
+  // ─── Quick merge: select all in group and immediately show merge dialog
+  function quickMerge(groupLabel: string) {
+    selectAllInGroup(groupLabel);
+    setMergeLabel(groupLabel);
+    setShowMerge(true);
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">RFQ EXTRACTION</h2>
         {batch && (
-          <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${
-            batch.status === "COMPLETED" ? "text-[#00CC66] bg-[#00CC66]/10" :
-            "text-[#FF9900] bg-[#FF9900]/10"
-          }`}>{batch.status}</Badge>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[#888888] bb-mono">{pending.length} pending / {accepted.length} accepted / {discarded.length} discarded</span>
+            <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${batch.status === "COMPLETED" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{batch.status}</Badge>
+          </div>
         )}
       </div>
 
-      {/* Source text input */}
+      {/* Source text input (before extraction) */}
       {!batch && (
         <div className="space-y-2">
           <Label>RFQ Source Text</Label>
-          <Textarea
-            value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
-            rows={6}
-            className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs bb-mono"
-            placeholder="Paste the enquiry / email / RFQ text here..."
-          />
+          <Textarea value={customText} onChange={(e) => setCustomText(e.target.value)} rows={6} className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs bb-mono" placeholder="Paste the enquiry / email / RFQ text here..." />
           <Button onClick={handleExtract} disabled={extracting || !customText.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
             <Wand2 className="size-4 mr-1" />
             {extracting ? "Extracting..." : "Explode RFQ"}
@@ -190,108 +253,193 @@ export function RfqExploder({
         </div>
       )}
 
-      {/* Source text toggle (after extraction) */}
+      {/* Source toggle */}
       {batch && (
-        <button onClick={() => setShowSource(!showSource)} className="flex items-center gap-1 text-xs text-[#888888] hover:text-[#E0E0E0]">
+        <button onClick={() => setShowSource(!showSource)} className="flex items-center gap-1 text-xs text-[#666666] hover:text-[#E0E0E0]">
           {showSource ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           Raw Source ({batch.sourceText.length} chars)
         </button>
       )}
       {showSource && batch && (
-        <div className="bg-[#151515] border border-[#333333] p-3 text-xs text-[#888888] bb-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
-          {batch.sourceText}
-        </div>
+        <div className="bg-[#151515] border border-[#333333] p-3 text-[10px] text-[#888888] bb-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{batch.sourceText}</div>
       )}
 
-      {/* Pending candidates */}
+      {/* ── QUICK GROUP BUTTONS ──────────────────────────────────────── */}
       {pending.length > 0 && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-widest text-[#888888]">
-              PENDING ({pending.length})
-            </span>
-            {selected.size >= 2 && (
-              <Button size="sm" onClick={() => setShowMerge(!showMerge)} className="bg-[#3399FF] text-black hover:bg-[#2277DD]">
-                <Merge className="size-3 mr-1" />
-                Merge {selected.size} Selected
-              </Button>
-            )}
+          <div className="text-[10px] uppercase tracking-widest text-[#888888]">QUICK GROUP — click to select all + merge</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(groupCounts).filter(([, count]) => count > 0).map(([label, count]) => {
+              const rule = GROUP_RULES.find((r) => r.label === label);
+              return (
+                <button
+                  key={label}
+                  onClick={() => quickMerge(label)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium hover:bg-[#222222] transition-colors"
+                  style={{ borderColor: rule?.color || "#555", color: rule?.color || "#888" }}
+                >
+                  <Package className="size-3" />
+                  {label}
+                  <span className="text-[9px] bb-mono opacity-70">({count})</span>
+                </button>
+              );
+            })}
           </div>
-
-          {/* Merge dialog */}
-          {showMerge && selected.size >= 2 && (
-            <div className="border border-[#3399FF]/30 bg-[#3399FF]/5 p-3 space-y-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Package Name</Label>
-                <Input value={mergeLabel} onChange={(e) => setMergeLabel(e.target.value)} placeholder="e.g. Copper Pipe Package" className="bg-[#222222] border-[#333333]" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Internal Notes (optional)</Label>
-                <Input value={mergeNotes} onChange={(e) => setMergeNotes(e.target.value)} placeholder="Additional notes" className="bg-[#222222] border-[#333333]" />
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleMergeSelected} disabled={!mergeLabel.trim() || processing} className="bg-[#3399FF] text-black">
-                  {processing ? "Merging..." : "Create Grouped Line"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => { setShowMerge(false); setSelected(new Set()); }} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Candidate rows */}
-          {pending.map((c) => (
-            <div key={c.id} className={`border ${selected.has(c.id) ? "border-[#3399FF]" : "border-[#333333]"} bg-[#1A1A1A] p-3 flex items-start gap-3`}>
-              <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 accent-[#3399FF]" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-[#E0E0E0]">{c.extractedProduct || c.rawText}</span>
-                  {c.extractedSize && <Badge variant="outline" className="text-[9px]">{c.extractedSize}</Badge>}
-                  <Badge variant="outline" className="text-[9px]">{c.suggestedLineType}</Badge>
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-[10px] text-[#888888] bb-mono">
-                  {c.extractedQty && <span>Qty: {Number(c.extractedQty)}</span>}
-                  <span>UOM: {c.extractedUnit || "EA"}</span>
-                  <span className={confColor(Number(c.confidence || 0))}>Conf: {Number(c.confidence || 0)}%</span>
-                  <span className="text-[#666666] truncate max-w-[200px]">Raw: {c.rawText}</span>
-                </div>
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <Button size="sm" variant="ghost" onClick={() => handleAcceptSingle(c.id)} disabled={processing} title="Accept as individual line">
-                  <Check className="size-3.5 text-[#00CC66]" />
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => handleDiscard(c.id)} title="Discard">
-                  <X className="size-3.5 text-[#FF3333]" />
-                </Button>
-              </div>
-            </div>
-          ))}
         </div>
       )}
 
-      {/* Accepted */}
+      {/* ── FILTER BAR ───────────────────────────────────────────────── */}
+      {pending.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Filter className="size-3 text-[#888888]" />
+          <button onClick={() => setFilterGroup(null)} className={`text-[10px] px-2 py-0.5 ${!filterGroup ? "bg-[#FF6600] text-black" : "text-[#888888] hover:text-[#E0E0E0]"}`}>All ({pending.length})</button>
+          {Object.entries(groupCounts).filter(([, count]) => count > 0).map(([label, count]) => {
+            const rule = GROUP_RULES.find((r) => r.label === label);
+            return (
+              <button key={label} onClick={() => setFilterGroup(label)} className={`text-[10px] px-2 py-0.5 ${filterGroup === label ? "text-black" : "hover:text-[#E0E0E0]"}`} style={filterGroup === label ? { backgroundColor: rule?.color || "#555" } : { color: rule?.color || "#888" }}>
+                {label.split(" ")[0]} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── ACTION BAR (when selected) ───────────────────────────────── */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 border border-[#3399FF]/30 bg-[#3399FF]/5 px-3 py-2">
+          <span className="text-xs text-[#3399FF] bb-mono font-bold">{selected.size} selected</span>
+          <Button size="sm" onClick={() => setShowMerge(true)} className="bg-[#3399FF] text-black hover:bg-[#2277DD]">
+            <Merge className="size-3 mr-1" /> Merge into Package
+          </Button>
+          <Button size="sm" variant="outline" onClick={selectNone} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">Clear</Button>
+          {filterGroup && filterGroup !== "Ungrouped" && (
+            <Button size="sm" variant="outline" onClick={() => selectAllInGroup(filterGroup)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">Select all in {filterGroup.split(" ")[0]}</Button>
+          )}
+        </div>
+      )}
+
+      {/* ── MERGE DIALOG ─────────────────────────────────────────────── */}
+      {showMerge && selected.size > 0 && (
+        <div className="border border-[#3399FF]/30 bg-[#3399FF]/5 p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-widest text-[#3399FF] font-bold">CREATE PACKAGE FROM {selected.size} ITEMS</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Package Name *</Label>
+              <Input value={mergeLabel} onChange={(e) => setMergeLabel(e.target.value)} placeholder="e.g. Copper Pipe Package" className="bg-[#222222] border-[#333333]" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Input value={mergeNotes} onChange={(e) => setMergeNotes(e.target.value)} placeholder="Additional notes" className="bg-[#222222] border-[#333333]" />
+            </div>
+          </div>
+          <div className="text-[10px] text-[#888888] bb-mono max-h-20 overflow-y-auto border border-[#333333] p-2 bg-[#151515]">
+            {[...selected].map((id) => {
+              const c = pending.find((p) => p.id === id);
+              if (!c) return null;
+              return <div key={id}>{c.extractedQty ? `${Number(c.extractedQty)}x ` : ""}{c.extractedProduct || c.rawText}</div>;
+            })}
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleMergeSelected} disabled={!mergeLabel.trim() || processing} className="bg-[#3399FF] text-black">
+              {processing ? "Creating..." : `Create "${mergeLabel}" (${selected.size} items)`}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowMerge(false); }} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PENDING CANDIDATES TABLE ─────────────────────────────────── */}
+      {filteredPending.length > 0 && (
+        <div className="border border-[#333333] bg-[#1A1A1A]">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#333333]">
+            <div className="flex items-center gap-2">
+              <input type="checkbox" checked={selected.size === filteredPending.length && filteredPending.length > 0} onChange={() => selected.size === filteredPending.length ? selectNone() : selectAll()} className="accent-[#3399FF]" />
+              <span className="text-[10px] text-[#888888] uppercase tracking-widest">Pending ({filteredPending.length})</span>
+            </div>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="text-[9px] uppercase tracking-widest text-[#666666] border-b border-[#333333]">
+                <th className="w-8 px-2 py-1.5"></th>
+                <th className="text-right px-2 py-1.5 w-12">Qty</th>
+                <th className="text-left px-2 py-1.5">Description</th>
+                <th className="text-left px-2 py-1.5 w-16">Size</th>
+                <th className="text-left px-2 py-1.5 w-24">Suggested Group</th>
+                <th className="text-right px-2 py-1.5 w-12">Conf</th>
+                <th className="px-2 py-1.5 w-20">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPending.map((c) => (
+                <tr key={c.id} className={`border-b border-[#2A2A2A] hover:bg-[#222222] ${selected.has(c.id) ? "bg-[#3399FF]/5" : ""}`}>
+                  <td className="px-2 py-1.5">
+                    <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} className="accent-[#3399FF]" />
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs bb-mono text-[#E0E0E0]">
+                    {c.extractedQty ? Number(c.extractedQty) : "?"}
+                  </td>
+                  <td className="px-2 py-1.5 text-xs text-[#E0E0E0]">
+                    {c.extractedProduct || c.rawText}
+                  </td>
+                  <td className="px-2 py-1.5 text-[10px] text-[#888888] bb-mono">
+                    {c.extractedSize || "—"}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    {c.suggestedGroup && (
+                      <button onClick={() => quickMerge(c.suggestedGroup!.label)} className="text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-wider" style={{ color: c.suggestedGroup.color, backgroundColor: c.suggestedGroup.color + "15" }}>
+                        {c.suggestedGroup.label.split(" ")[0]}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-[10px] bb-mono">
+                    <span className={Number(c.confidence) >= 80 ? "text-[#00CC66]" : Number(c.confidence) >= 60 ? "text-[#FF9900]" : "text-[#FF3333]"}>
+                      {Number(c.confidence)}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex gap-0.5">
+                      <button onClick={() => handleAcceptSingle(c.id)} disabled={processing} className="p-1 hover:bg-[#00CC66]/10" title="Accept as line">
+                        <Check className="size-3 text-[#00CC66]" />
+                      </button>
+                      <button onClick={() => handleDiscard(c.id)} className="p-1 hover:bg-[#FF3333]/10" title="Discard">
+                        <X className="size-3 text-[#FF3333]" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── ACCEPTED ─────────────────────────────────────────────────── */}
       {accepted.length > 0 && (
         <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-widest text-[#00CC66]">ACCEPTED ({accepted.length})</span>
+          <span className="text-[10px] uppercase tracking-widest text-[#00CC66] font-bold">ACCEPTED ({accepted.length})</span>
           {accepted.map((c) => (
-            <div key={c.id} className="border border-[#00CC66]/20 bg-[#00CC66]/5 px-3 py-2 text-xs text-[#E0E0E0] flex items-center gap-2">
-              <Check className="size-3 text-[#00CC66]" />
-              <span>{c.extractedProduct || c.rawText}</span>
-              {c.groupLabel && <Badge className="text-[8px] bg-[#3399FF]/10 text-[#3399FF]">{c.groupLabel}</Badge>}
+            <div key={c.id} className="border border-[#00CC66]/20 bg-[#00CC66]/5 px-3 py-1.5 text-xs text-[#E0E0E0] flex items-center gap-2">
+              <Check className="size-3 text-[#00CC66] shrink-0" />
+              <span>{c.extractedQty ? `${Number(c.extractedQty)}x ` : ""}{c.extractedProduct || c.rawText}</span>
+              {c.groupLabel && <Badge className="text-[8px] bg-[#3399FF]/10 text-[#3399FF] shrink-0">{c.groupLabel}</Badge>}
             </div>
           ))}
         </div>
       )}
 
-      {/* Discarded */}
+      {/* ── DISCARDED ────────────────────────────────────────────────── */}
       {discarded.length > 0 && (
         <div className="space-y-1">
           <span className="text-[10px] uppercase tracking-widest text-[#666666]">DISCARDED ({discarded.length})</span>
           {discarded.map((c) => (
-            <div key={c.id} className="px-3 py-1 text-[10px] text-[#666666] line-through">{c.extractedProduct || c.rawText}</div>
+            <div key={c.id} className="px-3 py-0.5 text-[10px] text-[#555555] line-through">{c.extractedProduct || c.rawText}</div>
           ))}
         </div>
+      )}
+
+      {/* Empty state */}
+      {batch && pending.length === 0 && accepted.length === 0 && (
+        <div className="text-center py-8 text-[#888888] text-sm">No candidates extracted. Try pasting different RFQ text.</div>
       )}
     </div>
   );
