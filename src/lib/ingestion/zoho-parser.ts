@@ -51,6 +51,8 @@ export interface ParsedZohoBill {
   customerRef: string | null;
   sourceAttachmentRef?: string;
   lines: ParsedZohoBillLine[];
+  isMixedSite: boolean;
+  detectedSites: string[];
 }
 
 export interface ParsedZohoBillLine {
@@ -69,11 +71,19 @@ export interface ParsedZohoBillLine {
 }
 
 export function parseZohoBill(payload: ZohoBillPayload): ParsedZohoBill {
-  // Extract site reference from custom fields or notes
-  const siteRef = extractSiteRef(payload);
+  const rawSiteRef = extractSiteRef(payload);
   const customerRef = payload.vendor_name || null;
 
-  const lines = payload.line_items.map((line) => parseZohoBillLine(line, siteRef, customerRef));
+  // Detect mixed-site references — split on / , & + "and" "mixed"
+  const siteRefs = splitSiteReferences(rawSiteRef);
+  const isMixedSite = siteRefs.length > 1;
+
+  // If mixed site, each line gets the raw compound text (not a resolved single site)
+  // The bill-level siteRef stays as the raw compound for the SourceSiteMatch
+  // Per-line site assignment must happen during review, not auto-resolution
+  const lines = payload.line_items.map((line) =>
+    parseZohoBillLine(line, rawSiteRef, customerRef)
+  );
 
   return {
     externalId: payload.bill_id || payload.bill_number,
@@ -82,10 +92,21 @@ export function parseZohoBill(payload: ZohoBillPayload): ParsedZohoBill {
     supplierExternalId: payload.vendor_id,
     billDate: payload.date,
     totalCost: payload.sub_total ?? payload.total,
-    siteRef,
+    siteRef: rawSiteRef,
     customerRef,
     lines,
+    isMixedSite,
+    detectedSites: siteRefs,
   };
+}
+
+const MIXED_SITE_SEPARATORS = /\s*[\/&+]\s*|\s+and\s+|\s+mixed\s*/i;
+
+function splitSiteReferences(rawSiteRef: string | null): string[] {
+  if (!rawSiteRef) return [];
+  const parts = rawSiteRef.split(MIXED_SITE_SEPARATORS).map((s) => s.trim()).filter((s) => s.length > 0);
+  // "mixed" at the end is a flag, not a site name — remove it
+  return parts.filter((p) => p.toLowerCase() !== "mixed");
 }
 
 function parseZohoBillLine(

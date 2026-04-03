@@ -11,9 +11,9 @@ export type AmountBasis = "EX_VAT" | "INC_VAT" | "UNKNOWN";
 export interface VatNormalisedAmount {
   sourceAmountBasis: AmountBasis;
   rawAmount: number;
-  amountExVat: number;
-  vatAmount: number;
-  amountIncVat: number;
+  amountExVat: number | null;
+  vatAmount: number | null;
+  amountIncVat: number | null;
   vatRate: number;
   vatStatus: VatStatus;
 }
@@ -56,13 +56,19 @@ export function normaliseVat(
     };
   }
 
-  // UNKNOWN basis — DO NOT assume raw is ex-VAT. Leave null until resolved.
+  // UNKNOWN basis:
+  // - rawAmount preserved (source truth)
+  // - amountExVat = NULL (not 0, not rawAmount)
+  // - vatAmount = NULL
+  // - amountIncVat = NULL
+  // - line will be BLOCKED_VAT_UNKNOWN in commercialiser
+  // - excluded from deal sheet, bundles, invoices, margin calcs, readiness totals
   return {
     sourceAmountBasis: "UNKNOWN",
     rawAmount,
-    amountExVat: 0, // null-equivalent — must not be used for margin calculations
-    vatAmount: 0,
-    amountIncVat: 0, // null-equivalent — basis unknown
+    amountExVat: null,
+    vatAmount: null,
+    amountIncVat: null,
     vatRate: rate,
     vatStatus: "UNKNOWN",
   };

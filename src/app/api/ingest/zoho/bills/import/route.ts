@@ -81,8 +81,35 @@ export async function POST(request: Request) {
           })),
         });
 
-        // Create SourceSiteMatch if site text found
-        if (parsed.siteRef) {
+        // Create SourceSiteMatch entries — one per detected site if mixed
+        if (parsed.isMixedSite && parsed.detectedSites.length > 1) {
+          // Mixed site bill: create one match per detected site fragment
+          // ALL set to UNRESOLVED — operator must assign lines to sites manually
+          for (const siteFragment of parsed.detectedSites) {
+            await prisma.sourceSiteMatch.create({
+              data: {
+                sourceSystem: "ZOHO_BOOKS",
+                sourceRecordId: parsed.externalId,
+                ingestionEventId: event.id,
+                rawSiteText: siteFragment,
+                matchMethod: "MIXED_SITE_SPLIT",
+                reviewStatus: "UNRESOLVED",
+              },
+            });
+          }
+          // Also create a match for the full compound text — flagged as MIXED
+          await prisma.sourceSiteMatch.create({
+            data: {
+              sourceSystem: "ZOHO_BOOKS",
+              sourceRecordId: parsed.externalId,
+              ingestionEventId: event.id,
+              rawSiteText: parsed.siteRef!,
+              matchMethod: "MIXED_SITE_COMPOUND",
+              reviewStatus: "UNRESOLVED",
+            },
+          });
+        } else if (parsed.siteRef) {
+          // Single site — normal flow
           await prisma.sourceSiteMatch.create({
             data: {
               sourceSystem: "ZOHO_BOOKS",

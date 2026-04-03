@@ -38,19 +38,26 @@ export async function PATCH(
     if (action === "confirm") {
       if (!siteId) return Response.json({ error: "siteId required for confirm" }, { status: 400 });
 
+      // Block confirmation of compound entries — must resolve individual fragments
+      if (match.matchMethod === "MIXED_SITE_COMPOUND") {
+        return Response.json({
+          error: "Cannot confirm a compound site reference. Resolve individual site fragments instead, then assign lines to sites during commercialisation.",
+        }, { status: 422 });
+      }
+
       await prisma.sourceSiteMatch.update({
         where: { id },
         data: {
           matchedSiteId: siteId,
-          matchMethod: "MANUAL_CONFIRM",
+          matchMethod: match.matchMethod === "MIXED_SITE_SPLIT" ? "MIXED_SITE_FRAGMENT_CONFIRMED" : "MANUAL_CONFIRM",
           reviewStatus: "CONFIRMED",
           reviewedBy: actor,
           reviewedAt: new Date(),
         },
       });
 
-      // Optionally create alias for future auto-matching
-      if (createAlias !== false) {
+      // Create alias only for non-compound, non-mixed entries
+      if (createAlias !== false && match.matchMethod !== "MIXED_SITE_SPLIT") {
         await prisma.siteAlias.upsert({
           where: { siteId_aliasText: { siteId, aliasText: match.rawSiteText.toLowerCase().trim() } },
           create: {
@@ -64,10 +71,12 @@ export async function PATCH(
       }
 
       // Auto-resolve other unresolved matches with same raw text
+      // BUT NOT compound entries — those must always be resolved individually
       await prisma.sourceSiteMatch.updateMany({
         where: {
           rawSiteText: { equals: match.rawSiteText, mode: "insensitive" },
           reviewStatus: "UNRESOLVED",
+          matchMethod: { notIn: ["MIXED_SITE_COMPOUND", "MIXED_SITE_SPLIT"] },
           id: { not: id },
         },
         data: {
