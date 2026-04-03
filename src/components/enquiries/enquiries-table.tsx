@@ -394,15 +394,17 @@ export function EnquiriesTable({
                         setConvertingEnquiryId(enq.id);
                         setConvertDialogOpen(true);
                       }}
-                      disabled={enq.workItems.length > 0}
+                      disabled={enq.workItems.length > 0 && enq.status !== "OPEN"}
                       title={
-                        enq.workItems.length > 0
-                          ? "Already has work items"
+                        enq.workItems.length > 0 && enq.status !== "OPEN"
+                          ? "Already converted"
+                          : enq.workItems.length > 0 && enq.status === "OPEN"
+                          ? "Fix: update status for existing work item"
                           : "Convert to Work Item"
                       }
                     >
                       <ArrowRightCircle className="size-4 mr-1" />
-                      Convert
+                      {enq.workItems.length > 0 && enq.status === "OPEN" ? "Fix" : "Convert"}
                     </Button>
                   </TableCell>
                 </TableRow>

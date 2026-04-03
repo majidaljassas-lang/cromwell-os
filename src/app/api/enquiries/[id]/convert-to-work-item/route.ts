@@ -18,10 +18,23 @@ export async function POST(
 
     const enquiry = await prisma.enquiry.findUnique({
       where: { id: enquiryId },
+      include: { workItems: { select: { id: true, status: true } } },
     });
 
     if (!enquiry) {
       return Response.json({ error: "Enquiry not found" }, { status: 404 });
+    }
+
+    // Backward compatibility: if work item already exists from pre-fix convert,
+    // heal the enquiry status and return the existing work item
+    if (enquiry.workItems.length > 0) {
+      if (enquiry.status === "OPEN") {
+        await prisma.enquiry.update({
+          where: { id: enquiryId },
+          data: { status: "READY_TO_CONVERT" },
+        });
+      }
+      return Response.json(enquiry.workItems[0], { status: 200 });
     }
 
     // Transaction: create work item AND update enquiry status
