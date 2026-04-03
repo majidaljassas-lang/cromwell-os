@@ -681,6 +681,9 @@ model TicketLine {
   payingCustomerId     String
   requestedByContactId String?
   supplierStrategyType String?
+  supplierId           String?
+  supplierName         String?
+  supplierReference    String?
   status               TicketLineStatus @default(CAPTURED)
   expectedCostUnit     Decimal?       @db.Decimal(14, 4)
   expectedCostTotal    Decimal?       @db.Decimal(14, 2)
@@ -706,6 +709,7 @@ model TicketLine {
   siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
   payingCustomer     Customer            @relation("TicketLinePayingCustomer", fields: [payingCustomerId], references: [id])
   requestedByContact Contact?            @relation("TicketLineRequestedBy", fields: [requestedByContactId], references: [id])
+  supplier           Supplier?           @relation("TicketLineSupplier", fields: [supplierId], references: [id])
 
   supplierOptions       SupplierOption[]
   dealSheetSnapshots    DealSheetLineSnapshot[]
@@ -910,6 +914,7 @@ model Supplier {
   returns           Return[]
   creditNotes       CreditNote[]
   costAllocations   CostAllocation[]
+  ticketLines       TicketLine[]     @relation("TicketLineSupplier")
 
   @@index([name])
 }

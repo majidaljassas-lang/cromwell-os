@@ -44,6 +44,7 @@ export async function PATCH(
       "expectedMarginTotal", "actualMarginTotal", "varianceTotal",
       "evidenceStatus", "costStatus", "salesStatus",
       "supplierStrategyType", "siteId", "siteCommercialLinkId",
+      "supplierId", "supplierName", "supplierReference",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) allowed[f] = body[f];

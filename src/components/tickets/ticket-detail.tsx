@@ -84,6 +84,9 @@ type TicketLine = {
   expectedMarginTotal: Decimal;
   actualMarginTotal: Decimal;
   varianceTotal: Decimal;
+  supplierId: string | null;
+  supplierName: string | null;
+  supplierReference: string | null;
   status: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
@@ -396,6 +399,16 @@ export function TicketDetail({
     if (suggSale !== "") body.suggestedSaleUnit = Number(suggSale);
     const actSale = fd.get("edit-actualSaleUnit") as string;
     if (actSale !== "") body.actualSaleUnit = Number(actSale);
+    const suppId = fd.get("edit-supplierId") as string;
+    body.supplierId = suppId || null;
+    if (suppId) {
+      const sup = suppliers.find((s) => s.id === suppId);
+      body.supplierName = sup?.name || null;
+    } else {
+      body.supplierName = null;
+    }
+    const supRef = fd.get("edit-supplierReference") as string;
+    body.supplierReference = supRef || null;
 
     try {
       const res = await fetch(`/api/ticket-lines/${editingLine.id}`, {
@@ -821,6 +834,24 @@ export function TicketDetail({
                           <option key={u} value={u}>{u}</option>
                         ))}
                       </select>
+                    </div>
+                  </div>
+                  <div className="border-t border-[#333333] pt-3 mt-1">
+                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">SUPPLIER (INTERNAL)</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Supplier</Label>
+                        <select name="edit-supplierId" defaultValue={editingLine.supplierId || ""} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                          <option value="">— None —</option>
+                          {suppliers.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-supplierReference">Supplier Ref</Label>
+                        <Input id="edit-supplierReference" name="edit-supplierReference" defaultValue={editingLine.supplierReference || ""} placeholder="PO / ref number" />
+                      </div>
                     </div>
                   </div>
                   <div className="border-t border-[#333333] pt-3 mt-1">
