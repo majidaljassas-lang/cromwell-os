@@ -1776,3 +1776,86 @@ model BacklogMessage {
   @@index([duplicateGroupId])
   @@index([timestampConfidence])
 }
+
+// ─── BACKLOG RECONCILIATION ─────────────────────────────────────────────────
+
+model BacklogTicketLine {
+  id                    String   @id @default(uuid())
+  caseId                String
+  sourceMessageId       String?
+  date                  DateTime
+  sender                String
+  rawText               String
+  normalizedProduct     String
+  requestedQty          Decimal  @db.Decimal(14, 4)
+  requestedUnit         String   @default("EA")
+  requestedQtyBase      Decimal? @db.Decimal(14, 4)
+  baseUnit              String?
+  notes                 String?
+  status                String   @default("UNMATCHED")
+  createdAt             DateTime @default(now())
+
+  invoiceMatches BacklogInvoiceMatch[]
+
+  @@index([caseId])
+  @@index([normalizedProduct])
+  @@index([sourceMessageId])
+}
+
+model BacklogInvoiceLine {
+  id                    String   @id @default(uuid())
+  caseId                String
+  invoiceId             String?
+  invoiceNumber         String
+  invoiceDate           DateTime
+  customer              String?
+  site                  String?
+  productDescription    String
+  normalizedProduct     String
+  qty                   Decimal  @db.Decimal(14, 4)
+  unit                  String   @default("EA")
+  qtyBase               Decimal? @db.Decimal(14, 4)
+  baseUnit              String?
+  rate                  Decimal? @db.Decimal(14, 2)
+  amount                Decimal? @db.Decimal(14, 2)
+  lineHeaderText        String?
+  isMaterialsHeader     Boolean  @default(false)
+  isBillLinked          Boolean  @default(false)
+  invoiceLineType       String   @default("MANUAL_INVOICE_LINE")
+  billingConfidence     String   @default("LOW")
+  createdAt             DateTime @default(now())
+
+  invoiceMatches BacklogInvoiceMatch[]
+
+  @@index([caseId])
+  @@index([normalizedProduct])
+  @@index([invoiceNumber])
+}
+
+model BacklogInvoiceMatch {
+  id                String   @id @default(uuid())
+  ticketLineId      String
+  invoiceLineId     String
+  matchConfidence   Decimal? @db.Decimal(5, 2)
+  matchMethod       String?
+  createdAt         DateTime @default(now())
+
+  ticketLine  BacklogTicketLine  @relation(fields: [ticketLineId], references: [id])
+  invoiceLine BacklogInvoiceLine @relation(fields: [invoiceLineId], references: [id])
+
+  @@index([ticketLineId])
+  @@index([invoiceLineId])
+}
+
+model ProductNormalization {
+  id              String   @id @default(uuid())
+  rawPattern      String
+  normalizedName  String
+  category        String?
+  conversionFactor Decimal? @db.Decimal(10, 4)
+  conversionUnit  String?
+  createdAt       DateTime @default(now())
+
+  @@unique([rawPattern])
+  @@index([normalizedName])
+}
