@@ -94,6 +94,40 @@ export function RfqExploder({
   const [mergeLabel, setMergeLabel] = useState("");
   const [mergeNotes, setMergeNotes] = useState("");
   const [showMerge, setShowMerge] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState("");
+  const [editProduct, setEditProduct] = useState("");
+  const [editSize, setEditSize] = useState("");
+
+  function startEdit(c: Candidate) {
+    setEditingId(c.id);
+    setEditQty(c.extractedQty ? String(Number(c.extractedQty)) : "");
+    setEditProduct(c.extractedProduct || c.rawText);
+    setEditSize(c.extractedSize || "");
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    await fetch(`/api/rfq/candidates/${editingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extractedQty: editQty ? Number(editQty) : null,
+        extractedProduct: editProduct,
+        extractedSize: editSize || null,
+      }),
+    });
+    setBatch((prev) => prev ? {
+      ...prev,
+      candidates: prev.candidates.map((c) => c.id === editingId ? {
+        ...c,
+        extractedQty: editQty ? Number(editQty) : null,
+        extractedProduct: editProduct,
+        extractedSize: editSize || null,
+      } : c),
+    } : null);
+    setEditingId(null);
+  }
   const [processing, setProcessing] = useState(false);
   const [showSource, setShowSource] = useState(false);
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
@@ -370,19 +404,33 @@ export function RfqExploder({
               </tr>
             </thead>
             <tbody>
-              {filteredPending.map((c) => (
-                <tr key={c.id} className={`border-b border-[#2A2A2A] hover:bg-[#222222] ${selected.has(c.id) ? "bg-[#3399FF]/5" : ""}`}>
+              {filteredPending.map((c) => {
+                const isEditing = editingId === c.id;
+                return (
+                <tr key={c.id} className={`border-b border-[#2A2A2A] hover:bg-[#222222] ${selected.has(c.id) ? "bg-[#3399FF]/5" : ""} ${isEditing ? "bg-[#FF6600]/5 border-[#FF6600]/30" : ""}`}>
                   <td className="px-2 py-1.5">
                     <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} className="accent-[#3399FF]" />
                   </td>
                   <td className="px-2 py-1.5 text-right text-xs bb-mono text-[#E0E0E0]">
-                    {c.extractedQty ? Number(c.extractedQty) : "?"}
+                    {isEditing ? (
+                      <input type="number" value={editQty} onChange={(e) => setEditQty(e.target.value)} className="w-12 h-6 text-right bg-[#222222] border border-[#FF6600] text-[#E0E0E0] text-xs px-1" autoFocus />
+                    ) : (
+                      <span className="cursor-pointer hover:text-[#FF6600]" onClick={() => startEdit(c)}>{c.extractedQty ? Number(c.extractedQty) : "?"}</span>
+                    )}
                   </td>
                   <td className="px-2 py-1.5 text-xs text-[#E0E0E0]">
-                    {c.extractedProduct || c.rawText}
+                    {isEditing ? (
+                      <input value={editProduct} onChange={(e) => setEditProduct(e.target.value)} className="w-full h-6 bg-[#222222] border border-[#FF6600] text-[#E0E0E0] text-xs px-1" />
+                    ) : (
+                      <span className="cursor-pointer hover:text-[#FF6600]" onClick={() => startEdit(c)}>{c.extractedProduct || c.rawText}</span>
+                    )}
                   </td>
                   <td className="px-2 py-1.5 text-[10px] text-[#888888] bb-mono">
-                    {c.extractedSize || "—"}
+                    {isEditing ? (
+                      <input value={editSize} onChange={(e) => setEditSize(e.target.value)} className="w-16 h-6 bg-[#222222] border border-[#FF6600] text-[#E0E0E0] text-[10px] px-1" />
+                    ) : (
+                      <span className="cursor-pointer hover:text-[#FF6600]" onClick={() => startEdit(c)}>{c.extractedSize || "—"}</span>
+                    )}
                   </td>
                   <td className="px-2 py-1.5">
                     {c.suggestedGroup && (
@@ -398,16 +446,33 @@ export function RfqExploder({
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex gap-0.5">
-                      <button onClick={() => handleAcceptSingle(c.id)} disabled={processing} className="p-1 hover:bg-[#00CC66]/10" title="Accept as line">
-                        <Check className="size-3 text-[#00CC66]" />
-                      </button>
-                      <button onClick={() => handleDiscard(c.id)} className="p-1 hover:bg-[#FF3333]/10" title="Discard">
-                        <X className="size-3 text-[#FF3333]" />
-                      </button>
+                      {isEditing ? (
+                        <>
+                          <button onClick={saveEdit} className="p-1 hover:bg-[#FF6600]/10" title="Save edit">
+                            <Check className="size-3 text-[#FF6600]" />
+                          </button>
+                          <button onClick={() => setEditingId(null)} className="p-1 hover:bg-[#333333]" title="Cancel">
+                            <X className="size-3 text-[#888888]" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(c)} className="p-1 hover:bg-[#FF6600]/10" title="Edit">
+                            <Wand2 className="size-3 text-[#FF6600]" />
+                          </button>
+                          <button onClick={() => handleAcceptSingle(c.id)} disabled={processing} className="p-1 hover:bg-[#00CC66]/10" title="Accept as line">
+                            <Check className="size-3 text-[#00CC66]" />
+                          </button>
+                          <button onClick={() => handleDiscard(c.id)} className="p-1 hover:bg-[#FF3333]/10" title="Discard">
+                            <X className="size-3 text-[#FF3333]" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
