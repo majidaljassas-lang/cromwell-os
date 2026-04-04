@@ -179,7 +179,25 @@ export function BacklogCaseView({
   const [filterType, setFilterType] = useState("ALL");
   const [filterSender, setFilterSender] = useState("");
   const [filterSource, setFilterSource] = useState("ALL");
+
+  // When source filter changes, re-fetch from server
+  async function changeSourceFilter(srcId: string) {
+    setFilterSource(srcId);
+    setLoadingMore(true);
+    const params = new URLSearchParams({ limit: String(pageSize), offset: "0" });
+    if (srcId !== "ALL") params.set("sourceId", srcId);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMessages(data.messages);
+      setTotalCount(data.totalCount);
+      setHasMore(data.hasMore);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setLoadingMore(false);
+  }
   const [filterParsed, setFilterParsed] = useState("ALL");
+  const [filterSearch, setFilterSearch] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
 
@@ -428,6 +446,7 @@ export function BacklogCaseView({
     if (filterSource !== "ALL" && m.sourceId !== filterSource) return false;
     if (filterParsed === "PARSED" && !m.parsedOk) return false;
     if (filterParsed === "UNPARSED" && m.parsedOk) return false;
+    if (filterSearch && !m.rawText.toLowerCase().includes(filterSearch.toLowerCase())) return false;
     if (filterDateFrom) {
       const msgDate = new Date(m.parsedTimestamp);
       const fromDate = new Date(filterDateFrom);
@@ -651,9 +670,9 @@ export function BacklogCaseView({
             ))}
             <span className="text-[#555555]">|</span>
             <span className="text-[9px] text-[#888888]">SRC:</span>
-            <button onClick={() => setFilterSource("ALL")} className={`text-[9px] px-2 py-0.5 ${filterSource === "ALL" ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>All</button>
+            <button onClick={() => changeSourceFilter("ALL")} className={`text-[9px] px-2 py-0.5 ${filterSource === "ALL" ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>All</button>
             {allSources.map((s) => (
-              <button key={s.id} onClick={() => setFilterSource(s.id)} className={`text-[9px] px-2 py-0.5 ${filterSource === s.id ? "bg-[#3399FF] text-black" : "text-[#888888]"}`}>{s.label.split(" ")[0]}</button>
+              <button key={s.id} onClick={() => changeSourceFilter(s.id)} className={`text-[9px] px-2 py-0.5 ${filterSource === s.id ? "bg-[#3399FF] text-black" : "text-[#888888]"}`}>{s.label.split(" ")[0]}</button>
             ))}
             <span className="text-[#555555]">|</span>
             <button onClick={() => setFilterParsed("ALL")} className={`text-[9px] px-2 py-0.5 ${filterParsed === "ALL" ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>All</button>
@@ -662,6 +681,9 @@ export function BacklogCaseView({
             <span className="text-[#555555]">|</span>
             <Input value={filterSender} onChange={(e) => setFilterSender(e.target.value)}
               placeholder="Filter by sender..." className="h-6 w-40 text-[10px] bg-[#222222] border-[#333333]" />
+            <span className="text-[#555555]">|</span>
+            <Input value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)}
+              placeholder="Search text..." className="h-6 w-48 text-[10px] bg-[#222222] border-[#333333]" />
           </div>
 
           {/* Messages */}
