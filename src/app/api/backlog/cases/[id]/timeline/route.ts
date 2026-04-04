@@ -32,8 +32,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const where: Record<string, unknown> = {
       sourceId: sourceFilter || { in: sourceIds },
     };
+    const search = searchParams.get("search");
     if (messageType && messageType !== "ALL") where.messageType = messageType;
     if (sender) where.sender = { contains: sender, mode: "insensitive" };
+    if (search) where.rawText = { contains: search, mode: "insensitive" };
     if (parsedOk === "true") where.parsedOk = true;
     if (parsedOk === "false") where.parsedOk = false;
 

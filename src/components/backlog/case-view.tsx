@@ -198,6 +198,35 @@ export function BacklogCaseView({
   }
   const [filterParsed, setFilterParsed] = useState("ALL");
   const [filterSearch, setFilterSearch] = useState("");
+  const [searchTimer, setSearchTimer] = useState<NodeJS.Timeout | null>(null);
+
+  function handleSearchChange(val: string) {
+    setFilterSearch(val);
+    if (searchTimer) clearTimeout(searchTimer);
+    if (!val.trim()) {
+      // Clear search — reload default
+      changeSourceFilter(filterSource);
+      return;
+    }
+    // Debounce 500ms then server search
+    const timer = setTimeout(() => serverSearch(val), 500);
+    setSearchTimer(timer);
+  }
+
+  async function serverSearch(query: string) {
+    setLoadingMore(true);
+    const params = new URLSearchParams({ limit: String(pageSize), offset: "0", search: query });
+    if (filterSource !== "ALL") params.set("sourceId", filterSource);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMessages(data.messages);
+      setTotalCount(data.totalCount);
+      setHasMore(data.hasMore);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setLoadingMore(false);
+  }
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
 
@@ -446,7 +475,7 @@ export function BacklogCaseView({
     if (filterSource !== "ALL" && m.sourceId !== filterSource) return false;
     if (filterParsed === "PARSED" && !m.parsedOk) return false;
     if (filterParsed === "UNPARSED" && m.parsedOk) return false;
-    if (filterSearch && !m.rawText.toLowerCase().includes(filterSearch.toLowerCase())) return false;
+    // filterSearch is handled server-side, not client-side
     if (filterDateFrom) {
       const msgDate = new Date(m.parsedTimestamp);
       const fromDate = new Date(filterDateFrom);
@@ -682,8 +711,8 @@ export function BacklogCaseView({
             <Input value={filterSender} onChange={(e) => setFilterSender(e.target.value)}
               placeholder="Filter by sender..." className="h-6 w-40 text-[10px] bg-[#222222] border-[#333333]" />
             <span className="text-[#555555]">|</span>
-            <Input value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)}
-              placeholder="Search text..." className="h-6 w-48 text-[10px] bg-[#222222] border-[#333333]" />
+            <Input value={filterSearch} onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search text..." className="h-6 w-48 text-[10px] bg-[#222222] border-[#FF6600]/50 focus:border-[#FF6600]" />
           </div>
 
           {/* Messages */}
