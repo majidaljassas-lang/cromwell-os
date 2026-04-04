@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag } from "lucide-react";
+import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -168,6 +168,55 @@ export function BacklogCaseView({
   }
 
   // Filter messages
+  async function deleteMessage(msgId: string) {
+    if (!confirm("Delete this message?")) return;
+    await fetch(`/api/backlog/messages/${msgId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function deleteSource(srcId: string, label: string) {
+    if (!confirm(`Delete source "${label}" and ALL its messages?`)) return;
+    await fetch(`/api/backlog/sources/${srcId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function editSourceLabel(srcId: string, newLabel: string) {
+    await fetch(`/api/backlog/sources/${srcId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: newLabel }),
+    });
+    router.refresh();
+  }
+
+  async function editCaseName(newName: string) {
+    await fetch(`/api/backlog/cases/${backlogCase.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName }),
+    });
+    router.refresh();
+  }
+
+  async function deleteCase() {
+    if (!confirm(`DELETE entire case "${backlogCase.name}" and ALL sources + messages? This cannot be undone.`)) return;
+    await fetch(`/api/backlog/cases/${backlogCase.id}`, { method: "DELETE" });
+    router.push("/backlog");
+  }
+
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [editingSourceLabel, setEditingSourceLabel] = useState("");
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingMsgText, setEditingMsgText] = useState("");
+
+  async function saveMessageEdit() {
+    if (!editingMsgId) return;
+    await fetch(`/api/backlog/messages/${editingMsgId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: editingMsgText }),
+    });
+    setEditingMsgId(null);
+    router.refresh();
+  }
+
   const filtered = messages.filter((m) => {
     if (filterType !== "ALL" && m.messageType !== filterType) return false;
     if (filterSender && !m.sender.toLowerCase().includes(filterSender.toLowerCase())) return false;
@@ -190,6 +239,9 @@ export function BacklogCaseView({
           {backlogCase.siteRef && <div className="text-xs text-[#888888] ml-[72px]">{backlogCase.siteRef}</div>}
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={deleteCase} className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
+            <Trash2 className="size-3.5 mr-1" />Delete Case
+          </Button>
           <Sheet open={addSourceOpen} onOpenChange={setAddSourceOpen}>
             <SheetTrigger render={<Button variant="outline" size="sm" className="bg-[#222222] border-[#333333] text-[#E0E0E0]"><Plus className="size-4 mr-1" />Add Source</Button>} />
             <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
@@ -380,6 +432,7 @@ export function BacklogCaseView({
                           {msg.messageType}
                         </button>
                       )}
+                      <button onClick={() => deleteMessage(msg.id)} className="p-0.5 hover:bg-[#FF3333]/10 ml-1" title="Delete message"><Trash2 className="size-2.5 text-[#FF3333]/50 hover:text-[#FF3333]" /></button>
                     </div>
                   </div>
                 </div>
@@ -405,7 +458,18 @@ export function BacklogCaseView({
                       <div className="text-[8px] text-[#555555] mt-0.5">{s.participantList.join(", ")}</div>
                     )}
                   </div>
-                  <Badge className={`text-[9px] ${s.status === "IMPORTED" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{s.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge className={`text-[9px] ${s.status === "IMPORTED" || s.status === "PARSED" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{s.status}</Badge>
+                    {editingSourceId === s.id ? (
+                      <div className="flex items-center gap-1">
+                        <input value={editingSourceLabel} onChange={(e) => setEditingSourceLabel(e.target.value)} className="h-6 w-32 text-xs bg-[#222222] border border-[#FF6600] text-[#E0E0E0] px-1" onKeyDown={(e) => { if (e.key === "Enter") { editSourceLabel(s.id, editingSourceLabel); setEditingSourceId(null); } }} autoFocus />
+                        <button onClick={() => { editSourceLabel(s.id, editingSourceLabel); setEditingSourceId(null); }} className="p-0.5 hover:bg-[#FF6600]/10"><Pencil className="size-3 text-[#FF6600]" /></button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditingSourceId(s.id); setEditingSourceLabel(s.label); }} className="p-0.5 hover:bg-[#FF6600]/10" title="Edit label"><Pencil className="size-3 text-[#888888]" /></button>
+                    )}
+                    <button onClick={() => deleteSource(s.id, s.label)} className="p-0.5 hover:bg-[#FF3333]/10" title="Delete source"><Trash2 className="size-3 text-[#FF3333]" /></button>
+                  </div>
                 </div>
               ))}
             </div>

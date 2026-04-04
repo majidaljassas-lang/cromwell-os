@@ -30,3 +30,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json({ error: "Failed to update message" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  try {
+    await prisma.backlogMessage.delete({ where: { id } });
+    return Response.json({ deleted: true });
+  } catch (error) {
+    return Response.json({ error: "Failed to delete message" }, { status: 500 });
+  }
+}
