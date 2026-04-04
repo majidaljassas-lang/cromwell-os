@@ -37,11 +37,11 @@ export default async function BacklogCasePage({ params }: { params: Promise<{ id
     };
   }
 
-  // Fetch first batch of timeline messages
+  // Fetch first page of timeline messages (100 max, paginated from here)
   const timelineMessages = sourceIds.length > 0 ? await prisma.backlogMessage.findMany({
     where: { sourceId: { in: sourceIds } },
     orderBy: { parsedTimestamp: "asc" },
-    take: 200,
+    take: 100,
   }) : [];
 
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));

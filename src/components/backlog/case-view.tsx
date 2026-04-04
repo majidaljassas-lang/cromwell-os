@@ -83,7 +83,60 @@ export function BacklogCaseView({
   sourceMap: Record<string, { label: string; sourceType: string }>;
 }) {
   const router = useRouter();
-  const [messages] = useState(initialMessages);
+  const [messages, setMessages] = useState(initialMessages);
+  const [totalCount, setTotalCount] = useState(stats.messageCount);
+  const [hasMore, setHasMore] = useState(initialMessages.length < stats.messageCount);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [dbTotal, setDbTotal] = useState(stats.messageCount);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    const params = new URLSearchParams({
+      limit: "100",
+      offset: String(messages.length),
+    });
+    if (filterType !== "ALL") params.set("messageType", filterType);
+    if (filterSender) params.set("sender", filterSender);
+    if (filterSource !== "ALL") params.set("sourceId", filterSource);
+    if (filterParsed !== "ALL") params.set("parsedOk", filterParsed === "PARSED" ? "true" : "false");
+
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMessages((prev) => [...prev, ...data.messages]);
+      setTotalCount(data.totalCount);
+      setHasMore(data.hasMore);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setLoadingMore(false);
+  }
+
+  async function jumpToLatest() {
+    setLoadingMore(true);
+    const lastOffset = Math.max(0, totalCount - 100);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=100&offset=${lastOffset}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMessages(data.messages);
+      setTotalCount(data.totalCount);
+      setHasMore(false);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setLoadingMore(false);
+  }
+
+  async function jumpToOldest() {
+    setLoadingMore(true);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=100&offset=0`);
+    if (res.ok) {
+      const data = await res.json();
+      setMessages(data.messages);
+      setTotalCount(data.totalCount);
+      setHasMore(data.hasMore);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setLoadingMore(false);
+  }
   const [addSourceOpen, setAddSourceOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importSourceId, setImportSourceId] = useState("");
@@ -445,6 +498,31 @@ export function BacklogCaseView({
 
         {/* TIMELINE TAB */}
         <TabsContent value="timeline" className="mt-4 space-y-3">
+          {/* Loaded count + navigation */}
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-[#888888] bb-mono">
+              Loaded <span className="text-[#E0E0E0] font-bold">{filtered.length}</span> of <span className="text-[#E0E0E0] font-bold">{totalCount}</span> messages
+              {hasMore && <span className="text-[#FF9900]"> (more available)</span>}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={jumpToOldest} className="text-[9px] px-2 py-0.5 bg-[#222222] border border-[#333333] text-[#888888] hover:text-[#E0E0E0]">⇤ Oldest</button>
+              <button onClick={jumpToLatest} className="text-[9px] px-2 py-0.5 bg-[#222222] border border-[#333333] text-[#888888] hover:text-[#E0E0E0]">Latest ⇥</button>
+            </div>
+          </div>
+
+          {/* Debug Panel */}
+          <details className="text-[9px] text-[#555555]">
+            <summary className="cursor-pointer hover:text-[#888888]">DEBUG</summary>
+            <div className="mt-1 border border-[#333333] bg-[#151515] p-2 bb-mono grid grid-cols-3 gap-2">
+              <div>DB total: <span className="text-[#E0E0E0]">{dbTotal}</span></div>
+              <div>API returned: <span className="text-[#E0E0E0]">{messages.length}</span></div>
+              <div>UI rendered: <span className="text-[#E0E0E0]">{filtered.length}</span></div>
+              <div>hasMore: <span className={hasMore ? "text-[#FF9900]" : "text-[#00CC66]"}>{String(hasMore)}</span></div>
+              <div>totalCount: <span className="text-[#E0E0E0]">{totalCount}</span></div>
+              <div>filters active: <span className="text-[#E0E0E0]">{[filterType !== "ALL", filterSender, filterSource !== "ALL", filterParsed !== "ALL"].filter(Boolean).length}</span></div>
+            </div>
+          </details>
+
           {/* Filters */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[9px] text-[#888888] uppercase tracking-widest">FILTER:</span>
@@ -528,6 +606,20 @@ export function BacklogCaseView({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Load More */}
+          {hasMore && (
+            <div className="text-center py-3">
+              <Button onClick={loadMore} disabled={loadingMore} variant="outline" className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
+                {loadingMore ? "Loading..." : `Load More (${totalCount - messages.length} remaining)`}
+              </Button>
+            </div>
+          )}
+          {!hasMore && messages.length > 0 && (
+            <div className="text-center py-2 text-[9px] text-[#555555] bb-mono">
+              All {totalCount} messages loaded
             </div>
           )}
         </TabsContent>

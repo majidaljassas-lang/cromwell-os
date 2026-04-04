@@ -185,6 +185,48 @@ function parseWaLine(line: string): WaParsed | null {
   };
 }
 
+// ─── Media Detection ────────────────────────────────────────────────────────
+
+interface MediaInfo {
+  hasMedia: boolean;
+  mediaType: string | null;
+  mediaFilename: string | null;
+  mediaNote: string | null;
+}
+
+const MEDIA_PATTERNS = [
+  { pattern: /image omitted/i, type: "image" },
+  { pattern: /<Media omitted>/i, type: "unknown" },
+  { pattern: /video omitted/i, type: "video" },
+  { pattern: /audio omitted/i, type: "audio" },
+  { pattern: /document omitted/i, type: "document" },
+  { pattern: /sticker omitted/i, type: "image" },
+  { pattern: /GIF omitted/i, type: "image" },
+  { pattern: /\bIMG[-_]\S+\.(jpg|jpeg|png|webp)/i, type: "image" },
+  { pattern: /\bVID[-_]\S+\.(mp4|mov|avi)/i, type: "video" },
+  { pattern: /\bAUD[-_]\S+\.(opus|mp3|m4a|ogg)/i, type: "audio" },
+  { pattern: /\bDOC[-_]\S+\.(pdf|doc|docx|xls|xlsx)/i, type: "document" },
+  { pattern: /\bPXL[-_]\S+\.(jpg|jpeg|png|mp4)/i, type: "image" },
+  { pattern: /\.pdf$/i, type: "document" },
+];
+
+function detectMedia(text: string): MediaInfo {
+  for (const { pattern, type } of MEDIA_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        hasMedia: true,
+        mediaType: type,
+        mediaFilename: match[0].includes(".") ? match[0] : null,
+        mediaNote: match[0],
+      };
+    }
+  }
+  return { hasMedia: false, mediaType: null, mediaFilename: null, mediaNote: null };
+}
+
+// ─── Async Parse ────────────────────────────────────────────────────────────
+
 async function startAsyncParse(sourceId: string) {
   await prisma.backlogSource.update({
     where: { id: sourceId },
@@ -213,6 +255,10 @@ async function startAsyncParse(sourceId: string) {
     parsedOk: boolean;
     isMultiline: boolean;
     lineCount: number;
+    hasMedia: boolean;
+    mediaType: string | null;
+    mediaFilename: string | null;
+    mediaNote: string | null;
   }
 
   const messages: Msg[] = [];
@@ -231,6 +277,7 @@ async function startAsyncParse(sourceId: string) {
       const rawTs = `${parsed.date}, ${parsed.time}`;
       const { ts, confidence } = parseTs(parsed.date, parsed.time);
 
+      const media = detectMedia(parsed.text);
       currentMsg = {
         startLine: i + 1,
         rawTimestampText: rawTs,
@@ -241,6 +288,7 @@ async function startAsyncParse(sourceId: string) {
         parsedOk: true,
         isMultiline: false,
         lineCount: 1,
+        ...media,
       };
     } else {
       // No timestamp — continuation of previous message (multiline)
@@ -248,8 +296,15 @@ async function startAsyncParse(sourceId: string) {
         currentMsg.rawText += "\n" + line;
         currentMsg.isMultiline = true;
         currentMsg.lineCount++;
+        // Check continuation lines for media too
+        const media = detectMedia(line);
+        if (media.hasMedia && !currentMsg.hasMedia) {
+          currentMsg.hasMedia = media.hasMedia;
+          currentMsg.mediaType = media.mediaType;
+          currentMsg.mediaFilename = media.mediaFilename;
+          currentMsg.mediaNote = media.mediaNote;
+        }
       } else {
-        // Very first line has no timestamp — store as unparsed
         currentMsg = {
           startLine: i + 1,
           rawTimestampText: null,
@@ -260,6 +315,7 @@ async function startAsyncParse(sourceId: string) {
           parsedOk: false,
           isMultiline: false,
           lineCount: 1,
+          hasMedia: false, mediaType: null, mediaFilename: null, mediaNote: null,
         };
       }
     }
@@ -276,26 +332,25 @@ async function startAsyncParse(sourceId: string) {
 
   if (currentMsg) messages.push(currentMsg);
 
-  // Debug logging
+  // Section 3: Validation output
   const tsMatches = messages.filter((m) => m.parsedOk).length;
   const multilineCount = messages.filter((m) => m.isMultiline).length;
   const unparsedCount2 = messages.filter((m) => !m.parsedOk).length;
+  const mediaCount = messages.filter((m) => m.hasMedia).length;
+  const timestamps = messages.filter((m) => m.parsedOk).map((m) => m.parsedTimestamp).sort((a, b) => a.getTime() - b.getTime());
+  const minTs = timestamps[0];
+  const maxTs = timestamps[timestamps.length - 1];
+
   console.log(`[BACKLOG PARSE] Source ${sourceId}:`);
-  console.log(`  Raw lines:       ${rawLines.length}`);
-  console.log(`  Total messages:  ${messages.length}`);
-  console.log(`  Parsed OK:       ${tsMatches}`);
-  console.log(`  Multiline:       ${multilineCount}`);
-  console.log(`  Unparsed:        ${unparsedCount2}`);
-  console.log(`  First 3 messages:`);
+  console.log(`  Total raw lines:      ${rawLines.length}`);
+  console.log(`  Total parsed msgs:    ${messages.length}`);
+  console.log(`  Multiline messages:   ${multilineCount}`);
+  console.log(`  Media messages:       ${mediaCount}`);
+  console.log(`  Unparsed messages:    ${unparsedCount2}`);
+  console.log(`  Min timestamp:        ${minTs?.toISOString() || "N/A"}`);
+  console.log(`  Max timestamp:        ${maxTs?.toISOString() || "N/A"}`);
   for (const m of messages.slice(0, 3)) {
-    console.log(`    line ${m.startLine} | ${m.sender} | ts="${m.rawTimestampText}" | "${m.rawText.slice(0, 80)}" | multi:${m.isMultiline} lines:${m.lineCount}`);
-  }
-  // Also log first raw line for format detection
-  const firstNonEmpty = rawLines.find((l) => l.trim());
-  if (firstNonEmpty) {
-    console.log(`  First raw line: "${firstNonEmpty.slice(0, 120)}"`);
-    console.log(`  Bracket match: ${!!firstNonEmpty.match(TS_BRACKET)}`);
-    console.log(`  Dash match:    ${!!firstNonEmpty.match(TS_DASH)}`);
+    console.log(`    line ${m.startLine} | ${m.sender} | ts="${m.rawTimestampText}" | "${m.rawText.slice(0, 80)}" | multi:${m.isMultiline} media:${m.hasMedia}`);
   }
 
   // Delete existing messages then bulk create
@@ -318,15 +373,16 @@ async function startAsyncParse(sourceId: string) {
         lineCount: m.lineCount,
         messageType: "UNCLASSIFIED",
         relationType: "NONE",
+        hasMedia: m.hasMedia,
+        mediaType: m.mediaType,
+        mediaFilename: m.mediaFilename,
+        mediaNote: m.mediaNote,
       })),
     });
   }
 
-  const unparsedCount = messages.filter((m) => !m.parsedOk).length;
-  const parsedCount = messages.filter((m) => m.parsedOk).length;
   const senders = [...new Set(messages.filter((m) => m.parsedOk).map((m) => m.sender))];
-  const timestamps = messages.filter((m) => m.parsedOk).map((m) => m.parsedTimestamp).sort((a, b) => a.getTime() - b.getTime());
-  const parseStatus = unparsedCount === 0 ? "COMPLETE" : parsedCount === 0 ? "FAILED" : "PARTIAL";
+  const parseStatus = unparsedCount2 === 0 ? "COMPLETE" : tsMatches === 0 ? "FAILED" : "PARTIAL";
 
   await prisma.backlogSource.update({
     where: { id: sourceId },
@@ -337,10 +393,10 @@ async function startAsyncParse(sourceId: string) {
       parsedAt: new Date(),
       importCompletedAt: new Date(),
       messageCount: messages.length,
-      unparsedLines: unparsedCount,
+      unparsedLines: unparsedCount2,
       participantList: senders,
-      dateFrom: timestamps[0] || undefined,
-      dateTo: timestamps[timestamps.length - 1] || undefined,
+      dateFrom: minTs || undefined,
+      dateTo: maxTs || undefined,
     },
   });
 }

@@ -1756,6 +1756,10 @@ model BacklogMessage {
   messageType           String   @default("UNCLASSIFIED")
   hasAttachment         Boolean  @default(false)
   attachmentRef         String?
+  hasMedia              Boolean  @default(false)
+  mediaType             String?
+  mediaFilename         String?
+  mediaNote             String?
   relationType          String   @default("NONE")
   relatedMessageId      String?
   duplicateGroupId      String?
