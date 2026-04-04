@@ -103,7 +103,11 @@ export function BacklogCaseView({
     const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?${params}`);
     if (res.ok) {
       const data = await res.json();
-      setMessages((prev) => [...prev, ...data.messages]);
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newMsgs = data.messages.filter((m: Message) => !existingIds.has(m.id));
+        return [...prev, ...newMsgs];
+      });
       setTotalCount(data.totalCount);
       setHasMore(data.hasMore);
       setDbTotal(data.stats?.dbTotal || data.totalCount);
