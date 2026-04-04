@@ -811,13 +811,15 @@ export function BacklogCaseView({
                         {!msg.parsedOk && <Badge className="text-[7px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">UNPARSED</Badge>}
                         {msg.isMultiline && <Badge className="text-[7px] px-1 py-0 text-[#00CCCC] bg-[#00CCCC]/10">{msg.lineCount}L</Badge>}
                         {msg.relationType !== "NONE" && (
-                          <Badge className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">
-                            {msg.relationType.replace(/_/g, " ")}
-                            {msg.relatedMessageId && (() => {
-                              const linked = messages.find((m) => m.id === msg.relatedMessageId);
-                              return linked ? ` → ${linked.sender}: ${linked.rawText.slice(0, 30)}...` : "";
-                            })()}
-                          </Badge>
+                          <button onClick={(e) => { e.stopPropagation(); setLinkingMsgId(msg.id); setLinkingRelType(msg.relationType); }} className="cursor-pointer">
+                            <Badge className={`text-[7px] px-1 py-0 ${msg.relatedMessageId ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10 animate-pulse"}`}>
+                              {msg.relationType.replace(/_/g, " ")}
+                              {msg.relatedMessageId ? (() => {
+                                const linked = messages.find((m) => m.id === msg.relatedMessageId);
+                                return linked ? ` → ${linked.sender}: ${linked.rawText.slice(0, 30)}...` : " → (linked)";
+                              })() : " ⚠ click to link"}
+                            </Badge>
+                          </button>
                         )}
                       </div>
                       <div className="text-xs text-[#E0E0E0] whitespace-pre-wrap">{msg.rawText}</div>
