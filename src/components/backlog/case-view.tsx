@@ -116,8 +116,81 @@ export function BacklogCaseView({
   }
 
   const [parsePreview, setParsePreview] = useState<{ totalLines: number; parsedOk: number; unparsed: number; parseStatus: string } | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<{
+    filename: string; bytes: number; lineCount: number; status: string;
+    parseStatus: string; parseProgressPct: number; messageCount: number; unparsedLines: number;
+  } | null>(null);
 
-  // STEP 1: Store raw text
+  async function handleFileUpload() {
+    if (!importSourceId || !importFile) return;
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("file", importFile);
+
+    const res = await fetch(`/api/backlog/sources/${importSourceId}/upload`, {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      setUploadStatus({
+        filename: data.filename, bytes: data.bytes, lineCount: data.lineCount,
+        status: data.status, parseStatus: data.parseStatus, parseProgressPct: 0,
+        messageCount: 0, unparsedLines: 0,
+      });
+      // Start polling
+      pollImportStatus(importSourceId);
+    }
+    setSubmitting(false);
+  }
+
+  async function handlePasteUpload() {
+    if (!importSourceId || !importText.trim()) return;
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("rawText", importText);
+
+    const res = await fetch(`/api/backlog/sources/${importSourceId}/upload`, {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      setUploadStatus({
+        filename: "pasted-text.txt", bytes: data.bytes, lineCount: data.lineCount,
+        status: data.status, parseStatus: data.parseStatus, parseProgressPct: 0,
+        messageCount: 0, unparsedLines: 0,
+      });
+      pollImportStatus(importSourceId);
+    }
+    setSubmitting(false);
+  }
+
+  function pollImportStatus(srcId: string) {
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/backlog/sources/${srcId}/upload`);
+      if (!res.ok) { clearInterval(interval); return; }
+      const data = await res.json();
+      setUploadStatus({
+        filename: data.rawImportFilename || "",
+        bytes: data.importBytes || 0,
+        lineCount: data.importLineCount || 0,
+        status: data.status,
+        parseStatus: data.parseStatus,
+        parseProgressPct: data.parseProgressPct || 0,
+        messageCount: data.messageCount || 0,
+        unparsedLines: data.unparsedLines || 0,
+      });
+      if (data.status === "PARSED" || data.status === "FAILED") {
+        clearInterval(interval);
+      }
+    }, 1500);
+  }
+
+  // Legacy paste handlers (kept as fallback internals)
   async function handleImportRaw() {
     if (!importSourceId || !importText.trim()) return;
     setSubmitting(true);
@@ -265,7 +338,7 @@ export function BacklogCaseView({
           <Sheet open={importOpen} onOpenChange={setImportOpen}>
             <SheetTrigger render={<Button className="bg-[#FF6600] text-black hover:bg-[#FF9900]"><Upload className="size-4 mr-1" />Import Messages</Button>} />
             <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333] w-[500px] sm:max-w-[500px]">
-              <SheetHeader><SheetTitle className="text-[#E0E0E0]">Import Messages</SheetTitle></SheetHeader>
+              <SheetHeader><SheetTitle className="text-[#E0E0E0]">Import WhatsApp Export</SheetTitle></SheetHeader>
               <div className="flex flex-col gap-4 px-4">
                 <div className="space-y-1.5">
                   <Label>Source</Label>
@@ -274,51 +347,69 @@ export function BacklogCaseView({
                     {allSources.map((s) => <option key={s.id} value={s.id}>{s.label} ({s.sourceType})</option>)}
                   </select>
                 </div>
+
+                {/* FILE UPLOAD — PRIMARY PATH */}
                 <div className="space-y-1.5">
-                  <Label>Paste Raw Messages</Label>
-                  <Textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={15}
-                    className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-[10px] bb-mono leading-tight"
-                    placeholder={"Paste WhatsApp export text here...\n\n12/03/2024, 09:15 - John: Need 10x basin taps\n12/03/2024, 09:20 - Vasille: Which ones?"} />
-                </div>
-                <div className="text-[9px] text-[#666666]">
-                  Format: DD/MM/YYYY, HH:MM - Sender: Message<br />
-                  Lines that don't match will be stored as UNKNOWN (never discarded)
+                  <Label>Upload WhatsApp .txt Export File</Label>
+                  <input
+                    type="file"
+                    accept=".txt,.text"
+                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    className="w-full text-xs text-[#E0E0E0] file:bg-[#FF6600] file:text-black file:border-0 file:px-3 file:py-1.5 file:text-xs file:font-bold file:mr-3 file:cursor-pointer bg-[#222222] border border-[#333333] p-1"
+                  />
+                  <div className="text-[9px] text-[#666666]">
+                    Upload the complete exported .txt file. No manual chunking required.<br/>
+                    File is stored verbatim before parsing. Zero data loss.
+                  </div>
                 </div>
 
-                {/* STEP 1: Store raw + preview parse */}
-                {!parsePreview && (
-                  <Button onClick={handleImportRaw} disabled={submitting || !importSourceId || !importText.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
-                    {submitting ? "Storing & Previewing..." : "Step 1: Store Raw & Preview Parse"}
+                {!uploadStatus && (
+                  <Button onClick={handleFileUpload} disabled={submitting || !importSourceId || !importFile} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                    {submitting ? "Uploading..." : "Upload & Parse"}
                   </Button>
                 )}
 
-                {/* STEP 2: Show parse preview + confirm */}
-                {parsePreview && (
+                {/* UPLOAD + PARSE STATUS */}
+                {uploadStatus && (
                   <div className="border border-[#333333] bg-[#151515] p-3 space-y-2">
-                    <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold">PARSE PREVIEW</div>
-                    <div className="grid grid-cols-3 gap-2 text-xs bb-mono">
-                      <div><span className="text-[#888888]">Total lines:</span> <span className="text-[#E0E0E0]">{parsePreview.totalLines}</span></div>
-                      <div><span className="text-[#888888]">Parsed OK:</span> <span className="text-[#00CC66]">{parsePreview.parsedOk}</span></div>
-                      <div><span className="text-[#888888]">Unparsed:</span> <span className={parsePreview.unparsed > 0 ? "text-[#FF9900]" : "text-[#00CC66]"}>{parsePreview.unparsed}</span></div>
+                    <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold">IMPORT STATUS</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs bb-mono">
+                      <div><span className="text-[#888888]">File:</span> <span className="text-[#E0E0E0]">{uploadStatus.filename}</span></div>
+                      <div><span className="text-[#888888]">Size:</span> <span className="text-[#E0E0E0]">{(uploadStatus.bytes / 1024).toFixed(1)} KB</span></div>
+                      <div><span className="text-[#888888]">Raw lines:</span> <span className="text-[#E0E0E0]">{uploadStatus.lineCount}</span></div>
+                      <div><span className="text-[#888888]">Status:</span> <Badge className={`text-[8px] ${uploadStatus.parseStatus === "COMPLETE" ? "text-[#00CC66] bg-[#00CC66]/10" : uploadStatus.parseStatus === "FAILED" ? "text-[#FF3333] bg-[#FF3333]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{uploadStatus.status}</Badge></div>
                     </div>
-                    <div className="text-[9px] text-[#888888]">
-                      Status: <Badge className={`text-[8px] ${parsePreview.parseStatus === "COMPLETE" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{parsePreview.parseStatus}</Badge>
-                    </div>
-                    {parsePreview.unparsed > 0 && (
-                      <div className="text-[9px] text-[#FF9900]">
-                        {parsePreview.unparsed} lines could not be parsed — they will be stored as UNKNOWN (never lost).
+                    {uploadStatus.parseProgressPct !== undefined && uploadStatus.parseProgressPct < 100 && uploadStatus.status === "PROCESSING" && (
+                      <div className="w-full bg-[#333333] h-1.5">
+                        <div className="bg-[#FF6600] h-1.5 transition-all" style={{ width: `${uploadStatus.parseProgressPct}%` }} />
                       </div>
                     )}
-                    <div className="flex gap-2">
-                      <Button onClick={handleConfirmParse} disabled={submitting} className="bg-[#00CC66] text-black hover:bg-[#00AA55]">
-                        {submitting ? "Confirming..." : "Step 2: Confirm Parse"}
+                    {uploadStatus.messageCount > 0 && (
+                      <div className="grid grid-cols-2 gap-2 text-xs bb-mono">
+                        <div><span className="text-[#888888]">Messages:</span> <span className="text-[#00CC66]">{uploadStatus.messageCount}</span></div>
+                        <div><span className="text-[#888888]">Unparsed:</span> <span className={uploadStatus.unparsedLines > 0 ? "text-[#FF9900]" : "text-[#00CC66]"}>{uploadStatus.unparsedLines}</span></div>
+                      </div>
+                    )}
+                    {uploadStatus.status === "PARSED" && (
+                      <Button onClick={() => { setImportOpen(false); setUploadStatus(null); setImportFile(null); router.refresh(); }} className="bg-[#00CC66] text-black hover:bg-[#00AA55] w-full">
+                        Done — View Timeline
                       </Button>
-                      <Button variant="outline" onClick={() => setParsePreview(null)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
-                        Cancel
-                      </Button>
-                    </div>
+                    )}
                   </div>
                 )}
+
+                {/* PASTE FALLBACK */}
+                <details className="text-[9px] text-[#666666]">
+                  <summary className="cursor-pointer hover:text-[#888888]">Or paste text manually (fallback)</summary>
+                  <div className="mt-2 space-y-2">
+                    <Textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
+                      className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-[10px] bb-mono leading-tight"
+                      placeholder="Paste WhatsApp export text here..." />
+                    <Button onClick={handlePasteUpload} disabled={submitting || !importSourceId || !importText.trim()} size="sm" className="bg-[#222222] border border-[#333333] text-[#E0E0E0]">
+                      {submitting ? "Uploading..." : "Upload Pasted Text"}
+                    </Button>
+                  </div>
+                </details>
               </div>
             </SheetContent>
           </Sheet>

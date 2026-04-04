@@ -1711,22 +1711,28 @@ model BacklogSourceGroup {
 }
 
 model BacklogSource {
-  id              String   @id @default(uuid())
-  groupId         String
-  label           String
-  sourceType      String
-  participantList String[] @default([])
-  rawFileRef      String?
-  rawImportText   String?
-  importedAt      DateTime?
-  parsedAt        DateTime?
-  parseStatus     String   @default("NOT_RUN")
-  unparsedLines   Int      @default(0)
-  messageCount    Int      @default(0)
-  dateFrom        DateTime?
-  dateTo          DateTime?
-  status          String   @default("CREATED")
-  createdAt       DateTime @default(now())
+  id                  String   @id @default(uuid())
+  groupId             String
+  label               String
+  sourceType          String
+  participantList     String[] @default([])
+  rawFileRef          String?
+  rawImportText       String?
+  rawImportFilename   String?
+  importBytes         Int      @default(0)
+  importLineCount     Int      @default(0)
+  importedAt          DateTime?
+  importStartedAt     DateTime?
+  importCompletedAt   DateTime?
+  parsedAt            DateTime?
+  parseStatus         String   @default("NOT_RUN")
+  parseProgressPct    Int      @default(0)
+  unparsedLines       Int      @default(0)
+  messageCount        Int      @default(0)
+  dateFrom            DateTime?
+  dateTo              DateTime?
+  status              String   @default("CREATED")
+  createdAt           DateTime @default(now())
 
   group    BacklogSourceGroup @relation(fields: [groupId], references: [id])
   messages BacklogMessage[]
