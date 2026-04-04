@@ -36,9 +36,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (file) {
       // File upload path
       const buffer = Buffer.from(await file.arrayBuffer());
-      rawText = buffer.toString("utf-8");
+      // Strip BOM if present, handle both UTF-8 and UTF-16 BOM
+      rawText = buffer.toString("utf-8").replace(/^\uFEFF/, "");
       filename = file.name;
       bytes = buffer.length;
+      console.log(`[BACKLOG UPLOAD] File: ${filename}, ${bytes} bytes, ${rawText.split("\n").length} raw lines`);
 
       // Save raw file to disk for evidence
       const uploadDir = path.join(process.cwd(), "public", "backlog-uploads");
@@ -141,8 +143,8 @@ interface WaParsed {
 }
 
 function parseWaLine(line: string): WaParsed | null {
-  // Strip BOM if present
-  const clean = line.replace(/^\uFEFF/, "");
+  // Strip BOM and \r
+  const clean = line.replace(/^\uFEFF/, "").replace(/\r$/, "");
 
   // Try bracketed format first: [DD/MM/YYYY, HH:MM:SS] remainder
   let tsMatch = clean.match(TS_BRACKET);
@@ -242,8 +244,10 @@ async function startAsyncParse(sourceId: string) {
     return;
   }
 
-  const rawLines = source.rawImportText.split("\n");
+  // Handle both \n and \r\n line endings — strip \r from every line
+  const rawLines = source.rawImportText.split("\n").map((l) => l.replace(/\r$/, ""));
   const totalLines = rawLines.length;
+  console.log(`[BACKLOG PARSE] Starting parse: ${totalLines} raw lines, ${source.rawImportText.length} bytes`);
 
   interface Msg {
     startLine: number;
@@ -263,10 +267,23 @@ async function startAsyncParse(sourceId: string) {
 
   const messages: Msg[] = [];
   let currentMsg: Msg | null = null;
+  let linesProcessed = 0;
+  let emptyLines = 0;
 
   for (let i = 0; i < rawLines.length; i++) {
+    linesProcessed++;
     const line = rawLines[i];
-    if (!line.trim()) continue;
+
+    // Empty lines: still count as processed but don't break message blocks
+    if (!line.trim()) {
+      emptyLines++;
+      // If we have a current multiline message, preserve empty lines in it
+      if (currentMsg && currentMsg.isMultiline) {
+        currentMsg.rawText += "\n";
+        currentMsg.lineCount++;
+      }
+      continue;
+    }
 
     const parsed = parseWaLine(line);
 
@@ -332,7 +349,7 @@ async function startAsyncParse(sourceId: string) {
 
   if (currentMsg) messages.push(currentMsg);
 
-  // Section 3: Validation output
+  // VALIDATION: confirm full file processed
   const tsMatches = messages.filter((m) => m.parsedOk).length;
   const multilineCount = messages.filter((m) => m.isMultiline).length;
   const unparsedCount2 = messages.filter((m) => !m.parsedOk).length;
@@ -340,17 +357,29 @@ async function startAsyncParse(sourceId: string) {
   const timestamps = messages.filter((m) => m.parsedOk).map((m) => m.parsedTimestamp).sort((a, b) => a.getTime() - b.getTime());
   const minTs = timestamps[0];
   const maxTs = timestamps[timestamps.length - 1];
+  const lastMsg = messages[messages.length - 1];
+
+  const fullProcessed = linesProcessed === totalLines;
 
   console.log(`[BACKLOG PARSE] Source ${sourceId}:`);
-  console.log(`  Total raw lines:      ${rawLines.length}`);
-  console.log(`  Total parsed msgs:    ${messages.length}`);
-  console.log(`  Multiline messages:   ${multilineCount}`);
-  console.log(`  Media messages:       ${mediaCount}`);
-  console.log(`  Unparsed messages:    ${unparsedCount2}`);
-  console.log(`  Min timestamp:        ${minTs?.toISOString() || "N/A"}`);
-  console.log(`  Max timestamp:        ${maxTs?.toISOString() || "N/A"}`);
+  console.log(`  Total raw lines:        ${totalLines}`);
+  console.log(`  Lines processed:        ${linesProcessed} ${fullProcessed ? "✓ COMPLETE" : "✗ INCOMPLETE"}`);
+  console.log(`  Empty lines:            ${emptyLines}`);
+  console.log(`  Total messages:         ${messages.length}`);
+  console.log(`  Parsed OK:              ${tsMatches}`);
+  console.log(`  Multiline:              ${multilineCount}`);
+  console.log(`  Media:                  ${mediaCount}`);
+  console.log(`  Unparsed:               ${unparsedCount2}`);
+  console.log(`  First timestamp:        ${minTs?.toISOString() || "N/A"}`);
+  console.log(`  Last timestamp:         ${maxTs?.toISOString() || "N/A"}`);
+  console.log(`  Last message line:      ${lastMsg?.startLine || "N/A"}`);
+  console.log(`  Last message sender:    ${lastMsg?.sender || "N/A"}`);
+  console.log(`  Last message preview:   "${lastMsg?.rawText.slice(0, 60) || "N/A"}"`);
+  if (!fullProcessed) {
+    console.error(`  ✗ INTEGRITY ERROR: ${totalLines - linesProcessed} lines not processed!`);
+  }
   for (const m of messages.slice(0, 3)) {
-    console.log(`    line ${m.startLine} | ${m.sender} | ts="${m.rawTimestampText}" | "${m.rawText.slice(0, 80)}" | multi:${m.isMultiline} media:${m.hasMedia}`);
+    console.log(`    line ${m.startLine} | ${m.sender} | ts="${m.rawTimestampText}" | "${m.rawText.slice(0, 60)}" | multi:${m.isMultiline}`);
   }
 
   // Delete existing messages then bulk create
