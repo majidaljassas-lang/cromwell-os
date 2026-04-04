@@ -72,19 +72,26 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+const INPUT_CLS = "h-7 text-xs px-1.5 bg-transparent border border-transparent hover:border-[#444] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0]";
+const NUM_CLS = `${INPUT_CLS} w-20 text-right tabular-nums`;
+
 function InlineLineRow({ line, onClickRow, onSaved }: {
   line: TicketLine;
   onClickRow: () => void;
   onSaved: () => void;
 }) {
-  const [saleVal, setSaleVal] = useState(Number(line.actualSaleUnit || 0) || "");
+  const [desc, setDesc] = useState(line.description);
+  const [qtyVal, setQtyVal] = useState(String(Number(line.qty)));
+  const [costVal, setCostVal] = useState(String(Number(line.expectedCostUnit || 0) || ""));
+  const [saleVal, setSaleVal] = useState(String(Number(line.actualSaleUnit || 0) || ""));
   const [saving, setSaving] = useState(false);
 
-  const qty = Number(line.qty);
-  const cost = Number(line.actualCostTotal || line.expectedCostTotal || 0);
+  const qty = Number(qtyVal || 1);
+  const costUnit = Number(costVal || 0);
   const saleUnit = Number(saleVal || 0);
+  const costTotal = costUnit * qty;
   const saleTotal = saleUnit * qty;
-  const margin = saleTotal - cost;
+  const margin = saleTotal - costTotal;
   const marginPct = saleTotal > 0 ? (margin / saleTotal) * 100 : 0;
 
   const sc = line.status === "READY_FOR_QUOTE"
@@ -93,59 +100,49 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
     ? "text-[#FF9900] bg-[#FF9900]/10"
     : "text-[#888888] bg-[#333333]";
 
-  async function handleSaleBlur() {
-    const newVal = Number(saleVal || 0);
-    const oldVal = Number(line.actualSaleUnit || 0);
-    if (newVal === oldVal) return;
+  async function saveField(field: string, value: unknown) {
     setSaving(true);
     await fetch(`/api/ticket-lines/${line.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actualSaleUnit: newVal || undefined }),
+      body: JSON.stringify({ [field]: value || undefined }),
     });
     setSaving(false);
     onSaved();
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter") {
-      (e.target as HTMLInputElement).blur();
-    }
-  }
+  function onBlurDesc() { if (desc !== line.description) saveField("description", desc); }
+  function onBlurQty() { const v = Number(qtyVal); if (v !== Number(line.qty)) saveField("qty", v); }
+  function onBlurCost() { const v = Number(costVal || 0); if (v !== Number(line.expectedCostUnit || 0)) saveField("expectedCostUnit", v || undefined); }
+  function onBlurSale() { const v = Number(saleVal || 0); if (v !== Number(line.actualSaleUnit || 0)) saveField("actualSaleUnit", v || undefined); }
+
+  function kd(e: React.KeyboardEvent) { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }
 
   return (
-    <TableRow className="hover:bg-[#222222]">
-      <TableCell className="font-medium max-w-[220px] cursor-pointer" onClick={onClickRow}>
-        <div>{line.description}</div>
-        {line.internalNotes && (
-          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight max-h-8 overflow-hidden">{line.internalNotes}</div>
-        )}
+    <TableRow className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""}`}>
+      <TableCell className="p-0 max-w-[250px]">
+        <input value={desc} onChange={(e) => setDesc(e.target.value)} onBlur={onBlurDesc} onKeyDown={kd}
+          className={`${INPUT_CLS} w-full font-medium`} />
       </TableCell>
-      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate cursor-pointer" onClick={onClickRow}>
+      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate cursor-pointer p-1" onClick={onClickRow}>
         {line.supplierName || "—"}
       </TableCell>
-      <TableCell className="text-right tabular-nums cursor-pointer" onClick={onClickRow}>
-        {dec(line.qty)}
+      <TableCell className="p-0">
+        <input type="number" step="0.01" value={qtyVal} onChange={(e) => setQtyVal(e.target.value)} onBlur={onBlurQty} onKeyDown={kd}
+          className={`${NUM_CLS} w-16`} />
       </TableCell>
-      <TableCell className="text-[#888888] text-[10px] cursor-pointer" onClick={onClickRow}>
+      <TableCell className="text-[#888888] text-[10px] cursor-pointer p-1" onClick={onClickRow}>
         {line.unit}
       </TableCell>
-      <TableCell className="text-right tabular-nums cursor-pointer" onClick={onClickRow}>
-        {fmtMoney(cost)}
+      <TableCell className="p-0">
+        <input type="number" step="0.01" value={costVal} onChange={(e) => setCostVal(e.target.value)} onBlur={onBlurCost} onKeyDown={kd}
+          className={NUM_CLS} placeholder="0.00" />
       </TableCell>
-      <TableCell className="text-right p-0">
-        <input
-          type="number"
-          step="0.01"
-          value={saleVal}
-          onChange={(e) => setSaleVal(e.target.value)}
-          onBlur={handleSaleBlur}
-          onKeyDown={handleKeyDown}
-          className={`w-20 h-7 text-right tabular-nums text-xs px-2 bg-transparent border border-transparent hover:border-[#FF6600] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0] ${saving ? "opacity-50" : ""}`}
-          placeholder="0.00"
-        />
+      <TableCell className="p-0">
+        <input type="number" step="0.01" value={saleVal} onChange={(e) => setSaleVal(e.target.value)} onBlur={onBlurSale} onKeyDown={kd}
+          className={NUM_CLS} placeholder="0.00" />
       </TableCell>
-      <TableCell className="text-right tabular-nums">
+      <TableCell className="text-right tabular-nums text-xs">
         <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
           {fmtMoney(margin)}
         </span>
