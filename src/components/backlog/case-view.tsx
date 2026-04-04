@@ -380,15 +380,37 @@ export function BacklogCaseView({
     router.refresh();
   }
 
+  const [linkingMsgId, setLinkingMsgId] = useState<string | null>(null);
+  const [linkingRelType, setLinkingRelType] = useState<string | null>(null);
+
   async function classifyMessage(msgId: string, field: string, value: string) {
+    // If setting a relation type other than NONE, enter linking mode
+    if (field === "relationType" && value !== "NONE") {
+      setLinkingMsgId(msgId);
+      setLinkingRelType(value);
+      setClassifyingId(null);
+      return; // Don't save yet — wait for target click
+    }
+
     await fetch(`/api/backlog/messages/${msgId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: value }),
+      body: JSON.stringify({ [field]: value, ...(field === "relationType" && value === "NONE" ? { relatedMessageId: null } : {}) }),
     });
-    // Update local state immediately so UI reflects the change
     setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, [field]: value } : m));
     setClassifyingId(null);
+  }
+
+  async function linkToMessage(targetMsgId: string) {
+    if (!linkingMsgId || !linkingRelType) return;
+    await fetch(`/api/backlog/messages/${linkingMsgId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ relationType: linkingRelType, relatedMessageId: targetMsgId }),
+    });
+    setMessages((prev) => prev.map((m) => m.id === linkingMsgId ? { ...m, relationType: linkingRelType!, relatedMessageId: targetMsgId } : m));
+    setLinkingMsgId(null);
+    setLinkingRelType(null);
   }
 
   // Filter messages
@@ -716,6 +738,16 @@ export function BacklogCaseView({
               placeholder="Search text..." className="h-6 w-48 text-[10px] bg-[#222222] border-[#FF6600]/50 focus:border-[#FF6600]" />
           </div>
 
+          {/* Linking mode banner */}
+          {linkingMsgId && (
+            <div className="border border-[#FF6600] bg-[#FF6600]/10 px-4 py-2 flex items-center justify-between">
+              <div className="text-xs text-[#FF6600] font-bold bb-mono">
+                Click the message that this is a <span className="text-white">{linkingRelType?.replace(/_/g, " ")}</span>
+              </div>
+              <button onClick={() => { setLinkingMsgId(null); setLinkingRelType(null); }} className="text-[9px] text-[#888888] hover:text-[#E0E0E0] px-2 py-0.5 border border-[#333333]">Cancel</button>
+            </div>
+          )}
+
           {/* Messages */}
           {filtered.length === 0 ? (
             <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">
@@ -724,7 +756,10 @@ export function BacklogCaseView({
           ) : (
             <div className="border border-[#333333] bg-[#1A1A1A]">
               {filtered.map((msg) => (
-                <div key={msg.id} className={`border-b border-[#2A2A2A] px-3 py-2 hover:bg-[#1E1E1E] ${msg.relationType === "DUPLICATE_OF" ? "opacity-50" : ""} ${!msg.parsedOk ? "border-l-2 border-l-[#FF9900]" : ""}`}>
+                <div
+                  key={msg.id}
+                  onClick={linkingMsgId && linkingMsgId !== msg.id ? () => linkToMessage(msg.id) : undefined}
+                  className={`border-b border-[#2A2A2A] px-3 py-2 hover:bg-[#1E1E1E] ${msg.relationType === "DUPLICATE_OF" ? "opacity-50" : ""} ${!msg.parsedOk ? "border-l-2 border-l-[#FF9900]" : ""} ${linkingMsgId && linkingMsgId !== msg.id ? "cursor-pointer hover:border-l-2 hover:border-l-[#FF6600] hover:bg-[#FF6600]/5" : ""} ${linkingMsgId === msg.id ? "border-l-2 border-l-[#FF6600] bg-[#FF6600]/10" : ""} ${msg.relatedMessageId ? "border-l-2 border-l-[#3399FF]" : ""}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
@@ -737,7 +772,15 @@ export function BacklogCaseView({
                         {msg.hasAttachment && <Paperclip className="size-2.5 text-[#FF9900]" />}
                         {!msg.parsedOk && <Badge className="text-[7px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">UNPARSED</Badge>}
                         {msg.isMultiline && <Badge className="text-[7px] px-1 py-0 text-[#00CCCC] bg-[#00CCCC]/10">{msg.lineCount}L</Badge>}
-                        {msg.relationType !== "NONE" && <Badge className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">{msg.relationType.replace(/_/g, " ")}</Badge>}
+                        {msg.relationType !== "NONE" && (
+                          <Badge className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">
+                            {msg.relationType.replace(/_/g, " ")}
+                            {msg.relatedMessageId && (() => {
+                              const linked = messages.find((m) => m.id === msg.relatedMessageId);
+                              return linked ? ` → ${linked.sender}: ${linked.rawText.slice(0, 30)}...` : "";
+                            })()}
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-xs text-[#E0E0E0] whitespace-pre-wrap">{msg.rawText}</div>
                     </div>
