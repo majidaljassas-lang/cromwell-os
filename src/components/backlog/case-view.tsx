@@ -15,12 +15,16 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter
 type Message = {
   id: string;
   sourceId: string;
+  lineNumber: number;
   timestamp: string;
   sender: string;
   rawText: string;
+  parsedOk: boolean;
   messageType: string;
   hasAttachment: boolean;
-  isDuplicate: boolean;
+  relationType: string;
+  relatedMessageId: string | null;
+  duplicateGroupId: string | null;
   notes: string | null;
 };
 
@@ -84,6 +88,8 @@ export function BacklogCaseView({
   const [classifyingId, setClassifyingId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState("ALL");
   const [filterSender, setFilterSender] = useState("");
+  const [filterSource, setFilterSource] = useState("ALL");
+  const [filterParsed, setFilterParsed] = useState("ALL");
 
   const allSources = backlogCase.sourceGroups.flatMap((g) => g.sources);
 
@@ -105,52 +111,53 @@ export function BacklogCaseView({
     router.refresh();
   }
 
-  async function handleImport() {
+  const [parsePreview, setParsePreview] = useState<{ totalLines: number; parsedOk: number; unparsed: number; parseStatus: string } | null>(null);
+
+  // STEP 1: Store raw text
+  async function handleImportRaw() {
     if (!importSourceId || !importText.trim()) return;
     setSubmitting(true);
-
-    // Parse WhatsApp-style text: "DD/MM/YYYY, HH:MM - Sender: Message"
-    const lines = importText.split("\n").filter((l) => l.trim());
-    const parsed: Array<{ timestamp: string; sender: string; rawText: string }> = [];
-
-    for (const line of lines) {
-      const waMatch = line.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*(.*)/);
-      if (waMatch) {
-        const [, date, time, sender, text] = waMatch;
-        const [d, m, y] = date.split("/");
-        const year = y.length === 2 ? `20${y}` : y;
-        parsed.push({
-          timestamp: new Date(`${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T${time}`).toISOString(),
-          sender: sender.trim(),
-          rawText: text.trim(),
-        });
-      } else {
-        // Can't parse — store raw anyway with UNKNOWN sender (NEVER discard)
-        parsed.push({
-          timestamp: new Date().toISOString(),
-          sender: "UNKNOWN",
-          rawText: line,
-        });
-      }
-    }
 
     await fetch(`/api/backlog/sources/${importSourceId}/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: parsed }),
+      body: JSON.stringify({ rawText: importText }),
+    });
+
+    // STEP 2: Preview parse (don't confirm yet)
+    const previewRes = await fetch(`/api/backlog/sources/${importSourceId}/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: false }),
+    });
+    const preview = await previewRes.json();
+    setParsePreview(preview);
+    setSubmitting(false);
+  }
+
+  // STEP 3: User confirms parse
+  async function handleConfirmParse() {
+    if (!importSourceId) return;
+    setSubmitting(true);
+
+    await fetch(`/api/backlog/sources/${importSourceId}/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
     });
 
     setImportOpen(false);
     setImportText("");
+    setParsePreview(null);
     setSubmitting(false);
     router.refresh();
   }
 
-  async function classifyMessage(msgId: string, messageType: string) {
+  async function classifyMessage(msgId: string, field: string, value: string) {
     await fetch(`/api/backlog/messages/${msgId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageType }),
+      body: JSON.stringify({ [field]: value }),
     });
     setClassifyingId(null);
     router.refresh();
@@ -160,6 +167,9 @@ export function BacklogCaseView({
   const filtered = messages.filter((m) => {
     if (filterType !== "ALL" && m.messageType !== filterType) return false;
     if (filterSender && !m.sender.toLowerCase().includes(filterSender.toLowerCase())) return false;
+    if (filterSource !== "ALL" && m.sourceId !== filterSource) return false;
+    if (filterParsed === "PARSED" && !m.parsedOk) return false;
+    if (filterParsed === "UNPARSED" && m.parsedOk) return false;
     return true;
   });
 
@@ -218,9 +228,41 @@ export function BacklogCaseView({
                   Format: DD/MM/YYYY, HH:MM - Sender: Message<br />
                   Lines that don't match will be stored as UNKNOWN (never discarded)
                 </div>
-                <Button onClick={handleImport} disabled={submitting || !importSourceId || !importText.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
-                  {submitting ? "Importing..." : "Import All Messages"}
-                </Button>
+
+                {/* STEP 1: Store raw + preview parse */}
+                {!parsePreview && (
+                  <Button onClick={handleImportRaw} disabled={submitting || !importSourceId || !importText.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                    {submitting ? "Storing & Previewing..." : "Step 1: Store Raw & Preview Parse"}
+                  </Button>
+                )}
+
+                {/* STEP 2: Show parse preview + confirm */}
+                {parsePreview && (
+                  <div className="border border-[#333333] bg-[#151515] p-3 space-y-2">
+                    <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold">PARSE PREVIEW</div>
+                    <div className="grid grid-cols-3 gap-2 text-xs bb-mono">
+                      <div><span className="text-[#888888]">Total lines:</span> <span className="text-[#E0E0E0]">{parsePreview.totalLines}</span></div>
+                      <div><span className="text-[#888888]">Parsed OK:</span> <span className="text-[#00CC66]">{parsePreview.parsedOk}</span></div>
+                      <div><span className="text-[#888888]">Unparsed:</span> <span className={parsePreview.unparsed > 0 ? "text-[#FF9900]" : "text-[#00CC66]"}>{parsePreview.unparsed}</span></div>
+                    </div>
+                    <div className="text-[9px] text-[#888888]">
+                      Status: <Badge className={`text-[8px] ${parsePreview.parseStatus === "COMPLETE" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{parsePreview.parseStatus}</Badge>
+                    </div>
+                    {parsePreview.unparsed > 0 && (
+                      <div className="text-[9px] text-[#FF9900]">
+                        {parsePreview.unparsed} lines could not be parsed — they will be stored as UNKNOWN (never lost).
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button onClick={handleConfirmParse} disabled={submitting} className="bg-[#00CC66] text-black hover:bg-[#00AA55]">
+                        {submitting ? "Confirming..." : "Step 2: Confirm Parse"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setParsePreview(null)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </SheetContent>
           </Sheet>
@@ -265,6 +307,17 @@ export function BacklogCaseView({
                 {t}
               </button>
             ))}
+            <span className="text-[#555555]">|</span>
+            <span className="text-[9px] text-[#888888]">SRC:</span>
+            <button onClick={() => setFilterSource("ALL")} className={`text-[9px] px-2 py-0.5 ${filterSource === "ALL" ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>All</button>
+            {allSources.map((s) => (
+              <button key={s.id} onClick={() => setFilterSource(s.id)} className={`text-[9px] px-2 py-0.5 ${filterSource === s.id ? "bg-[#3399FF] text-black" : "text-[#888888]"}`}>{s.label.split(" ")[0]}</button>
+            ))}
+            <span className="text-[#555555]">|</span>
+            <button onClick={() => setFilterParsed("ALL")} className={`text-[9px] px-2 py-0.5 ${filterParsed === "ALL" ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>All</button>
+            <button onClick={() => setFilterParsed("PARSED")} className={`text-[9px] px-2 py-0.5 ${filterParsed === "PARSED" ? "bg-[#00CC66] text-black" : "text-[#888888]"}`}>Parsed</button>
+            <button onClick={() => setFilterParsed("UNPARSED")} className={`text-[9px] px-2 py-0.5 ${filterParsed === "UNPARSED" ? "bg-[#FF9900] text-black" : "text-[#888888]"}`}>Unparsed</button>
+            <span className="text-[#555555]">|</span>
             <Input value={filterSender} onChange={(e) => setFilterSender(e.target.value)}
               placeholder="Filter by sender..." className="h-6 w-40 text-[10px] bg-[#222222] border-[#333333]" />
           </div>
@@ -277,7 +330,7 @@ export function BacklogCaseView({
           ) : (
             <div className="border border-[#333333] bg-[#1A1A1A]">
               {filtered.map((msg) => (
-                <div key={msg.id} className={`border-b border-[#2A2A2A] px-3 py-2 hover:bg-[#1E1E1E] ${msg.isDuplicate ? "opacity-50" : ""}`}>
+                <div key={msg.id} className={`border-b border-[#2A2A2A] px-3 py-2 hover:bg-[#1E1E1E] ${msg.relationType === "DUPLICATE_OF" ? "opacity-50" : ""} ${!msg.parsedOk ? "border-l-2 border-l-[#FF9900]" : ""}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
@@ -285,20 +338,33 @@ export function BacklogCaseView({
                         <span className="text-[10px] font-bold text-[#3399FF]">{msg.sender}</span>
                         <span className="text-[8px] text-[#555555]">{sourceMap[msg.sourceId]?.label || ""}</span>
                         {msg.hasAttachment && <Paperclip className="size-2.5 text-[#FF9900]" />}
-                        {msg.isDuplicate && <Badge className="text-[7px] px-1 py-0 text-[#888888] bg-[#333333]">DUP</Badge>}
+                        {!msg.parsedOk && <Badge className="text-[7px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">UNPARSED</Badge>}
+                        {msg.relationType !== "NONE" && <Badge className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">{msg.relationType.replace(/_/g, " ")}</Badge>}
                       </div>
                       <div className="text-xs text-[#E0E0E0] whitespace-pre-wrap">{msg.rawText}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {classifyingId === msg.id ? (
-                        <div className="flex gap-0.5 flex-wrap">
-                          {MSG_TYPES.filter((t) => t !== "UNCLASSIFIED").map((t) => (
-                            <button key={t} onClick={() => classifyMessage(msg.id, t)}
-                              className={`text-[7px] px-1.5 py-0.5 uppercase tracking-wider ${MSG_TYPE_COLORS[t] || "text-[#888888] bg-[#333333]"}`}>
-                              {t}
-                            </button>
-                          ))}
-                          <button onClick={() => setClassifyingId(null)} className="text-[7px] px-1 text-[#666666]">✕</button>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex gap-0.5 flex-wrap">
+                            <span className="text-[6px] text-[#555555] w-8">TYPE:</span>
+                            {MSG_TYPES.filter((t) => t !== "UNCLASSIFIED").map((t) => (
+                              <button key={t} onClick={() => classifyMessage(msg.id, "messageType", t)}
+                                className={`text-[7px] px-1.5 py-0.5 uppercase tracking-wider ${MSG_TYPE_COLORS[t] || "text-[#888888] bg-[#333333]"}`}>
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex gap-0.5 flex-wrap">
+                            <span className="text-[6px] text-[#555555] w-8">REL:</span>
+                            {["NONE", "DUPLICATE_OF", "FOLLOW_UP_TO", "CONFIRMATION_OF"].map((r) => (
+                              <button key={r} onClick={() => classifyMessage(msg.id, "relationType", r)}
+                                className="text-[7px] px-1.5 py-0.5 uppercase tracking-wider text-[#3399FF] bg-[#3399FF]/10">
+                                {r.replace(/_/g, " ")}
+                              </button>
+                            ))}
+                          </div>
+                          <button onClick={() => setClassifyingId(null)} className="text-[7px] px-1 text-[#666666] self-end">✕ close</button>
                         </div>
                       ) : (
                         <button onClick={() => setClassifyingId(msg.id)}

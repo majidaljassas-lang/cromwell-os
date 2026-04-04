@@ -1711,39 +1711,46 @@ model BacklogSourceGroup {
 }
 
 model BacklogSource {
-  id            String   @id @default(uuid())
-  groupId       String
-  label         String
-  sourceType    String
-  participantList String[]  @default([])
-  rawFileRef    String?
-  importedAt    DateTime?
-  messageCount  Int      @default(0)
-  dateFrom      DateTime?
-  dateTo        DateTime?
-  status        String   @default("IMPORTED")
-  createdAt     DateTime @default(now())
+  id              String   @id @default(uuid())
+  groupId         String
+  label           String
+  sourceType      String
+  participantList String[] @default([])
+  rawFileRef      String?
+  rawImportText   String?
+  importedAt      DateTime?
+  parsedAt        DateTime?
+  parseStatus     String   @default("NOT_RUN")
+  unparsedLines   Int      @default(0)
+  messageCount    Int      @default(0)
+  dateFrom        DateTime?
+  dateTo          DateTime?
+  status          String   @default("CREATED")
+  createdAt       DateTime @default(now())
 
   group    BacklogSourceGroup @relation(fields: [groupId], references: [id])
   messages BacklogMessage[]
 
   @@index([groupId])
+  @@index([parseStatus])
 }
 
 model BacklogMessage {
-  id            String   @id @default(uuid())
-  sourceId      String
-  timestamp     DateTime
-  sender        String
-  rawText       String
-  messageType   String   @default("UNCLASSIFIED")
-  hasAttachment Boolean  @default(false)
-  attachmentRef String?
-  isDuplicate   Boolean  @default(false)
-  duplicateOfId String?
-  linkedToId    String?
-  notes         String?
-  createdAt     DateTime @default(now())
+  id                String   @id @default(uuid())
+  sourceId          String
+  lineNumber        Int      @default(0)
+  timestamp         DateTime
+  sender            String
+  rawText           String
+  parsedOk          Boolean  @default(true)
+  messageType       String   @default("UNCLASSIFIED")
+  hasAttachment     Boolean  @default(false)
+  attachmentRef     String?
+  relationType      String   @default("NONE")
+  relatedMessageId  String?
+  duplicateGroupId  String?
+  notes             String?
+  createdAt         DateTime @default(now())
 
   source BacklogSource @relation(fields: [sourceId], references: [id])
 
@@ -1751,4 +1758,6 @@ model BacklogMessage {
   @@index([timestamp])
   @@index([messageType])
   @@index([sender])
+  @@index([relationType])
+  @@index([duplicateGroupId])
 }

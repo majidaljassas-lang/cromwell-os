@@ -1,82 +1,49 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * POST: Import raw messages into a backlog source.
- * Body: { messages: Array<{ timestamp, sender, rawText, hasAttachment?, attachmentRef? }> }
+ * POST: Import raw text into a backlog source.
  *
- * RULES:
- * - Store every line as-is
- * - Do NOT interpret, classify, or extract
- * - Keep exact order
- * - Keep timestamps and sender exactly
- * - If parsing fails, store raw anyway with type UNKNOWN
- * - NEVER discard
+ * STEP 1 ONLY: Store raw text exactly as-is. Do NOT parse. Do NOT interpret.
+ * Body: { rawText: string }
+ *
+ * Raw text is stored on the source record. Parse runs separately via /parse endpoint.
+ * NO message may be lost. NO interpretation at this stage.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: sourceId } = await params;
   try {
     const body = await request.json();
-    const { messages } = body as {
-      messages: Array<{
-        timestamp: string;
-        sender: string;
-        rawText: string;
-        hasAttachment?: boolean;
-        attachmentRef?: string;
-      }>;
-    };
+    const { rawText } = body;
 
-    if (!messages || !Array.isArray(messages)) {
-      return Response.json({ error: "messages array required" }, { status: 400 });
+    if (!rawText || typeof rawText !== "string") {
+      return Response.json({ error: "rawText string required" }, { status: 400 });
     }
 
     const source = await prisma.backlogSource.findUnique({ where: { id: sourceId } });
     if (!source) return Response.json({ error: "Source not found" }, { status: 404 });
 
-    // Store every message — ZERO data loss
-    const created = await prisma.backlogMessage.createMany({
-      data: messages.map((m) => ({
-        sourceId,
-        timestamp: new Date(m.timestamp),
-        sender: m.sender || "UNKNOWN",
-        rawText: m.rawText || "",
-        messageType: "UNCLASSIFIED",
-        hasAttachment: m.hasAttachment || false,
-        attachmentRef: m.attachmentRef,
-      })),
-    });
-
-    // Update source metadata
-    const allMsgs = await prisma.backlogMessage.findMany({
-      where: { sourceId },
-      orderBy: { timestamp: "asc" },
-      select: { timestamp: true, sender: true },
-    });
-
-    const senders = [...new Set(allMsgs.map((m) => m.sender))];
-    const dateFrom = allMsgs[0]?.timestamp;
-    const dateTo = allMsgs[allMsgs.length - 1]?.timestamp;
-
+    // Store raw text — preserve exactly, NEVER interpret
     await prisma.backlogSource.update({
       where: { id: sourceId },
       data: {
-        messageCount: allMsgs.length,
-        participantList: senders,
-        dateFrom,
-        dateTo,
+        rawImportText: rawText,
         importedAt: new Date(),
-        status: "IMPORTED",
+        status: "RAW_STORED",
+        parseStatus: "NOT_RUN",
       },
     });
 
+    const lineCount = rawText.split("\n").filter((l: string) => l.trim()).length;
+
     return Response.json({
-      imported: created.count,
-      totalMessages: allMsgs.length,
-      participants: senders,
-      dateRange: { from: dateFrom, to: dateTo },
+      stored: true,
+      sourceId,
+      rawLineCount: lineCount,
+      parseStatus: "NOT_RUN",
+      message: "Raw text stored. Run /parse as next step.",
     }, { status: 201 });
   } catch (error) {
-    console.error("Backlog import failed:", error);
+    console.error("Backlog raw import failed:", error);
     return Response.json({ error: "Import failed" }, { status: 500 });
   }
 }

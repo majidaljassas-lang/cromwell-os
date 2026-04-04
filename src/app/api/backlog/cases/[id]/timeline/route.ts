@@ -27,9 +27,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     // Build where clause
-    const where: Record<string, unknown> = { sourceId: { in: sourceIds } };
+    const sourceFilter = searchParams.get("sourceId");
+    const parsedOk = searchParams.get("parsedOk");
+    const where: Record<string, unknown> = { sourceId: sourceFilter ? sourceFilter : { in: sourceIds } };
     if (messageType && messageType !== "ALL") where.messageType = messageType;
     if (sender) where.sender = { contains: sender, mode: "insensitive" };
+    if (parsedOk === "true") where.parsedOk = true;
+    if (parsedOk === "false") where.parsedOk = false;
 
     const [messages, total] = await Promise.all([
       prisma.backlogMessage.findMany({
