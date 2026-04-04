@@ -68,6 +68,102 @@ function dec(val: Decimal): string {
   });
 }
 
+function fmtMoney(n: number): string {
+  return n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function InlineLineRow({ line, onClickRow, onSaved }: {
+  line: TicketLine;
+  onClickRow: () => void;
+  onSaved: () => void;
+}) {
+  const [saleVal, setSaleVal] = useState(Number(line.actualSaleUnit || 0) || "");
+  const [saving, setSaving] = useState(false);
+
+  const qty = Number(line.qty);
+  const cost = Number(line.actualCostTotal || line.expectedCostTotal || 0);
+  const saleUnit = Number(saleVal || 0);
+  const saleTotal = saleUnit * qty;
+  const margin = saleTotal - cost;
+  const marginPct = saleTotal > 0 ? (margin / saleTotal) * 100 : 0;
+
+  const sc = line.status === "READY_FOR_QUOTE"
+    ? "text-[#00CC66] bg-[#00CC66]/10"
+    : line.status === "PRICED"
+    ? "text-[#FF9900] bg-[#FF9900]/10"
+    : "text-[#888888] bg-[#333333]";
+
+  async function handleSaleBlur() {
+    const newVal = Number(saleVal || 0);
+    const oldVal = Number(line.actualSaleUnit || 0);
+    if (newVal === oldVal) return;
+    setSaving(true);
+    await fetch(`/api/ticket-lines/${line.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actualSaleUnit: newVal || undefined }),
+    });
+    setSaving(false);
+    onSaved();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      (e.target as HTMLInputElement).blur();
+    }
+  }
+
+  return (
+    <TableRow className="hover:bg-[#222222]">
+      <TableCell className="font-medium max-w-[220px] cursor-pointer" onClick={onClickRow}>
+        <div>{line.description}</div>
+        {line.internalNotes && (
+          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight max-h-8 overflow-hidden">{line.internalNotes}</div>
+        )}
+      </TableCell>
+      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate cursor-pointer" onClick={onClickRow}>
+        {line.supplierName || "—"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums cursor-pointer" onClick={onClickRow}>
+        {dec(line.qty)}
+      </TableCell>
+      <TableCell className="text-[#888888] text-[10px] cursor-pointer" onClick={onClickRow}>
+        {line.unit}
+      </TableCell>
+      <TableCell className="text-right tabular-nums cursor-pointer" onClick={onClickRow}>
+        {fmtMoney(cost)}
+      </TableCell>
+      <TableCell className="text-right p-0">
+        <input
+          type="number"
+          step="0.01"
+          value={saleVal}
+          onChange={(e) => setSaleVal(e.target.value)}
+          onBlur={handleSaleBlur}
+          onKeyDown={handleKeyDown}
+          className={`w-20 h-7 text-right tabular-nums text-xs px-2 bg-transparent border border-transparent hover:border-[#FF6600] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0] ${saving ? "opacity-50" : ""}`}
+          placeholder="0.00"
+        />
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
+          {fmtMoney(margin)}
+        </span>
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-[10px]">
+        <span className={marginPct >= 20 ? "text-[#00CC66]" : marginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}>
+          {marginPct.toFixed(1)}%
+        </span>
+      </TableCell>
+      <TableCell>
+        <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
+          {line.status.replace(/_/g, " ")}
+        </Badge>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 type TicketLine = {
   id: string;
   lineType: string;
@@ -855,55 +951,14 @@ export function TicketDetail({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeLines.map((line) => {
-                    const margin = Number(line.actualMarginTotal || 0);
-                    const sc = line.status === "READY_FOR_QUOTE"
-                      ? "text-[#00CC66] bg-[#00CC66]/10"
-                      : line.status === "PRICED"
-                      ? "text-[#FF9900] bg-[#FF9900]/10"
-                      : "text-[#888888] bg-[#333333]";
-                    return (
-                    <TableRow key={line.id} className="cursor-pointer hover:bg-[#222222]" onClick={() => { setEditingLine(line); setEditSheetOpen(true); }}>
-                      <TableCell className="font-medium max-w-[220px]">
-                        <div>{line.description}</div>
-                        {line.internalNotes && (
-                          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight max-h-8 overflow-hidden">{line.internalNotes}</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate">
-                        {line.supplierName || "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {dec(line.qty)}
-                      </TableCell>
-                      <TableCell className="text-[#888888] text-[10px]">
-                        {line.unit}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {dec(line.actualCostTotal || line.expectedCostTotal)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {dec(line.actualSaleTotal)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>{dec(line.actualMarginTotal)}</span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-[10px]">
-                        {(() => {
-                          const sale = Number(line.actualSaleTotal || 0);
-                          const cost = Number(line.actualCostTotal || line.expectedCostTotal || 0);
-                          const pct = sale > 0 ? ((sale - cost) / sale * 100) : 0;
-                          return <span className={pct >= 20 ? "text-[#00CC66]" : pct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}>{pct.toFixed(1)}%</span>;
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
-                          {line.status.replace(/_/g, " ")}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })
+                  activeLines.map((line) => (
+                    <InlineLineRow
+                      key={line.id}
+                      line={line}
+                      onClickRow={() => { setEditingLine(line); setEditSheetOpen(true); }}
+                      onSaved={() => { router.refresh(); fetch(`/api/tickets/${ticket.id}/commercial-summary`).then(r => r.ok ? r.json() : null).then(d => setSummary(d)); }}
+                    />
+                  ))
                 )}
               </TableBody>
             </Table>
