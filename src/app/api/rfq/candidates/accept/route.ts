@@ -1,12 +1,13 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * POST: Accept one or more candidates as a ticket line.
- * Body: { candidateIds: string[], ticketId: string, payingCustomerId: string,
- *         description?: string, groupLabel?: string, internalNotes?: string }
+ * POST: Accept candidates as ticket lines.
  *
- * If multiple candidateIds: merges them into one grouped commercial line.
- * If single: creates one ticket line from the candidate.
+ * Single candidate → creates individual ticket line (status CAPTURED)
+ * Multiple candidates → creates ONE package line (status CAPTURED), marks originals MERGED
+ *
+ * Idempotent: already-accepted candidates are skipped.
+ * All created lines track sourceItemIds for audit.
  */
 export async function POST(request: Request) {
   try {
@@ -17,23 +18,20 @@ export async function POST(request: Request) {
       return Response.json({ error: "candidateIds, ticketId, payingCustomerId required" }, { status: 400 });
     }
 
+    // Idempotency: only process pending candidates
     const candidates = await prisma.extractedLineCandidate.findMany({
-      where: { id: { in: candidateIds }, status: { not: "ACCEPTED" } },
+      where: { id: { in: candidateIds }, status: "PENDING" },
     });
 
     if (candidates.length === 0) {
-      return Response.json({ error: "No pending candidates found" }, { status: 404 });
+      return Response.json({ error: "No pending candidates found — may already be accepted" }, { status: 409 });
     }
 
-    // Build description and notes from candidates
     const isMerge = candidates.length > 1;
     let lineDescription: string;
     let lineNotes: string;
-    let totalQty = 0;
-    let lineUnit = "LOT";
 
     if (isMerge) {
-      // Merge: use provided description or group label, build notes from individual items
       lineDescription = description || groupLabel || candidates.map((c) => c.extractedProduct).join(" + ");
       lineNotes = (internalNotes || "") + (internalNotes ? "\n" : "") +
         candidates.map((c) => {
@@ -41,43 +39,39 @@ export async function POST(request: Request) {
           const size = c.extractedSize ? ` ${c.extractedSize}` : "";
           return `${qty}${c.extractedProduct}${size}`;
         }).join("\n");
-      totalQty = 1; // Grouped as 1 LOT
-      lineUnit = "LOT";
     } else {
       const c = candidates[0];
       lineDescription = description || c.extractedProduct || c.rawText;
       lineNotes = internalNotes || "";
-      totalQty = c.extractedQty ? Number(c.extractedQty) : 1;
-      lineUnit = (c.extractedUnit as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET") || "EA";
     }
 
-    // Create ticket line
+    // Create the ACTIVE package line
     const ticketLine = await prisma.ticketLine.create({
       data: {
         ticketId,
         lineType: "MATERIAL",
         description: lineDescription,
-        internalNotes: lineNotes || undefined,
-        qty: totalQty,
-        unit: lineUnit as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET",
+        internalNotes: lineNotes.trim() || undefined,
+        qty: isMerge ? 1 : (candidates[0].extractedQty ? Number(candidates[0].extractedQty) : 1),
+        unit: isMerge ? "LOT" : ((candidates[0].extractedUnit || "EA") as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET"),
         payingCustomerId,
         status: "CAPTURED",
+        sourceItemIds: candidates.map((c) => c.id),
       },
     });
 
-    // Update all candidates to ACCEPTED and link to ticket line
-    const primaryId = candidates[0].id;
+    // Update candidates to ACCEPTED
     await prisma.extractedLineCandidate.updateMany({
       where: { id: { in: candidateIds } },
       data: {
         status: "ACCEPTED",
         groupLabel: groupLabel || undefined,
         resultTicketLineId: ticketLine.id,
-        mergedIntoId: isMerge ? primaryId : undefined,
+        mergedIntoId: isMerge ? ticketLine.id : undefined,
       },
     });
 
-    // Update batch status if all candidates resolved
+    // Check if batch is complete
     const batch = await prisma.extractionBatch.findFirst({
       where: { candidates: { some: { id: candidates[0].id } } },
       include: { candidates: { select: { status: true } } },
@@ -96,6 +90,7 @@ export async function POST(request: Request) {
       ticketLine,
       acceptedCount: candidates.length,
       merged: isMerge,
+      groupLabel: groupLabel || null,
     }, { status: 201 });
   } catch (error) {
     console.error("Failed to accept candidates:", error);

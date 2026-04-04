@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -339,6 +339,23 @@ export function TicketDetail({
   salesInvoices?: SalesInvoiceData[];
 }) {
   const router = useRouter();
+  const [summary, setSummary] = useState<{
+    totals: { totalSale: number; totalCost: number; totalMargin: number; totalMarginPct: number };
+  } | null>(null);
+
+  // Fetch commercial summary from backend (single source of truth)
+  useEffect(() => {
+    fetch(`/api/tickets/${ticket.id}/commercial-summary`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => setSummary(d))
+      .catch(() => {});
+  }, [ticket.id]);
+
+  // Filter lines: only show ACTIVE statuses (exclude RAW and MERGED)
+  const activeLines = ticket.lines.filter(
+    (l) => l.status !== "RAW" && l.status !== "MERGED"
+  );
+
   const [lineSheetOpen, setLineSheetOpen] = useState(false);
   const [submittingLine, setSubmittingLine] = useState(false);
   const [lineType, setLineType] = useState<string>("MATERIAL");
@@ -613,6 +630,32 @@ export function TicketDetail({
         </div>
       </div>
 
+      {/* Commercial Summary Cards — PRIMARY DECISION LAYER */}
+      {summary && (
+        <div className="grid grid-cols-4 gap-3">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">TOTAL SALE</div>
+            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">£{summary.totals.totalSale.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>
+          </div>
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">TOTAL COST</div>
+            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">£{summary.totals.totalCost.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>
+          </div>
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">MARGIN</div>
+            <div className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>
+              £{summary.totals.totalMargin.toLocaleString("en-GB", { minimumFractionDigits: 2 })}
+            </div>
+          </div>
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">MARGIN %</div>
+            <div className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMarginPct >= 20 ? "text-[#00CC66]" : summary.totals.totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>
+              {summary.totals.totalMarginPct.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Description */}
       {ticket.description && (
         <Card>
@@ -628,7 +671,7 @@ export function TicketDetail({
       <Tabs defaultValue="lines">
         <TabsList>
           <TabsTrigger value="lines">
-            Lines ({ticket.lines.length})
+            Lines ({activeLines.length})
           </TabsTrigger>
           <TabsTrigger value="rfq">RFQ Extract</TabsTrigger>
           <TabsTrigger value="evidence">
@@ -791,18 +834,18 @@ export function TicketDetail({
               <TableHeader>
                 <TableRow>
                   <TableHead>Description</TableHead>
-                  <TableHead>Type</TableHead>
+                  <TableHead>Supplier</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead>Unit</TableHead>
-                  <TableHead className="text-right">Exp. Cost</TableHead>
-                  <TableHead className="text-right">Actual Cost</TableHead>
-                  <TableHead className="text-right">Sale Price</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Sale</TableHead>
                   <TableHead className="text-right">Margin</TableHead>
+                  <TableHead className="text-right">Margin %</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ticket.lines.length === 0 ? (
+                {activeLines.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={9}
@@ -812,7 +855,7 @@ export function TicketDetail({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  ticket.lines.map((line) => {
+                  activeLines.map((line) => {
                     const margin = Number(line.actualMarginTotal || 0);
                     const sc = line.status === "READY_FOR_QUOTE"
                       ? "text-[#00CC66] bg-[#00CC66]/10"
@@ -821,16 +864,14 @@ export function TicketDetail({
                       : "text-[#888888] bg-[#333333]";
                     return (
                     <TableRow key={line.id} className="cursor-pointer hover:bg-[#222222]" onClick={() => { setEditingLine(line); setEditSheetOpen(true); }}>
-                      <TableCell className="font-medium max-w-[250px]">
+                      <TableCell className="font-medium max-w-[220px]">
                         <div>{line.description}</div>
                         {line.internalNotes && (
-                          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight">{line.internalNotes}</div>
+                          <div className="text-[10px] text-[#666666] mt-0.5 whitespace-pre-line leading-tight max-h-8 overflow-hidden">{line.internalNotes}</div>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[9px]">
-                          {line.lineType.replace(/_/g, " ")}
-                        </Badge>
+                      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate">
+                        {line.supplierName || "—"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {dec(line.qty)}
@@ -839,16 +880,21 @@ export function TicketDetail({
                         {line.unit}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {dec(line.expectedCostTotal)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {dec(line.actualCostTotal)}
+                        {dec(line.actualCostTotal || line.expectedCostTotal)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {dec(line.actualSaleTotal)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>{dec(line.actualMarginTotal)}</span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-[10px]">
+                        {(() => {
+                          const sale = Number(line.actualSaleTotal || 0);
+                          const cost = Number(line.actualCostTotal || line.expectedCostTotal || 0);
+                          const pct = sale > 0 ? ((sale - cost) / sale * 100) : 0;
+                          return <span className={pct >= 20 ? "text-[#00CC66]" : pct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}>{pct.toFixed(1)}%</span>;
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>

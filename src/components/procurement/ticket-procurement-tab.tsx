@@ -88,12 +88,13 @@ type CostAllocationItem = {
   totalCost: Decimal;
   allocationStatus: string;
   confidenceScore: Decimal;
+  notes: string | null;
   ticketLine: { id: string; description: string };
   supplierBillLine: {
     id: string;
     description: string;
     supplierBill: { id: string; billNo: string };
-  };
+  } | null;
   supplier: { id: string; name: string };
 };
 

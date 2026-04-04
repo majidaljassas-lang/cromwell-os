@@ -57,6 +57,8 @@ enum UnitOfMeasure {
 }
 
 enum TicketLineStatus {
+  RAW
+  MERGED
   CAPTURED
   PRICED
   READY_FOR_QUOTE
@@ -699,6 +701,8 @@ model TicketLine {
   evidenceStatus       String?
   costStatus           String?
   salesStatus          String?
+  mergedIntoLineId     String?
+  sourceItemIds        String[]       @default([])
   isLocked             Boolean        @default(false)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
