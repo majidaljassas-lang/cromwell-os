@@ -170,16 +170,31 @@ export function BacklogCaseView({
 
   const [parsePreview, setParsePreview] = useState<{ totalLines: number; parsedOk: number; unparsed: number; parseStatus: string } | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
   const [uploadStatus, setUploadStatus] = useState<{
     filename: string; bytes: number; lineCount: number; status: string;
     parseStatus: string; parseProgressPct: number; messageCount: number; unparsedLines: number;
   } | null>(null);
 
   async function handleFileUpload() {
-    if (!importSourceId || !importFile) return;
+    const files = importFiles.length > 0 ? importFiles : importFile ? [importFile] : [];
+    if (!importSourceId || files.length === 0) return;
     setSubmitting(true);
+
+    // If multiple files, concatenate into one upload
+    let blob: Blob;
+    let filename: string;
+    if (files.length === 1) {
+      blob = files[0];
+      filename = files[0].name;
+    } else {
+      const texts = await Promise.all(files.map((f) => f.text()));
+      blob = new Blob([texts.join("\n")], { type: "text/plain" });
+      filename = `merged_${files.length}_files.txt`;
+    }
+
     const fd = new FormData();
-    fd.append("file", importFile);
+    fd.append("file", blob, filename);
 
     const res = await fetch(`/api/backlog/sources/${importSourceId}/upload`, {
       method: "POST",
@@ -306,6 +321,35 @@ export function BacklogCaseView({
     router.refresh();
   }
 
+  async function clearSource(srcId: string) {
+    await fetch(`/api/backlog/sources/${srcId}/clear`, { method: "POST" });
+    router.refresh();
+  }
+
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+
+  function toggleSource(id: string) {
+    setSelectedSources((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+
+  async function bulkClearSources() {
+    if (!confirm(`Clear import data from ${selectedSources.size} source(s)? Messages will be deleted but sources kept.`)) return;
+    for (const id of selectedSources) {
+      await fetch(`/api/backlog/sources/${id}/clear`, { method: "POST" });
+    }
+    setSelectedSources(new Set());
+    router.refresh();
+  }
+
+  async function bulkDeleteSources() {
+    if (!confirm(`DELETE ${selectedSources.size} source(s) and ALL their messages? This cannot be undone.`)) return;
+    for (const id of selectedSources) {
+      await fetch(`/api/backlog/sources/${id}`, { method: "DELETE" });
+    }
+    setSelectedSources(new Set());
+    router.refresh();
+  }
+
   async function editSourceLabel(srcId: string, newLabel: string) {
     await fetch(`/api/backlog/sources/${srcId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -403,22 +447,27 @@ export function BacklogCaseView({
 
                 {/* FILE UPLOAD — PRIMARY PATH */}
                 <div className="space-y-1.5">
-                  <Label>Upload WhatsApp .txt Export File</Label>
+                  <Label>Upload WhatsApp .txt Export File(s)</Label>
                   <input
                     type="file"
                     accept=".txt,.text"
-                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    multiple
+                    onChange={(e) => setImportFiles(e.target.files ? Array.from(e.target.files) : [])}
                     className="w-full text-xs text-[#E0E0E0] file:bg-[#FF6600] file:text-black file:border-0 file:px-3 file:py-1.5 file:text-xs file:font-bold file:mr-3 file:cursor-pointer bg-[#222222] border border-[#333333] p-1"
                   />
                   <div className="text-[9px] text-[#666666]">
-                    Upload the complete exported .txt file. No manual chunking required.<br/>
-                    File is stored verbatim before parsing. Zero data loss.
+                    Select one or multiple .txt files. Each uploads to the selected source.<br/>
+                    Files stored verbatim before parsing. Zero data loss.
                   </div>
                 </div>
 
+                {importFiles.length > 0 && !uploadStatus && (
+                  <div className="text-[9px] text-[#888888] bb-mono">{importFiles.length} file(s) selected: {importFiles.map((f) => f.name).join(", ")}</div>
+                )}
+
                 {!uploadStatus && (
-                  <Button onClick={handleFileUpload} disabled={submitting || !importSourceId || !importFile} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
-                    {submitting ? "Uploading..." : "Upload & Parse"}
+                  <Button onClick={handleFileUpload} disabled={submitting || !importSourceId || (importFiles.length === 0 && !importFile)} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                    {submitting ? "Uploading..." : `Upload & Parse${importFiles.length > 1 ? ` (${importFiles.length} files)` : ""}`}
                   </Button>
                 )}
 
@@ -626,23 +675,61 @@ export function BacklogCaseView({
 
         {/* SOURCES TAB */}
         <TabsContent value="sources" className="mt-4 space-y-3">
+          {/* Bulk action bar */}
+          {selectedSources.size > 0 && (
+            <div className="flex items-center gap-2 border border-[#3399FF]/30 bg-[#3399FF]/5 px-3 py-2">
+              <span className="text-xs text-[#3399FF] bb-mono font-bold">{selectedSources.size} selected</span>
+              <Button size="sm" onClick={bulkClearSources} variant="outline" className="bg-[#222222] text-[#FF9900] border-[#FF9900]/30 hover:bg-[#FF9900]/10">
+                Clear Import Data
+              </Button>
+              <Button size="sm" onClick={bulkDeleteSources} variant="outline" className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
+                <Trash2 className="size-3 mr-1" />Delete Sources
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setSelectedSources(new Set())} className="bg-[#222222] border-[#333333] text-[#888888]">
+                Clear Selection
+              </Button>
+            </div>
+          )}
+
           {backlogCase.sourceGroups.map((g) => (
             <div key={g.id} className="space-y-2">
-              <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold">{g.sourceType}: {g.name}</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={g.sources.every((s) => selectedSources.has(s.id))}
+                  onChange={() => {
+                    const allIds = g.sources.map((s) => s.id);
+                    const allSelected = allIds.every((id) => selectedSources.has(id));
+                    setSelectedSources((prev) => {
+                      const next = new Set(prev);
+                      allIds.forEach((id) => allSelected ? next.delete(id) : next.add(id));
+                      return next;
+                    });
+                  }}
+                  className="accent-[#3399FF]"
+                />
+                <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold">{g.sourceType}: {g.name}</div>
+              </div>
               {g.sources.map((s) => (
-                <div key={s.id} className="border border-[#333333] bg-[#1A1A1A] p-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm text-[#E0E0E0]">{s.label}</div>
-                    <div className="text-[9px] text-[#666666] bb-mono mt-0.5">
-                      {s._count.messages} messages
-                      {s.dateFrom && <> · {new Date(s.dateFrom).toLocaleDateString("en-GB")} – {s.dateTo ? new Date(s.dateTo).toLocaleDateString("en-GB") : "now"}</>}
+                <div key={s.id} className={`border ${selectedSources.has(s.id) ? "border-[#3399FF]" : "border-[#333333]"} bg-[#1A1A1A] p-3 flex items-center justify-between`}>
+                  <div className="flex items-center gap-3">
+                    <input type="checkbox" checked={selectedSources.has(s.id)} onChange={() => toggleSource(s.id)} className="accent-[#3399FF]" />
+                    <div>
+                      <div className="text-sm text-[#E0E0E0]">{s.label}</div>
+                      <div className="text-[9px] text-[#666666] bb-mono mt-0.5">
+                        {s._count.messages} messages
+                        {s.dateFrom && <> · {new Date(s.dateFrom).toLocaleDateString("en-GB")} – {s.dateTo ? new Date(s.dateTo).toLocaleDateString("en-GB") : "now"}</>}
+                      </div>
+                      {s.participantList.length > 0 && (
+                        <div className="text-[8px] text-[#555555] mt-0.5">{s.participantList.join(", ")}</div>
+                      )}
                     </div>
-                    {s.participantList.length > 0 && (
-                      <div className="text-[8px] text-[#555555] mt-0.5">{s.participantList.join(", ")}</div>
-                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge className={`text-[9px] ${s.status === "IMPORTED" || s.status === "PARSED" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>{s.status}</Badge>
+                    {s._count.messages > 0 && (
+                      <button onClick={() => clearSource(s.id)} className="p-0.5 hover:bg-[#FF9900]/10" title="Clear import data"><Upload className="size-3 text-[#FF9900]" /></button>
+                    )}
                     {editingSourceId === s.id ? (
                       <div className="flex items-center gap-1">
                         <input value={editingSourceLabel} onChange={(e) => setEditingSourceLabel(e.target.value)} className="h-6 w-32 text-xs bg-[#222222] border border-[#FF6600] text-[#E0E0E0] px-1" onKeyDown={(e) => { if (e.key === "Enter") { editSourceLabel(s.id, editingSourceLabel); setEditingSourceId(null); } }} autoFocus />
