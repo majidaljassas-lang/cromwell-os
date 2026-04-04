@@ -1677,3 +1677,78 @@ model ExtractedLineCandidate {
   @@index([status])
   @@index([groupLabel])
 }
+
+// ─── BACKLOG RECONSTRUCTION ─────────────────────────────────────────────────
+
+model BacklogCase {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  siteRef     String?
+  status      String   @default("ACTIVE")
+  dateFrom    DateTime?
+  dateTo      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sourceGroups BacklogSourceGroup[]
+
+  @@index([name])
+}
+
+model BacklogSourceGroup {
+  id          String   @id @default(uuid())
+  caseId      String
+  name        String
+  description String?
+  sourceType  String
+  createdAt   DateTime @default(now())
+
+  case    BacklogCase     @relation(fields: [caseId], references: [id])
+  sources BacklogSource[]
+
+  @@index([caseId])
+}
+
+model BacklogSource {
+  id            String   @id @default(uuid())
+  groupId       String
+  label         String
+  sourceType    String
+  participantList String[]  @default([])
+  rawFileRef    String?
+  importedAt    DateTime?
+  messageCount  Int      @default(0)
+  dateFrom      DateTime?
+  dateTo        DateTime?
+  status        String   @default("IMPORTED")
+  createdAt     DateTime @default(now())
+
+  group    BacklogSourceGroup @relation(fields: [groupId], references: [id])
+  messages BacklogMessage[]
+
+  @@index([groupId])
+}
+
+model BacklogMessage {
+  id            String   @id @default(uuid())
+  sourceId      String
+  timestamp     DateTime
+  sender        String
+  rawText       String
+  messageType   String   @default("UNCLASSIFIED")
+  hasAttachment Boolean  @default(false)
+  attachmentRef String?
+  isDuplicate   Boolean  @default(false)
+  duplicateOfId String?
+  linkedToId    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  source BacklogSource @relation(fields: [sourceId], references: [id])
+
+  @@index([sourceId])
+  @@index([timestamp])
+  @@index([messageType])
+  @@index([sender])
+}

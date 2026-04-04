@@ -19,6 +19,7 @@ import {
   Banknote,
   BarChart3,
   FolderArchive,
+  Archive,
 } from "lucide-react";
 
 const navItems = [
@@ -38,6 +39,7 @@ const navItems = [
   { label: "CASH SALES", href: "/cash-sales", icon: Banknote },
   { label: "REPORTS", href: "/reports", icon: BarChart3 },
   { label: "SITE PACKS", href: "/site-packs", icon: FolderArchive },
+  { label: "BACKLOG", href: "/backlog", icon: Archive },
 ];
 
 export function Sidebar() {
