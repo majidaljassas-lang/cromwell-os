@@ -382,6 +382,21 @@ export function BacklogCaseView({
 
   const [linkingMsgId, setLinkingMsgId] = useState<string | null>(null);
   const [linkingRelType, setLinkingRelType] = useState<string | null>(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkResults, setLinkResults] = useState<Message[]>([]);
+  const [linkSearching, setLinkSearching] = useState(false);
+
+  async function searchForLink(query: string) {
+    setLinkSearch(query);
+    if (!query.trim() || query.length < 2) { setLinkResults([]); return; }
+    setLinkSearching(true);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?search=${encodeURIComponent(query)}&limit=10`);
+    if (res.ok) {
+      const data = await res.json();
+      setLinkResults(data.messages.filter((m: Message) => m.id !== linkingMsgId));
+    }
+    setLinkSearching(false);
+  }
 
   async function classifyMessage(msgId: string, field: string, value: string) {
     // If setting a relation type other than NONE, enter linking mode
@@ -738,13 +753,36 @@ export function BacklogCaseView({
               placeholder="Search text..." className="h-6 w-48 text-[10px] bg-[#222222] border-[#FF6600]/50 focus:border-[#FF6600]" />
           </div>
 
-          {/* Linking mode banner */}
+          {/* Linking mode banner + cross-source search */}
           {linkingMsgId && (
-            <div className="border border-[#FF6600] bg-[#FF6600]/10 px-4 py-2 flex items-center justify-between">
-              <div className="text-xs text-[#FF6600] font-bold bb-mono">
-                Click the message that this is a <span className="text-white">{linkingRelType?.replace(/_/g, " ")}</span>
+            <div className="border border-[#FF6600] bg-[#FF6600]/10 px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-[#FF6600] font-bold bb-mono">
+                  Click a message below OR search across all sources to link as <span className="text-white">{linkingRelType?.replace(/_/g, " ")}</span>
+                </div>
+                <button onClick={() => { setLinkingMsgId(null); setLinkingRelType(null); setLinkSearch(""); setLinkResults([]); }} className="text-[9px] text-[#888888] hover:text-[#E0E0E0] px-2 py-0.5 border border-[#333333]">Cancel</button>
               </div>
-              <button onClick={() => { setLinkingMsgId(null); setLinkingRelType(null); }} className="text-[9px] text-[#888888] hover:text-[#E0E0E0] px-2 py-0.5 border border-[#333333]">Cancel</button>
+              <div className="flex items-center gap-2">
+                <Input value={linkSearch} onChange={(e) => searchForLink(e.target.value)}
+                  placeholder="Search across ALL sources (e.g. drylining, order)..." className="h-7 text-[10px] bg-[#222222] border-[#FF6600]/50 flex-1" />
+                {linkSearching && <span className="text-[9px] text-[#FF6600] animate-pulse">searching...</span>}
+              </div>
+              {linkResults.length > 0 && (
+                <div className="border border-[#333333] bg-[#151515] max-h-40 overflow-y-auto">
+                  {linkResults.map((r) => (
+                    <button key={r.id} onClick={() => { linkToMessage(r.id); setLinkSearch(""); setLinkResults([]); }}
+                      className="w-full text-left px-3 py-1.5 border-b border-[#2A2A2A] hover:bg-[#FF6600]/10 text-xs">
+                      <span className="text-[9px] text-[#666666] bb-mono">{new Date(r.parsedTimestamp).toLocaleDateString("en-GB")}</span>
+                      {" "}
+                      <span className="text-[#3399FF] font-bold">{r.sender}</span>
+                      {" "}
+                      <span className="text-[8px] text-[#555555]">{(r as Message & { sourceLabel?: string }).sourceLabel || ""}</span>
+                      {" — "}
+                      <span className="text-[#E0E0E0]">{r.rawText.slice(0, 80)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
