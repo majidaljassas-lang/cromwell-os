@@ -57,6 +57,8 @@ type BacklogCase = {
   description: string | null;
   siteRef: string | null;
   status: string;
+  dateFrom: string | null;
+  dateTo: string | null;
   sourceGroups: SourceGroup[];
 };
 
@@ -88,11 +90,13 @@ export function BacklogCaseView({
   const [hasMore, setHasMore] = useState(initialMessages.length < stats.messageCount);
   const [loadingMore, setLoadingMore] = useState(false);
   const [dbTotal, setDbTotal] = useState(stats.messageCount);
+  const [pageSize, setPageSize] = useState(100);
+  const [autoLoading, setAutoLoading] = useState(false);
 
-  async function loadMore() {
+  async function loadMore(customLimit?: number) {
     setLoadingMore(true);
     const params = new URLSearchParams({
-      limit: "100",
+      limit: String(customLimit || pageSize),
       offset: String(messages.length),
     });
     if (filterType !== "ALL") params.set("messageType", filterType);
@@ -117,8 +121,8 @@ export function BacklogCaseView({
 
   async function jumpToLatest() {
     setLoadingMore(true);
-    const lastOffset = Math.max(0, totalCount - 100);
-    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=100&offset=${lastOffset}`);
+    const lastOffset = Math.max(0, totalCount - pageSize);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=${pageSize}&offset=${lastOffset}`);
     if (res.ok) {
       const data = await res.json();
       setMessages(data.messages);
@@ -129,9 +133,34 @@ export function BacklogCaseView({
     setLoadingMore(false);
   }
 
+  async function loadAll() {
+    setAutoLoading(true);
+    setLoadingMore(true);
+    let allMsgs: Message[] = [];
+    let offset = 0;
+    let more = true;
+    while (more) {
+      const params = new URLSearchParams({ limit: "500", offset: String(offset) });
+      const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?${params}`);
+      if (!res.ok) break;
+      const data = await res.json();
+      const existingIds = new Set(allMsgs.map((m) => m.id));
+      const newMsgs = data.messages.filter((m: Message) => !existingIds.has(m.id));
+      allMsgs = [...allMsgs, ...newMsgs];
+      more = data.hasMore;
+      offset += data.returnedCount;
+      setMessages([...allMsgs]);
+      setTotalCount(data.totalCount);
+      setDbTotal(data.stats?.dbTotal || data.totalCount);
+    }
+    setHasMore(false);
+    setAutoLoading(false);
+    setLoadingMore(false);
+  }
+
   async function jumpToOldest() {
     setLoadingMore(true);
-    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=100&offset=0`);
+    const res = await fetch(`/api/backlog/cases/${backlogCase.id}/timeline?limit=${pageSize}&offset=0`);
     if (res.ok) {
       const data = await res.json();
       setMessages(data.messages);
@@ -151,6 +180,8 @@ export function BacklogCaseView({
   const [filterSender, setFilterSender] = useState("");
   const [filterSource, setFilterSource] = useState("ALL");
   const [filterParsed, setFilterParsed] = useState("ALL");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
 
   const allSources = backlogCase.sourceGroups.flatMap((g) => g.sources);
 
@@ -397,6 +428,16 @@ export function BacklogCaseView({
     if (filterSource !== "ALL" && m.sourceId !== filterSource) return false;
     if (filterParsed === "PARSED" && !m.parsedOk) return false;
     if (filterParsed === "UNPARSED" && m.parsedOk) return false;
+    if (filterDateFrom) {
+      const msgDate = new Date(m.parsedTimestamp);
+      const fromDate = new Date(filterDateFrom);
+      if (msgDate < fromDate) return false;
+    }
+    if (filterDateTo) {
+      const msgDate = new Date(m.parsedTimestamp);
+      const toDate = new Date(filterDateTo + "T23:59:59");
+      if (msgDate > toDate) return false;
+    }
     return true;
   });
 
@@ -551,16 +592,39 @@ export function BacklogCaseView({
 
         {/* TIMELINE TAB */}
         <TabsContent value="timeline" className="mt-4 space-y-3">
-          {/* Loaded count + navigation */}
-          <div className="flex items-center justify-between">
+          {/* Loaded count + navigation + page size + date range */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-xs text-[#888888] bb-mono">
-              Loaded <span className="text-[#E0E0E0] font-bold">{filtered.length}</span> of <span className="text-[#E0E0E0] font-bold">{totalCount}</span> messages
+              Showing <span className="text-[#E0E0E0] font-bold">{filtered.length}</span> of <span className="text-[#E0E0E0] font-bold">{totalCount}</span> messages
+              {filtered.length < messages.length && <span className="text-[#FF9900]"> (filtered)</span>}
               {hasMore && <span className="text-[#FF9900]"> (more available)</span>}
+              {autoLoading && <span className="text-[#FF6600] animate-pulse"> loading all...</span>}
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              {/* Page size */}
+              <span className="text-[8px] text-[#666666]">PER PAGE:</span>
+              {[50, 100, 150, 200, 250].map((n) => (
+                <button key={n} onClick={() => setPageSize(n)} className={`text-[9px] px-1.5 py-0.5 ${pageSize === n ? "bg-[#FF6600] text-black" : "text-[#888888] hover:text-[#E0E0E0]"}`}>{n}</button>
+              ))}
+              <span className="text-[#555555]">|</span>
               <button onClick={jumpToOldest} className="text-[9px] px-2 py-0.5 bg-[#222222] border border-[#333333] text-[#888888] hover:text-[#E0E0E0]">⇤ Oldest</button>
               <button onClick={jumpToLatest} className="text-[9px] px-2 py-0.5 bg-[#222222] border border-[#333333] text-[#888888] hover:text-[#E0E0E0]">Latest ⇥</button>
+              <button onClick={loadAll} disabled={autoLoading || !hasMore} className="text-[9px] px-2 py-0.5 bg-[#FF6600] text-black hover:bg-[#FF9900] disabled:opacity-30">Load All</button>
             </div>
+          </div>
+
+          {/* Date range filter */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[8px] text-[#666666] uppercase tracking-widest">DATE:</span>
+            <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} className="h-6 text-[10px] bg-[#222222] border border-[#333333] text-[#E0E0E0] px-1 bb-mono" />
+            <span className="text-[8px] text-[#666666]">→</span>
+            <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} className="h-6 text-[10px] bg-[#222222] border border-[#333333] text-[#E0E0E0] px-1 bb-mono" />
+            <button onClick={() => { const d = new Date(); d.setDate(d.getDate() - 30); setFilterDateFrom(d.toISOString().slice(0,10)); setFilterDateTo(""); }} className="text-[8px] px-1.5 py-0.5 text-[#888888] hover:text-[#E0E0E0] bg-[#222222] border border-[#333333]">30d</button>
+            <button onClick={() => { const d = new Date(); d.setDate(d.getDate() - 90); setFilterDateFrom(d.toISOString().slice(0,10)); setFilterDateTo(""); }} className="text-[8px] px-1.5 py-0.5 text-[#888888] hover:text-[#E0E0E0] bg-[#222222] border border-[#333333]">90d</button>
+            <button onClick={() => { setFilterDateFrom(""); setFilterDateTo(""); }} className="text-[8px] px-1.5 py-0.5 text-[#888888] hover:text-[#E0E0E0] bg-[#222222] border border-[#333333]">All</button>
+            {backlogCase.dateFrom && (
+              <button onClick={() => setFilterDateFrom(backlogCase.dateFrom!.slice(0,10))} className="text-[8px] px-1.5 py-0.5 text-[#FF6600] hover:bg-[#FF6600]/10 bg-[#222222] border border-[#FF6600]/30">From Job Start</button>
+            )}
           </div>
 
           {/* Debug Panel */}
@@ -665,7 +729,7 @@ export function BacklogCaseView({
           {/* Load More */}
           {hasMore && (
             <div className="text-center py-3">
-              <Button onClick={loadMore} disabled={loadingMore} variant="outline" className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
+              <Button onClick={() => loadMore()} disabled={loadingMore} variant="outline" className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
                 {loadingMore ? "Loading..." : `Load More (${totalCount - messages.length} remaining)`}
               </Button>
             </div>
