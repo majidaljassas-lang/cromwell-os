@@ -32,12 +32,22 @@ interface ParsedMsg {
   lineCount: number;
 }
 
-// Both WhatsApp formats:
-// [13/11/2024, 12:16:37] Sender: Message
-// 13/11/2024, 12:16 - Sender: Message
-const WA_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}:\d{2})\]\s*([^:]+):\s*([\s\S]*)/;
-const WA_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
-function matchWaLine(line: string): RegExpMatchArray | null { return line.match(WA_BRACKET) || line.match(WA_DASH); }
+// Timestamp boundary detection — supports both formats
+const TS_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/;
+const TS_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*/;
+
+function parseWaLine(line: string): { date: string; time: string; sender: string; text: string } | null {
+  const clean = line.replace(/^\uFEFF/, "");
+  let tsMatch = clean.match(TS_BRACKET);
+  let remainder: string;
+  if (tsMatch) { remainder = clean.slice(tsMatch[0].length); }
+  else { tsMatch = clean.match(TS_DASH); if (tsMatch) { remainder = clean.slice(tsMatch[0].length); } else { return null; } }
+  const colonIdx = remainder.indexOf(": ");
+  if (colonIdx > 0 && colonIdx < 60) {
+    return { date: tsMatch[1], time: tsMatch[2], sender: remainder.slice(0, colonIdx).trim(), text: remainder.slice(colonIdx + 2) };
+  }
+  return { date: tsMatch[1], time: tsMatch[2], sender: "SYSTEM", text: remainder.trim() };
+}
 
 function parseTimestamp(date: string, time: string): { ts: Date; confidence: string } {
   const [d, m, y] = date.split("/");
@@ -82,18 +92,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // Skip completely empty lines (but they don't break message blocks)
       if (!line.trim()) continue;
 
-      // Try to match WhatsApp timestamp pattern
-      const waMatch = matchWaLine(line);
+      const parsed = parseWaLine(line);
 
-      if (waMatch) {
-        // New message starts — flush previous if exists
+      if (parsed) {
         if (currentMsg) {
           messages.push(currentMsg);
         }
 
-        const [, date, time, sender, text] = waMatch;
-        const rawTs = `${date}, ${time}`;
-        const { ts, confidence } = parseTimestamp(date, time);
+        const rawTs = `${parsed.date}, ${parsed.time}`;
+        const { ts, confidence } = parseTimestamp(parsed.date, parsed.time);
+        const date = parsed.date;
+        const time = parsed.time;
+        const sender = parsed.sender;
+        const text = parsed.text;
 
         currentMsg = {
           startLine: i + 1,

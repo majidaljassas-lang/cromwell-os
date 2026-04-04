@@ -126,14 +126,63 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 // ─── Async Parse (runs after response) ──────────────────────────────────────
 
-// Matches BOTH WhatsApp formats:
-// Format A (bracketed): [13/11/2024, 12:16:37] Sender Name: Message
-// Format B (unbracketed): 13/11/2024, 12:16 - Sender Name: Message
-const WA_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}:\d{2})\]\s*([^:]+):\s*([\s\S]*)/;
-const WA_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
+// TIMESTAMP BOUNDARY DETECTION
+// Step 1: detect if line starts with a WhatsApp timestamp
+// Supports: [DD/MM/YYYY, HH:MM:SS] and DD/MM/YYYY, HH:MM -
+// Seconds optional. D/M can be 1 or 2 digits.
+const TS_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/;
+const TS_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*/;
 
-function matchWaLine(line: string): RegExpMatchArray | null {
-  return line.match(WA_BRACKET) || line.match(WA_DASH);
+interface WaParsed {
+  date: string;
+  time: string;
+  sender: string;
+  text: string;
+}
+
+function parseWaLine(line: string): WaParsed | null {
+  // Strip BOM if present
+  const clean = line.replace(/^\uFEFF/, "");
+
+  // Try bracketed format first: [DD/MM/YYYY, HH:MM:SS] remainder
+  let tsMatch = clean.match(TS_BRACKET);
+  let remainder: string;
+
+  if (tsMatch) {
+    remainder = clean.slice(tsMatch[0].length);
+  } else {
+    // Try dash format: DD/MM/YYYY, HH:MM - remainder
+    tsMatch = clean.match(TS_DASH);
+    if (tsMatch) {
+      remainder = clean.slice(tsMatch[0].length);
+    } else {
+      return null; // No timestamp found — this is a continuation line
+    }
+  }
+
+  const date = tsMatch[1];
+  const time = tsMatch[2];
+
+  // Step 2: parse sender and message from remainder
+  // Format: "Sender Name: message text"
+  // System messages may not have ": " (e.g. "Catalyn created group")
+  const colonIdx = remainder.indexOf(": ");
+  if (colonIdx > 0 && colonIdx < 60) {
+    return {
+      date,
+      time,
+      sender: remainder.slice(0, colonIdx).trim(),
+      text: remainder.slice(colonIdx + 2),
+    };
+  }
+
+  // No colon — system message, store entire remainder as text
+  return {
+    date,
+    time,
+    sender: "SYSTEM",
+    text: remainder.trim(),
+  };
 }
 
 async function startAsyncParse(sourceId: string) {
@@ -173,32 +222,34 @@ async function startAsyncParse(sourceId: string) {
     const line = rawLines[i];
     if (!line.trim()) continue;
 
-    const waMatch = matchWaLine(line);
+    const parsed = parseWaLine(line);
 
-    if (waMatch) {
+    if (parsed) {
+      // New message boundary — flush previous
       if (currentMsg) messages.push(currentMsg);
 
-      const [, date, time, sender, text] = waMatch;
-      const rawTs = `${date}, ${time}`;
-      const { ts, confidence } = parseTs(date, time);
+      const rawTs = `${parsed.date}, ${parsed.time}`;
+      const { ts, confidence } = parseTs(parsed.date, parsed.time);
 
       currentMsg = {
         startLine: i + 1,
         rawTimestampText: rawTs,
         parsedTimestamp: ts,
         timestampConfidence: confidence,
-        sender: sender.trim(),
-        rawText: text.trim(),
+        sender: parsed.sender,
+        rawText: parsed.text,
         parsedOk: true,
         isMultiline: false,
         lineCount: 1,
       };
     } else {
+      // No timestamp — continuation of previous message (multiline)
       if (currentMsg) {
         currentMsg.rawText += "\n" + line;
         currentMsg.isMultiline = true;
         currentMsg.lineCount++;
       } else {
+        // Very first line has no timestamp — store as unparsed
         currentMsg = {
           startLine: i + 1,
           rawTimestampText: null,
@@ -227,9 +278,24 @@ async function startAsyncParse(sourceId: string) {
 
   // Debug logging
   const tsMatches = messages.filter((m) => m.parsedOk).length;
-  console.log(`[BACKLOG PARSE] Source ${sourceId}: ${rawLines.length} raw lines → ${messages.length} messages (${tsMatches} parsed, ${messages.length - tsMatches} unparsed)`);
+  const multilineCount = messages.filter((m) => m.isMultiline).length;
+  const unparsedCount2 = messages.filter((m) => !m.parsedOk).length;
+  console.log(`[BACKLOG PARSE] Source ${sourceId}:`);
+  console.log(`  Raw lines:       ${rawLines.length}`);
+  console.log(`  Total messages:  ${messages.length}`);
+  console.log(`  Parsed OK:       ${tsMatches}`);
+  console.log(`  Multiline:       ${multilineCount}`);
+  console.log(`  Unparsed:        ${unparsedCount2}`);
+  console.log(`  First 3 messages:`);
   for (const m of messages.slice(0, 3)) {
-    console.log(`  [MSG] line ${m.startLine} | ${m.sender} | ${m.rawTimestampText} | ${m.rawText.slice(0, 60)} | multiline:${m.isMultiline} lines:${m.lineCount}`);
+    console.log(`    line ${m.startLine} | ${m.sender} | ts="${m.rawTimestampText}" | "${m.rawText.slice(0, 80)}" | multi:${m.isMultiline} lines:${m.lineCount}`);
+  }
+  // Also log first raw line for format detection
+  const firstNonEmpty = rawLines.find((l) => l.trim());
+  if (firstNonEmpty) {
+    console.log(`  First raw line: "${firstNonEmpty.slice(0, 120)}"`);
+    console.log(`  Bracket match: ${!!firstNonEmpty.match(TS_BRACKET)}`);
+    console.log(`  Dash match:    ${!!firstNonEmpty.match(TS_DASH)}`);
   }
 
   // Delete existing messages then bulk create
