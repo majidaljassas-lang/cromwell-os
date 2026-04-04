@@ -127,6 +127,23 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
 
   function kd(e: React.KeyboardEvent) { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }
 
+  if (!mounted) {
+    // SSR placeholder — static text only, no inputs
+    return (
+      <TableRow className="hover:bg-[#1E1E1E]">
+        <TableCell className="p-1 max-w-[250px] font-medium text-xs">{line.description}</TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">{line.supplierName || "—"}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.qty)}</TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">{line.unit}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.expectedCostUnit)}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.actualSaleUnit)}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">—</TableCell>
+        <TableCell className="text-right text-[10px] p-1">—</TableCell>
+        <TableCell className="p-1"><Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#888888] bg-[#333333]">{line.status.replace(/_/g, " ")}</Badge></TableCell>
+      </TableRow>
+    );
+  }
+
   return (
     <TableRow className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""}`}>
       <TableCell className="p-0 max-w-[250px]">
