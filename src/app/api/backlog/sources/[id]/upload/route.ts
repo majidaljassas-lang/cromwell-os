@@ -126,7 +126,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 // ─── Async Parse (runs after response) ──────────────────────────────────────
 
-const WA_PATTERN = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
+// Matches BOTH WhatsApp formats:
+// Format A (bracketed): [13/11/2024, 12:16:37] Sender Name: Message
+// Format B (unbracketed): 13/11/2024, 12:16 - Sender Name: Message
+const WA_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}:\d{2})\]\s*([^:]+):\s*([\s\S]*)/;
+const WA_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
+
+function matchWaLine(line: string): RegExpMatchArray | null {
+  return line.match(WA_BRACKET) || line.match(WA_DASH);
+}
 
 async function startAsyncParse(sourceId: string) {
   await prisma.backlogSource.update({
@@ -165,7 +173,7 @@ async function startAsyncParse(sourceId: string) {
     const line = rawLines[i];
     if (!line.trim()) continue;
 
-    const waMatch = line.match(WA_PATTERN);
+    const waMatch = matchWaLine(line);
 
     if (waMatch) {
       if (currentMsg) messages.push(currentMsg);
@@ -216,6 +224,13 @@ async function startAsyncParse(sourceId: string) {
   }
 
   if (currentMsg) messages.push(currentMsg);
+
+  // Debug logging
+  const tsMatches = messages.filter((m) => m.parsedOk).length;
+  console.log(`[BACKLOG PARSE] Source ${sourceId}: ${rawLines.length} raw lines → ${messages.length} messages (${tsMatches} parsed, ${messages.length - tsMatches} unparsed)`);
+  for (const m of messages.slice(0, 3)) {
+    console.log(`  [MSG] line ${m.startLine} | ${m.sender} | ${m.rawTimestampText} | ${m.rawText.slice(0, 60)} | multiline:${m.isMultiline} lines:${m.lineCount}`);
+  }
 
   // Delete existing messages then bulk create
   await prisma.backlogMessage.deleteMany({ where: { sourceId } });

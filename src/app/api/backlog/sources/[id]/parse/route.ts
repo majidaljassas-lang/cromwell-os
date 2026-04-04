@@ -32,7 +32,12 @@ interface ParsedMsg {
   lineCount: number;
 }
 
-const WA_PATTERN = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
+// Both WhatsApp formats:
+// [13/11/2024, 12:16:37] Sender: Message
+// 13/11/2024, 12:16 - Sender: Message
+const WA_BRACKET = /^\[(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}:\d{2})\]\s*([^:]+):\s*([\s\S]*)/;
+const WA_DASH = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*([\s\S]*)/;
+function matchWaLine(line: string): RegExpMatchArray | null { return line.match(WA_BRACKET) || line.match(WA_DASH); }
 
 function parseTimestamp(date: string, time: string): { ts: Date; confidence: string } {
   const [d, m, y] = date.split("/");
@@ -78,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!line.trim()) continue;
 
       // Try to match WhatsApp timestamp pattern
-      const waMatch = line.match(WA_PATTERN);
+      const waMatch = matchWaLine(line);
 
       if (waMatch) {
         // New message starts — flush previous if exists
