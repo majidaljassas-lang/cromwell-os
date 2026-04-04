@@ -80,10 +80,19 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
   onClickRow: () => void;
   onSaved: () => void;
 }) {
-  const [desc, setDesc] = useState(line.description);
-  const [qtyVal, setQtyVal] = useState(String(Number(line.qty)));
-  const [costVal, setCostVal] = useState(String(Number(line.expectedCostUnit || 0) || ""));
-  const [saleVal, setSaleVal] = useState(String(Number(line.actualSaleUnit || 0) || ""));
+  const [desc, setDesc] = useState("");
+  const [qtyVal, setQtyVal] = useState("");
+  const [costVal, setCostVal] = useState("");
+  const [saleVal, setSaleVal] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setDesc(line.description);
+    setQtyVal(line.qty ? String(Number(line.qty)) : "1");
+    setCostVal(Number(line.expectedCostUnit || 0) ? String(Number(line.expectedCostUnit)) : "");
+    setSaleVal(Number(line.actualSaleUnit || 0) ? String(Number(line.actualSaleUnit)) : "");
+    setMounted(true);
+  }, [line.description, line.qty, line.expectedCostUnit, line.actualSaleUnit]);
   const [saving, setSaving] = useState(false);
 
   const qty = Number(qtyVal || 1);
