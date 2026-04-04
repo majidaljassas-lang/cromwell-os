@@ -16,10 +16,14 @@ type Message = {
   id: string;
   sourceId: string;
   lineNumber: number;
-  timestamp: string;
+  rawTimestampText: string | null;
+  parsedTimestamp: string;
+  timestampConfidence: string;
   sender: string;
   rawText: string;
   parsedOk: boolean;
+  isMultiline: boolean;
+  lineCount: number;
   messageType: string;
   hasAttachment: boolean;
   relationType: string;
@@ -334,11 +338,15 @@ export function BacklogCaseView({
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[9px] text-[#666666] bb-mono">{new Date(msg.timestamp).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        <span className={`text-[9px] bb-mono ${msg.timestampConfidence === "LOW" ? "text-[#FF3333]" : msg.timestampConfidence === "MEDIUM" ? "text-[#FF9900]" : "text-[#666666]"}`} title={msg.rawTimestampText || "no raw timestamp"}>
+                          {new Date(msg.parsedTimestamp).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {msg.timestampConfidence !== "HIGH" && <span className="ml-1 text-[7px]">({msg.timestampConfidence})</span>}
+                        </span>
                         <span className="text-[10px] font-bold text-[#3399FF]">{msg.sender}</span>
                         <span className="text-[8px] text-[#555555]">{sourceMap[msg.sourceId]?.label || ""}</span>
                         {msg.hasAttachment && <Paperclip className="size-2.5 text-[#FF9900]" />}
                         {!msg.parsedOk && <Badge className="text-[7px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">UNPARSED</Badge>}
+                        {msg.isMultiline && <Badge className="text-[7px] px-1 py-0 text-[#00CCCC] bg-[#00CCCC]/10">{msg.lineCount}L</Badge>}
                         {msg.relationType !== "NONE" && <Badge className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">{msg.relationType.replace(/_/g, " ")}</Badge>}
                       </div>
                       <div className="text-xs text-[#E0E0E0] whitespace-pre-wrap">{msg.rawText}</div>

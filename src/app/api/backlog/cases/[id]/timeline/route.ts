@@ -38,7 +38,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const [messages, total] = await Promise.all([
       prisma.backlogMessage.findMany({
         where,
-        orderBy: { timestamp: "asc" },
+        orderBy: { parsedTimestamp: "asc" },
         take: limit,
         skip: offset,
       }),
@@ -48,7 +48,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // Compute stats
     const allMessages = await prisma.backlogMessage.findMany({
       where: { sourceId: { in: sourceIds } },
-      select: { sender: true, messageType: true, hasAttachment: true, timestamp: true },
+      select: { sender: true, messageType: true, hasAttachment: true, parsedTimestamp: true, timestampConfidence: true },
     });
 
     const participants = [...new Set(allMessages.map((m) => m.sender))];
@@ -75,8 +75,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         participants,
         participantCount: participants.length,
         attachmentCount,
-        dateFrom: allMessages.length > 0 ? allMessages.reduce((min, m) => m.timestamp < min ? m.timestamp : min, allMessages[0].timestamp) : null,
-        dateTo: allMessages.length > 0 ? allMessages.reduce((max, m) => m.timestamp > max ? m.timestamp : max, allMessages[0].timestamp) : null,
+        dateFrom: allMessages.length > 0 ? allMessages.reduce((min, m) => m.parsedTimestamp < min ? m.parsedTimestamp : min, allMessages[0].parsedTimestamp) : null,
+        dateTo: allMessages.length > 0 ? allMessages.reduce((max, m) => m.parsedTimestamp > max ? m.parsedTimestamp : max, allMessages[0].parsedTimestamp) : null,
         typeCounts,
       },
     });

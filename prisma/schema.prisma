@@ -1736,28 +1736,33 @@ model BacklogSource {
 }
 
 model BacklogMessage {
-  id                String   @id @default(uuid())
-  sourceId          String
-  lineNumber        Int      @default(0)
-  timestamp         DateTime
-  sender            String
-  rawText           String
-  parsedOk          Boolean  @default(true)
-  messageType       String   @default("UNCLASSIFIED")
-  hasAttachment     Boolean  @default(false)
-  attachmentRef     String?
-  relationType      String   @default("NONE")
-  relatedMessageId  String?
-  duplicateGroupId  String?
-  notes             String?
-  createdAt         DateTime @default(now())
+  id                    String   @id @default(uuid())
+  sourceId              String
+  lineNumber            Int      @default(0)
+  rawTimestampText      String?
+  parsedTimestamp       DateTime @default(now())
+  timestampConfidence   String   @default("HIGH")
+  sender                String
+  rawText               String
+  parsedOk              Boolean  @default(true)
+  isMultiline           Boolean  @default(false)
+  lineCount             Int      @default(1)
+  messageType           String   @default("UNCLASSIFIED")
+  hasAttachment         Boolean  @default(false)
+  attachmentRef         String?
+  relationType          String   @default("NONE")
+  relatedMessageId      String?
+  duplicateGroupId      String?
+  notes                 String?
+  createdAt             DateTime @default(now())
 
   source BacklogSource @relation(fields: [sourceId], references: [id])
 
   @@index([sourceId])
-  @@index([timestamp])
+  @@index([parsedTimestamp])
   @@index([messageType])
   @@index([sender])
   @@index([relationType])
   @@index([duplicateGroupId])
+  @@index([timestampConfidence])
 }
