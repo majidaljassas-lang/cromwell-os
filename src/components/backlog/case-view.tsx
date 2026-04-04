@@ -386,8 +386,9 @@ export function BacklogCaseView({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
     });
+    // Update local state immediately so UI reflects the change
+    setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, [field]: value } : m));
     setClassifyingId(null);
-    router.refresh();
   }
 
   // Filter messages
@@ -745,21 +746,27 @@ export function BacklogCaseView({
                         <div className="flex flex-col gap-1">
                           <div className="flex gap-0.5 flex-wrap">
                             <span className="text-[6px] text-[#555555] w-8">TYPE:</span>
-                            {MSG_TYPES.filter((t) => t !== "UNCLASSIFIED").map((t) => (
+                            {MSG_TYPES.filter((t) => t !== "UNCLASSIFIED").map((t) => {
+                              const isActive = msg.messageType === t;
+                              return (
                               <button key={t} onClick={() => classifyMessage(msg.id, "messageType", t)}
-                                className={`text-[7px] px-1.5 py-0.5 uppercase tracking-wider ${MSG_TYPE_COLORS[t] || "text-[#888888] bg-[#333333]"}`}>
-                                {t}
+                                className={`text-[7px] px-1.5 py-0.5 uppercase tracking-wider border ${isActive ? "border-white ring-1 ring-white font-black" : "border-transparent"} ${MSG_TYPE_COLORS[t] || "text-[#888888] bg-[#333333]"}`}>
+                                {isActive ? "✓ " : ""}{t}
                               </button>
-                            ))}
+                              );
+                            })}
                           </div>
                           <div className="flex gap-0.5 flex-wrap">
                             <span className="text-[6px] text-[#555555] w-8">REL:</span>
-                            {["NONE", "DUPLICATE_OF", "FOLLOW_UP_TO", "CONFIRMATION_OF"].map((r) => (
+                            {["NONE", "DUPLICATE_OF", "FOLLOW_UP_TO", "CONFIRMATION_OF"].map((r) => {
+                              const isActive = msg.relationType === r;
+                              return (
                               <button key={r} onClick={() => classifyMessage(msg.id, "relationType", r)}
-                                className="text-[7px] px-1.5 py-0.5 uppercase tracking-wider text-[#3399FF] bg-[#3399FF]/10">
-                                {r.replace(/_/g, " ")}
+                                className={`text-[7px] px-1.5 py-0.5 uppercase tracking-wider border ${isActive ? "border-white ring-1 ring-white text-white bg-[#3399FF] font-black" : "border-transparent text-[#3399FF] bg-[#3399FF]/10"}`}>
+                                {isActive ? "✓ " : ""}{r.replace(/_/g, " ")}
                               </button>
-                            ))}
+                              );
+                            })}
                           </div>
                           <button onClick={() => setClassifyingId(null)} className="text-[7px] px-1 text-[#666666] self-end">✕ close</button>
                         </div>
