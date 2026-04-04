@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeProduct, convertToBase } from "@/lib/reconciliation/normalizer";
+import { canonicalizeSite, parseOrderRef } from "@/lib/reconciliation/site-aliases";
 
 /**
  * POST: Ingest invoice lines for reconciliation.
@@ -22,8 +23,14 @@ export async function POST(request: Request) {
     let totalCreated = 0;
 
     for (const inv of invoices) {
+      // Site aliasing
+      const { canonical: canonicalSite, aliasUsed: siteAliasUsed } = canonicalizeSite(inv.site);
+
+      // Order ref parsing
+      const orderRef = parseOrderRef(inv.orderRef);
+
       for (const line of inv.lines) {
-        const { normalized, category, confidence } = normalizeProduct(line.productDescription);
+        const { normalized, confidence } = normalizeProduct(line.productDescription);
         const unit = line.unit || "EA";
         const qty = Number(line.qty || 0);
         const base = convertToBase(normalized, qty, unit);
@@ -44,6 +51,12 @@ export async function POST(request: Request) {
             invoiceDate: new Date(inv.invoiceDate),
             customer: inv.customer,
             site: inv.site || "Dellow Centre",
+            canonicalSite: canonicalSite,
+            siteAliasUsed: siteAliasUsed,
+            orderRefRaw: orderRef.raw,
+            orderRefTokens: orderRef.tokens,
+            orderRefDateHint: orderRef.dateHint,
+            orderRefItemHint: orderRef.itemHint,
             productDescription: line.productDescription,
             normalizedProduct: normalized,
             qty,

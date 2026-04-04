@@ -1810,6 +1810,12 @@ model BacklogInvoiceLine {
   invoiceDate           DateTime
   customer              String?
   site                  String?
+  canonicalSite         String?
+  siteAliasUsed         Boolean  @default(false)
+  orderRefRaw           String?
+  orderRefTokens        String[] @default([])
+  orderRefDateHint      String?
+  orderRefItemHint      String?
   productDescription    String
   normalizedProduct     String
   qty                   Decimal  @db.Decimal(14, 4)
@@ -1833,12 +1839,14 @@ model BacklogInvoiceLine {
 }
 
 model BacklogInvoiceMatch {
-  id                String   @id @default(uuid())
-  ticketLineId      String
-  invoiceLineId     String
-  matchConfidence   Decimal? @db.Decimal(5, 2)
-  matchMethod       String?
-  createdAt         DateTime @default(now())
+  id                  String   @id @default(uuid())
+  ticketLineId        String
+  invoiceLineId       String
+  matchConfidence     Decimal? @db.Decimal(5, 2)
+  matchMethod         String?
+  matchUsedSiteAlias  Boolean  @default(false)
+  matchUsedOrderRef   Boolean  @default(false)
+  createdAt           DateTime @default(now())
 
   ticketLine  BacklogTicketLine  @relation(fields: [ticketLineId], references: [id])
   invoiceLine BacklogInvoiceLine @relation(fields: [invoiceLineId], references: [id])

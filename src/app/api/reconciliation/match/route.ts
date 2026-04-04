@@ -29,22 +29,38 @@ export async function POST(request: Request) {
     let matchCount = 0;
 
     for (const tl of ticketLines) {
-      // Find invoice lines with same normalized product
+      // Find invoice lines with same normalized product (canonical site already filtered by caseId)
       const matches = invoiceLines.filter((il) => il.normalizedProduct === tl.normalizedProduct && il.normalizedProduct !== "UNKNOWN");
 
       if (matches.length > 0) {
         for (const il of matches) {
-          // Check if this exact pair already exists
           const existing = await prisma.backlogInvoiceMatch.findFirst({
             where: { ticketLineId: tl.id, invoiceLineId: il.id },
           });
           if (!existing) {
+            // Determine match signals used
+            const usedSiteAlias = il.siteAliasUsed;
+            const usedOrderRef = !!(il.orderRefItemHint && tl.normalizedProduct.toLowerCase().includes(il.orderRefItemHint.toLowerCase().split(" ")[0]));
+
+            // Calculate confidence
+            let confidence = 70; // base: normalized product match
+            if (il.canonicalSite === "DELLOW_CENTRE") confidence += 10; // site confirmed
+            if (usedOrderRef) confidence += 10; // order ref supports match
+            if (il.isBillLinked) confidence += 5; // bill-linked = higher trust
+
+            const methods: string[] = ["NORMALIZED_PRODUCT"];
+            if (usedSiteAlias) methods.push("SITE_ALIAS");
+            if (usedOrderRef) methods.push("ORDER_REF");
+            if (il.canonicalSite) methods.push("CANONICAL_SITE");
+
             await prisma.backlogInvoiceMatch.create({
               data: {
                 ticketLineId: tl.id,
                 invoiceLineId: il.id,
-                matchConfidence: 80,
-                matchMethod: "NORMALIZED_PRODUCT",
+                matchConfidence: Math.min(confidence, 99),
+                matchMethod: methods.join("+"),
+                matchUsedSiteAlias: usedSiteAlias,
+                matchUsedOrderRef: usedOrderRef,
               },
             });
             matchCount++;

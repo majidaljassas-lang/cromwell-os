@@ -60,9 +60,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
           invoiceNumber: m.invoiceLine.invoiceNumber,
           qty: Number(m.invoiceLine.qty),
           amount: Number(m.invoiceLine.amount || 0),
+          rawSite: m.invoiceLine.site,
+          canonicalSite: m.invoiceLine.canonicalSite,
+          siteAliasUsed: m.invoiceLine.siteAliasUsed,
+          orderRefRaw: m.invoiceLine.orderRefRaw,
           isBillLinked: m.invoiceLine.isBillLinked,
           invoiceLineType: m.invoiceLine.invoiceLineType,
           billingConfidence: m.invoiceLine.billingConfidence,
+          matchMethod: m.matchMethod,
+          matchUsedSiteAlias: m.matchUsedSiteAlias,
+          matchUsedOrderRef: m.matchUsedOrderRef,
         })),
       };
     });
