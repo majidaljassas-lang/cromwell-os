@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil } from "lucide-react";
+import { ReconciliationPanel } from "./reconciliation-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -674,6 +675,7 @@ export function BacklogCaseView({
         <TabsList>
           <TabsTrigger value="timeline">Timeline ({filtered.length})</TabsTrigger>
           <TabsTrigger value="sources">Sources ({allSources.length})</TabsTrigger>
+          <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
         </TabsList>
 
         {/* TIMELINE TAB */}
@@ -953,6 +955,11 @@ export function BacklogCaseView({
               ))}
             </div>
           ))}
+        </TabsContent>
+
+        {/* RECONCILIATION TAB */}
+        <TabsContent value="reconciliation" className="mt-4">
+          <ReconciliationPanel caseId={backlogCase.id} />
         </TabsContent>
       </Tabs>
     </div>
