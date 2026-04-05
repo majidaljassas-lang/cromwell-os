@@ -95,6 +95,7 @@ type Site = {
   postcode: string | null;
   country: string | null;
   notes: string | null;
+  aliases: string[];
   isActive: boolean;
   siteCommercialLinks: CommercialLink[];
   siteContactLinks: ContactLink[];
@@ -130,6 +131,7 @@ export function SiteDetail({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkSubmitting, setLinkSubmitting] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [aliases, setAliases] = useState<string[]>(site.aliases || []);
 
   async function handleSiteUpdate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -146,6 +148,7 @@ export function SiteDetail({
       postcode: formData.get("postcode") as string || null,
       country: formData.get("country") as string || null,
       notes: formData.get("notes") as string || null,
+      aliases: aliases.filter((a) => a.trim()),
     };
 
     try {
@@ -322,6 +325,19 @@ export function SiteDetail({
                     defaultValue={site.notes || ""}
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <Label>Site Aliases (for matching)</Label>
+                  <div className="text-[9px] text-[#666666]">Other names this site appears under in invoices/bills</div>
+                  <div className="space-y-1">
+                    {aliases.map((a, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Input value={a} onChange={(e) => { const n = [...aliases]; n[i] = e.target.value; setAliases(n); }} className="flex-1 h-7 text-xs" />
+                        <button type="button" onClick={() => setAliases(aliases.filter((_, j) => j !== i))} className="text-[#FF3333] text-xs px-1">✕</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => setAliases([...aliases, ""])} className="text-[9px] text-[#FF6600] hover:text-[#FF9900]">+ Add alias</button>
+                  </div>
+                </div>
                 <div className="flex gap-2 pt-2">
                   <Button type="submit" disabled={saving} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
                     <Check className="size-4 mr-1" />
@@ -400,6 +416,16 @@ export function SiteDetail({
                       <dt className="text-[#888888]">Notes</dt>
                       <dd className="font-medium whitespace-pre-wrap">
                         {site.notes}
+                      </dd>
+                    </div>
+                  )}
+                  {site.aliases && site.aliases.length > 0 && (
+                    <div className="col-span-2">
+                      <dt className="text-[#888888]">Aliases (for matching)</dt>
+                      <dd className="flex flex-wrap gap-1 mt-1">
+                        {site.aliases.map((a: string, i: number) => (
+                          <span key={i} className="text-xs px-2 py-0.5 bg-[#FF6600]/10 text-[#FF6600] border border-[#FF6600]/30">{a}</span>
+                        ))}
                       </dd>
                     </div>
                   )}

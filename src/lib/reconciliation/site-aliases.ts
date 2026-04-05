@@ -1,46 +1,67 @@
 /**
- * Site Aliasing
- *
- * Maps raw site labels to canonical site names.
- * Extendable — add more aliases as needed.
+ * Site Aliasing — uses Site.aliases from database.
+ * Canonical site = Site.siteName (single source of truth).
+ * Aliases are for matching ONLY.
  */
 
-const SITE_ALIAS_MAP: Record<string, string> = {
-  "dellow centre": "DELLOW_CENTRE",
-  "dellow": "DELLOW_CENTRE",
-  "dc": "DELLOW_CENTRE",
-  "shuttleworth - stratford": "DELLOW_CENTRE",
-  "shuttleworth stratford": "DELLOW_CENTRE",
-  "shuttleworth": "DELLOW_CENTRE",
-  "stratford": "DELLOW_CENTRE",
-};
+import { prisma } from "@/lib/prisma";
 
-export function canonicalizeSite(rawSite: string | null | undefined): { canonical: string; aliasUsed: boolean } {
-  if (!rawSite) return { canonical: "UNKNOWN", aliasUsed: false };
+let aliasCache: Map<string, { siteId: string; siteName: string }> | null = null;
+let cacheTime = 0;
 
-  const lower = rawSite.toLowerCase().trim();
+async function loadAliases(): Promise<Map<string, { siteId: string; siteName: string }>> {
+  if (aliasCache && Date.now() - cacheTime < 60000) return aliasCache;
 
-  // Exact match
-  if (SITE_ALIAS_MAP[lower]) {
-    const isExact = lower === Object.keys(SITE_ALIAS_MAP).find((k) => SITE_ALIAS_MAP[k] === SITE_ALIAS_MAP[lower] && k === lower.split(" ").slice(0, 2).join(" "));
-    return { canonical: SITE_ALIAS_MAP[lower], aliasUsed: lower !== "dellow centre" };
-  }
+  const sites = await prisma.site.findMany({
+    where: { isActive: true },
+    select: { id: true, siteName: true, aliases: true },
+  });
 
-  // Partial match
-  for (const [alias, canonical] of Object.entries(SITE_ALIAS_MAP)) {
-    if (lower.includes(alias) || alias.includes(lower)) {
-      return { canonical, aliasUsed: true };
+  const map = new Map<string, { siteId: string; siteName: string }>();
+  for (const site of sites) {
+    map.set(site.siteName.toLowerCase().trim(), { siteId: site.id, siteName: site.siteName });
+    for (const alias of site.aliases) {
+      map.set(alias.toLowerCase().trim(), { siteId: site.id, siteName: site.siteName });
     }
   }
 
-  return { canonical: rawSite, aliasUsed: false };
+  aliasCache = map;
+  cacheTime = Date.now();
+  return map;
 }
 
-/**
- * Order Reference Parser
- *
- * Extracts useful tokens from invoice order_ref fields.
- */
+export async function canonicalizeSiteAsync(rawSite: string | null | undefined): Promise<{
+  canonical: string;
+  siteId: string | null;
+  aliasUsed: boolean;
+}> {
+  if (!rawSite) return { canonical: "UNKNOWN", siteId: null, aliasUsed: false };
+
+  const lower = rawSite.toLowerCase().trim();
+  const aliases = await loadAliases();
+
+  const match = aliases.get(lower);
+  if (match) {
+    return {
+      canonical: match.siteName,
+      siteId: match.siteId,
+      aliasUsed: lower !== match.siteName.toLowerCase().trim(),
+    };
+  }
+
+  for (const [alias, data] of aliases) {
+    if (lower.includes(alias) || alias.includes(lower)) {
+      return { canonical: data.siteName, siteId: data.siteId, aliasUsed: true };
+    }
+  }
+
+  return { canonical: rawSite, siteId: null, aliasUsed: false };
+}
+
+export function canonicalizeSite(rawSite: string | null | undefined): { canonical: string; aliasUsed: boolean } {
+  if (!rawSite) return { canonical: "UNKNOWN", aliasUsed: false };
+  return { canonical: rawSite, aliasUsed: false };
+}
 
 export function parseOrderRef(orderRef: string | null | undefined): {
   raw: string | null;
@@ -49,18 +70,15 @@ export function parseOrderRef(orderRef: string | null | undefined): {
   itemHint: string | null;
 } {
   if (!orderRef) return { raw: null, tokens: [], dateHint: null, itemHint: null };
-
   const tokens = orderRef.split(/[\s,;\/\-]+/).filter((t) => t.length > 1);
-
-  // Extract date hint
-  let dateHint: string | null = null;
   const dateMatch = orderRef.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (dateMatch) dateHint = dateMatch[0];
-
-  // Extract item hints — look for product-like words
+  const dateHint = dateMatch ? dateMatch[0] : null;
   const productWords = ["plasterboard", "board", "stud", "track", "insulation", "strap", "pipe", "tap", "valve", "screw", "filler", "plaster", "drylining", "drywall", "copper", "mlcp"];
   const itemTokens = tokens.filter((t) => productWords.some((pw) => t.toLowerCase().includes(pw)));
   const itemHint = itemTokens.length > 0 ? itemTokens.join(" ") : null;
-
   return { raw: orderRef, tokens, dateHint, itemHint };
+}
+
+export function clearSiteAliasCache() {
+  aliasCache = null;
 }

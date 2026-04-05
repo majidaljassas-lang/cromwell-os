@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeProduct, convertToBase } from "@/lib/reconciliation/normalizer";
-import { canonicalizeSite, parseOrderRef } from "@/lib/reconciliation/site-aliases";
+import { canonicalizeSiteAsync, parseOrderRef } from "@/lib/reconciliation/site-aliases";
 
 /**
  * POST: Ingest invoice lines for reconciliation.
@@ -23,8 +23,8 @@ export async function POST(request: Request) {
     let totalCreated = 0;
 
     for (const inv of invoices) {
-      // Site aliasing
-      const { canonical: canonicalSite, aliasUsed: siteAliasUsed } = canonicalizeSite(inv.site);
+      // Site aliasing — async lookup from database
+      const { canonical: canonicalSite, aliasUsed: siteAliasUsed } = await canonicalizeSiteAsync(inv.site);
 
       // Order ref parsing
       const orderRef = parseOrderRef(inv.orderRef);
