@@ -1,9 +1,21 @@
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get("search");
+
+    const where = search
+      ? { OR: [
+          { name: { contains: search, mode: "insensitive" as const } },
+          { legalName: { contains: search, mode: "insensitive" as const } },
+        ] }
+      : {};
+
     const customers = await prisma.customer.findMany({
+      where,
       orderBy: { createdAt: "desc" },
+      take: 50,
     });
     return Response.json(customers);
   } catch (error) {

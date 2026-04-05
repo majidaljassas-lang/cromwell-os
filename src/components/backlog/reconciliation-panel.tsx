@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight, FileText, MessageSquare } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, MessageSquare, Link2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ManualLinkDialog } from "@/components/shared/manual-link-dialog";
 
 type InvoiceMatch = {
   invoiceNumber: string;
@@ -77,6 +79,26 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
   const [filterInvoice, setFilterInvoice] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [filterSender, setFilterSender] = useState("ALL");
+
+  // Manual link dialog state
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkDialogType, setLinkDialogType] = useState<"INVOICE_LINE" | "CUSTOMER" | "SITE">("INVOICE_LINE");
+  const [linkDialogSourceId, setLinkDialogSourceId] = useState("");
+  const [linkDialogRawText, setLinkDialogRawText] = useState<string | undefined>();
+
+  function openManualLink(sourceId: string, type: "INVOICE_LINE" | "CUSTOMER" | "SITE", rawText?: string) {
+    setLinkDialogSourceId(sourceId);
+    setLinkDialogType(type);
+    setLinkDialogRawText(rawText);
+    setLinkDialogOpen(true);
+  }
+
+  function handleLinked() {
+    // Refresh reconciliation data
+    fetch(`/api/reconciliation/summary/${caseId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setData(d); });
+  }
 
   useEffect(() => {
     fetch(`/api/reconciliation/summary/${caseId}`)
@@ -240,6 +262,37 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
                         {row.invoiceMatches.length === 0 && (
                           <div className="text-xs text-[#FF3333]">No invoice lines matched to this ticket line.</div>
                         )}
+
+                        {/* Manual link actions */}
+                        <div className="flex items-center gap-2 pt-2 border-t border-[#333333]">
+                          <span className="text-[8px] text-[#666666] uppercase tracking-widest">ACTIONS:</span>
+                          {(row.status === "AWAITING_INVOICE" || row.status === "MESSAGE_LINKED" || row.invoiceMatches.length === 0) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-[9px] bg-[#222222] border-[#FF6600] text-[#FF6600] hover:bg-[#FF6600]/10"
+                              onClick={(e) => { e.stopPropagation(); openManualLink(row.id, "INVOICE_LINE", row.rawText); }}
+                            >
+                              <Link2 className="size-3 mr-1" /> Link Invoice
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[9px] bg-[#222222] border-[#3399FF] text-[#3399FF] hover:bg-[#3399FF]/10"
+                            onClick={(e) => { e.stopPropagation(); openManualLink(row.id, "SITE", row.rawText); }}
+                          >
+                            <Link2 className="size-3 mr-1" /> Link Site
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[9px] bg-[#222222] border-[#00CC66] text-[#00CC66] hover:bg-[#00CC66]/10"
+                            onClick={(e) => { e.stopPropagation(); openManualLink(row.id, "CUSTOMER", row.rawText); }}
+                          >
+                            <Link2 className="size-3 mr-1" /> Link Customer
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </td>
@@ -249,6 +302,16 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
           </tbody>
         </table>
       </div>
+
+      {/* Manual Link Dialog */}
+      <ManualLinkDialog
+        open={linkDialogOpen}
+        onOpenChange={setLinkDialogOpen}
+        linkType={linkDialogType}
+        sourceId={linkDialogSourceId}
+        rawText={linkDialogRawText}
+        onLinked={handleLinked}
+      />
     </div>
   );
 }

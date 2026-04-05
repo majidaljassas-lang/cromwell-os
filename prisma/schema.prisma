@@ -338,6 +338,8 @@ model Customer {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
+  parentEntity        Customer?           @relation("CustomerHierarchy", fields: [parentCustomerEntityId], references: [id])
+  subsidiaries        Customer[]          @relation("CustomerHierarchy")
   siteCommercialLinks SiteCommercialLink[]
   customerAliases     CustomerAlias[]
   siteContactLinks    SiteContactLink[]
@@ -1528,8 +1530,10 @@ model SiteAlias {
   siteId           String
   aliasText        String
   sourceType       SourceType?
+  aliasSource      String?
   isActive         Boolean    @default(true)
   confidenceDefault Decimal?  @db.Decimal(5, 2)
+  manualConfirmed  Boolean    @default(false)
   createdAt        DateTime   @default(now())
 
   site Site @relation(fields: [siteId], references: [id])
@@ -1539,17 +1543,36 @@ model SiteAlias {
 }
 
 model CustomerAlias {
-  id         String     @id @default(uuid())
-  customerId String
-  aliasText  String
-  sourceType SourceType?
-  isActive   Boolean    @default(true)
-  createdAt  DateTime   @default(now())
+  id              String     @id @default(uuid())
+  customerId      String
+  aliasText       String
+  sourceType      SourceType?
+  aliasSource     String?
+  confidenceScore Decimal?   @db.Decimal(5, 2)
+  manualConfirmed Boolean    @default(false)
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
 
   customer Customer @relation(fields: [customerId], references: [id])
 
   @@unique([customerId, aliasText])
   @@index([aliasText])
+}
+
+model ManualLinkAudit {
+  id            String   @id @default(uuid())
+  linkType      String
+  sourceId      String
+  targetId      String
+  targetType    String
+  linkedBy      String?
+  linkedAt      DateTime @default(now())
+  previousState String?
+  notes         String?
+
+  @@index([linkType])
+  @@index([sourceId])
+  @@index([targetId])
 }
 
 model SourceSiteMatch {
@@ -1824,10 +1847,39 @@ model BacklogTicketLine {
   @@index([orderThreadId])
 }
 
+model BacklogInvoiceDocument {
+  id                String   @id @default(uuid())
+  caseId            String
+  sourceId          String?
+  invoiceNumber     String?
+  invoiceDate       DateTime?
+  customerName      String?
+  site              String?
+  rawFileName       String
+  rawFileRef        String?
+  rawText           String?
+  fileBytes         Int      @default(0)
+  pageCount         Int      @default(0)
+  parseStatus       String   @default("UPLOADED")
+  parseError        String?
+  totalAmount       Decimal? @db.Decimal(14, 2)
+  lineCount         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  lines BacklogInvoiceLine[]
+
+  @@index([caseId])
+  @@index([sourceId])
+  @@index([parseStatus])
+}
+
 model BacklogInvoiceLine {
   id                    String   @id @default(uuid())
   caseId                String
   invoiceId             String?
+  documentId            String?
+  sourceId              String?
   invoiceNumber         String
   invoiceDate           DateTime
   customer              String?
@@ -1853,9 +1905,12 @@ model BacklogInvoiceLine {
   billingConfidence     String   @default("LOW")
   createdAt             DateTime @default(now())
 
+  document       BacklogInvoiceDocument? @relation(fields: [documentId], references: [id])
   invoiceMatches BacklogInvoiceMatch[]
 
   @@index([caseId])
+  @@index([documentId])
+  @@index([sourceId])
   @@index([normalizedProduct])
   @@index([invoiceNumber])
 }

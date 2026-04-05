@@ -26,6 +26,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         orderBy: { createdAt: "desc" },
         take: 10,
       },
+      parentEntity: { select: { id: true, name: true } },
+      subsidiaries: { select: { id: true, name: true, legalName: true, isBillingEntity: true } },
+      customerAliases: {
+        where: { isActive: true },
+        orderBy: { createdAt: "desc" },
+      },
     },
   });
 
@@ -38,11 +44,17 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     orderBy: { siteName: "asc" },
   });
 
+  const allCustomers = await prisma.customer.findMany({
+    where: { id: { not: id } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
     <div className="p-4 space-y-4">
-      <CustomerDetail customer={s(customer)} allSites={s(allSites)} />
+      <CustomerDetail customer={s(customer)} allSites={s(allSites)} allCustomers={s(allCustomers)} />
     </div>
   );
 }

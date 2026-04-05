@@ -1,10 +1,24 @@
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get("search");
+
+    const where = search
+      ? { OR: [
+          { siteName: { contains: search, mode: "insensitive" as const } },
+          { siteCode: { contains: search, mode: "insensitive" as const } },
+          { city: { contains: search, mode: "insensitive" as const } },
+          { postcode: { contains: search, mode: "insensitive" as const } },
+        ] }
+      : {};
+
     const sites = await prisma.site.findMany({
+      where,
       include: { siteCommercialLinks: true },
       orderBy: { createdAt: "desc" },
+      take: 50,
     });
     return Response.json(sites);
   } catch (error) {

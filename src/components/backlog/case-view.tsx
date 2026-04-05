@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { ReconciliationPanel } from "./reconciliation-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -496,6 +496,129 @@ export function BacklogCaseView({
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editingSourceLabel, setEditingSourceLabel] = useState("");
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+
+  // Invoice upload state
+  type InvoiceDoc = {
+    id: string;
+    sourceId: string | null;
+    invoiceNumber: string | null;
+    invoiceDate: string | null;
+    customerName: string | null;
+    site: string | null;
+    rawFileName: string;
+    fileBytes: number;
+    pageCount: number;
+    parseStatus: string;
+    parseError: string | null;
+    totalAmount: number | null;
+    lineCount: number;
+    lines: Array<{
+      id: string;
+      productDescription: string;
+      normalizedProduct: string;
+      qty: number;
+      unit: string;
+      rate: number | null;
+      amount: number | null;
+      billingConfidence: string;
+    }>;
+  };
+  const [invoiceDocs, setInvoiceDocs] = useState<InvoiceDoc[]>([]);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceUploading, setInvoiceUploading] = useState(false);
+  const [invoiceDragOver, setInvoiceDragOver] = useState(false);
+  const [invoiceUploadSourceId, setInvoiceUploadSourceId] = useState("");
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+
+  const invoiceFileRef = useRef<HTMLInputElement>(null);
+
+  const documentSources = allSources.filter((s) =>
+    ["PDF", "DOCUMENT", "INVOICE", "OTHER"].includes(s.sourceType.toUpperCase())
+  );
+
+  async function loadInvoiceDocs() {
+    setInvoiceLoading(true);
+    const allDocs: InvoiceDoc[] = [];
+    for (const src of documentSources) {
+      const res = await fetch(`/api/backlog/sources/${src.id}/upload-invoice`);
+      if (res.ok) {
+        const docs = await res.json();
+        allDocs.push(...docs);
+      }
+    }
+    setInvoiceDocs(allDocs);
+    setInvoiceLoading(false);
+  }
+
+  async function deleteInvoiceDoc(docId: string, sourceId: string) {
+    if (!confirm("Delete this invoice document and all its line items?")) return;
+    await fetch(`/api/backlog/sources/${sourceId}/upload-invoice?documentId=${docId}`, { method: "DELETE" });
+    setInvoiceDocs((prev) => prev.filter((d) => d.id !== docId));
+  }
+
+  async function deleteAllInvoiceDocs() {
+    if (!confirm(`Delete ALL ${invoiceDocs.length} invoice documents and their line items?`)) return;
+    for (const src of documentSources) {
+      await fetch(`/api/backlog/sources/${src.id}/upload-invoice?all=true`, { method: "DELETE" });
+    }
+    setInvoiceDocs([]);
+  }
+
+  async function handleInvoiceUpload(files: File[]) {
+    if (!invoiceUploadSourceId || files.length === 0) return;
+    setInvoiceUploading(true);
+    try {
+      const fd = new FormData();
+      for (const f of files) {
+        fd.append("files", f);
+      }
+      const res = await fetch(`/api/backlog/sources/${invoiceUploadSourceId}/upload-invoice`, {
+        method: "POST",
+        body: fd,
+      });
+      if (res.ok) {
+        await loadInvoiceDocs();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error("Invoice upload failed:", err);
+      }
+    } catch (err) {
+      console.error("Invoice upload error:", err);
+    }
+    setInvoiceUploading(false);
+    // Reset file input so same file can be re-selected
+    if (invoiceFileRef.current) invoiceFileRef.current.value = "";
+  }
+
+  function handleInvoiceDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setInvoiceDragOver(false);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+    if (files.length > 0) handleInvoiceUpload(files);
+  }
+
+  function handleInvoiceFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length > 0) handleInvoiceUpload(files);
+  }
+
+  const [runningMatch, setRunningMatch] = useState(false);
+  const [matchResult, setMatchResult] = useState<{ matched: number; ticketLines: number; invoiceLines: number } | null>(null);
+
+  async function runReconciliationMatch() {
+    setRunningMatch(true);
+    setMatchResult(null);
+    const res = await fetch("/api/reconciliation/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId: backlogCase.id }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMatchResult(data);
+    }
+    setRunningMatch(false);
+  }
   const [editingMsgText, setEditingMsgText] = useState("");
 
   async function saveMessageEdit() {
@@ -555,7 +678,8 @@ export function BacklogCaseView({
                   <select name="sourceType" required className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
                     <option value="WHATSAPP">WhatsApp</option>
                     <option value="EMAIL">Email</option>
-                    <option value="PDF">PDF</option>
+                    <option value="PDF">PDF / Document</option>
+                    <option value="INVOICE">Invoice</option>
                     <option value="OTHER">Other</option>
                   </select>
                 </div>
@@ -675,6 +799,7 @@ export function BacklogCaseView({
         <TabsList>
           <TabsTrigger value="timeline">Timeline ({filtered.length})</TabsTrigger>
           <TabsTrigger value="sources">Sources ({allSources.length})</TabsTrigger>
+          <TabsTrigger value="invoices" onClick={() => { if (invoiceDocs.length === 0) loadInvoiceDocs(); }}>Invoices ({invoiceDocs.length})</TabsTrigger>
           <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
         </TabsList>
 
@@ -955,6 +1080,279 @@ export function BacklogCaseView({
               ))}
             </div>
           ))}
+        </TabsContent>
+
+        {/* INVOICES TAB */}
+        <TabsContent value="invoices" className="mt-4 space-y-4">
+          {/* Upload zone */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4 space-y-3">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold flex items-center gap-2">
+              <Upload className="size-3.5" /> UPLOAD PDF INVOICES
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="space-y-1 flex-1">
+                <label className="text-[9px] text-[#666666]">Upload to source:</label>
+                <select
+                  value={invoiceUploadSourceId}
+                  onChange={(e) => setInvoiceUploadSourceId(e.target.value)}
+                  className="w-full h-8 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-xs px-2"
+                >
+                  <option value="">Select document source...</option>
+                  {documentSources.length > 0
+                    ? documentSources.map((s) => <option key={s.id} value={s.id}>{s.label} ({s.sourceType})</option>)
+                    : allSources.map((s) => <option key={s.id} value={s.id}>{s.label} ({s.sourceType})</option>)
+                  }
+                </select>
+              </div>
+            </div>
+
+            {invoiceUploadSourceId && (
+              <div
+                onDragOver={(e) => { e.preventDefault(); setInvoiceDragOver(true); }}
+                onDragLeave={() => setInvoiceDragOver(false)}
+                onDrop={handleInvoiceDrop}
+                className={`border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+                  invoiceDragOver
+                    ? "border-[#FF6600] bg-[#FF6600]/5"
+                    : "border-[#333333] hover:border-[#FF6600]/50"
+                }`}
+                onClick={() => invoiceFileRef.current?.click()}
+              >
+                <input
+                  ref={invoiceFileRef}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  multiple
+                  onChange={handleInvoiceFileSelect}
+                  style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
+                />
+                {invoiceUploading ? (
+                  <div className="flex items-center justify-center gap-2 text-[#FF6600]">
+                    <Loader2 className="size-5 animate-spin" />
+                    <span className="text-sm">Uploading & parsing...</span>
+                  </div>
+                ) : (
+                  <>
+                    <FileText className="size-8 text-[#FF6600] mx-auto mb-2" />
+                    <div className="text-sm text-[#E0E0E0]">Drop PDF invoices here</div>
+                    <div className="text-[9px] text-[#666666] mt-1">or click to select files. Supports multiple PDFs.</div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {!invoiceUploadSourceId && (
+              <div className="text-xs text-[#666666] italic">Select a source above to upload PDF invoices. Create a source with type PDF or DOCUMENT if none exists.</div>
+            )}
+          </div>
+
+          {/* Loading indicator */}
+          {invoiceLoading && (
+            <div className="flex items-center justify-center gap-2 text-[#888888] py-8">
+              <Loader2 className="size-4 animate-spin" /> Loading invoice documents...
+            </div>
+          )}
+
+          {/* Invoice documents list */}
+          {!invoiceLoading && invoiceDocs.length === 0 && (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+              No invoice documents uploaded yet. Upload PDF files above.
+            </div>
+          )}
+
+          {/* Run reconciliation matching */}
+          {!invoiceLoading && invoiceDocs.some((d) => d.parseStatus === "PARSED") && (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-4 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-[#888888]">RECONCILIATION</div>
+                <div className="text-xs text-[#E0E0E0] mt-1">
+                  Match parsed invoice lines against WhatsApp order lines.
+                </div>
+                {matchResult && (
+                  <div className="text-[9px] text-[#00CC66] bb-mono mt-1">
+                    {matchResult.matched} matches created from {matchResult.ticketLines} order lines × {matchResult.invoiceLines} invoice lines
+                  </div>
+                )}
+              </div>
+              <Button
+                onClick={runReconciliationMatch}
+                disabled={runningMatch}
+                className="bg-[#FF6600] text-black hover:bg-[#FF9900]"
+              >
+                {runningMatch ? <><Loader2 className="size-4 mr-1 animate-spin" />Matching...</> : "Run Matching"}
+              </Button>
+            </div>
+          )}
+
+          {!invoiceLoading && invoiceDocs.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-widest text-[#888888]">
+                  {invoiceDocs.length} DOCUMENT{invoiceDocs.length !== 1 ? "S" : ""} UPLOADED
+                </div>
+                <button onClick={deleteAllInvoiceDocs} className="text-[9px] text-[#FF3333] hover:text-[#FF6666] flex items-center gap-1">
+                  <Trash2 className="size-3" /> Delete All
+                </button>
+              </div>
+
+              {invoiceDocs.map((doc) => {
+                const isExpanded = expandedInvoiceId === doc.id;
+                return (
+                  <div key={doc.id} className="border border-[#333333] bg-[#1A1A1A]">
+                    {/* Document header */}
+                    <div
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#222222]"
+                      onClick={() => setExpandedInvoiceId(isExpanded ? null : doc.id)}
+                    >
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? <ChevronDown className="size-4 text-[#888888]" /> : <ChevronRight className="size-4 text-[#888888]" />}
+                        <FileText className="size-5 text-[#FF6600]" />
+                        <div>
+                          <div className="text-sm text-[#E0E0E0] font-medium">
+                            {doc.invoiceNumber || doc.rawFileName}
+                          </div>
+                          <div className="text-[9px] text-[#666666] bb-mono mt-0.5 flex items-center gap-3">
+                            <span>{doc.rawFileName}</span>
+                            <span>{(doc.fileBytes / 1024).toFixed(1)} KB</span>
+                            <span>{doc.pageCount} page{doc.pageCount !== 1 ? "s" : ""}</span>
+                            {doc.invoiceDate && <span>{new Date(doc.invoiceDate).toLocaleDateString("en-GB")}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.lineCount > 0 && (
+                          <span className="text-[9px] text-[#888888] bb-mono">{doc.lineCount} lines</span>
+                        )}
+                        {doc.totalAmount != null && (
+                          <span className="text-xs text-[#E0E0E0] bb-mono font-bold">
+                            £{Number(doc.totalAmount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}
+                          </span>
+                        )}
+                        {doc.parseStatus === "PARSED" && <CheckCircle2 className="size-4 text-[#00CC66]" />}
+                        {doc.parseStatus === "ERROR" && <AlertCircle className="size-4 text-[#FF3333]" />}
+                        {doc.parseStatus === "UPLOADED" && <Clock className="size-4 text-[#FF9900]" />}
+                        {doc.parseStatus === "PARSING" && <Loader2 className="size-4 text-[#FF6600] animate-spin" />}
+                        <Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${
+                          doc.parseStatus === "PARSED" ? "text-[#00CC66] bg-[#00CC66]/10" :
+                          doc.parseStatus === "ERROR" ? "text-[#FF3333] bg-[#FF3333]/10" :
+                          "text-[#FF9900] bg-[#FF9900]/10"
+                        }`}>
+                          {doc.parseStatus}
+                        </Badge>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteInvoiceDoc(doc.id, doc.sourceId || ""); }}
+                          className="p-1 hover:bg-[#FF3333]/10"
+                          title="Delete invoice"
+                        >
+                          <Trash2 className="size-3.5 text-[#FF3333]" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded detail */}
+                    {isExpanded && (
+                      <div className="border-t border-[#333333] px-4 py-3 space-y-3 bg-[#151515]">
+                        {/* Invoice metadata */}
+                        <div className="grid grid-cols-4 gap-4 text-xs">
+                          <div>
+                            <span className="text-[9px] text-[#888888] uppercase tracking-widest">Invoice #</span>
+                            <div className="text-[#E0E0E0] font-bold mt-0.5">{doc.invoiceNumber || "—"}</div>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-[#888888] uppercase tracking-widest">Date</span>
+                            <div className="text-[#E0E0E0] mt-0.5">{doc.invoiceDate ? new Date(doc.invoiceDate).toLocaleDateString("en-GB") : "—"}</div>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-[#888888] uppercase tracking-widest">Customer</span>
+                            <div className="text-[#E0E0E0] mt-0.5">{doc.customerName || "—"}</div>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-[#888888] uppercase tracking-widest">Site</span>
+                            <div className="text-[#E0E0E0] mt-0.5">{doc.site || "—"}</div>
+                          </div>
+                        </div>
+
+                        {/* Error message */}
+                        {doc.parseError && (
+                          <div className="border border-[#FF3333]/30 bg-[#FF3333]/5 px-3 py-2 text-xs text-[#FF3333]">
+                            <AlertCircle className="size-3.5 inline mr-1" />
+                            {doc.parseError}
+                          </div>
+                        )}
+
+                        {/* Line items table */}
+                        {doc.lines.length > 0 && (
+                          <div>
+                            <div className="text-[9px] text-[#888888] uppercase tracking-widest mb-2">LINE ITEMS ({doc.lines.length})</div>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333]">
+                                  <th className="text-left px-2 py-1.5">Description</th>
+                                  <th className="text-left px-2 py-1.5 w-28">Normalized</th>
+                                  <th className="text-right px-2 py-1.5 w-14">Qty</th>
+                                  <th className="text-left px-2 py-1.5 w-10">Unit</th>
+                                  <th className="text-right px-2 py-1.5 w-16">Rate</th>
+                                  <th className="text-right px-2 py-1.5 w-20">Amount</th>
+                                  <th className="text-left px-2 py-1.5 w-14">Conf</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {doc.lines.map((line) => (
+                                  <tr key={line.id} className="border-b border-[#2A2A2A] hover:bg-[#1A1A1A]">
+                                    <td className="px-2 py-1.5 text-[#E0E0E0]">{line.productDescription}</td>
+                                    <td className="px-2 py-1.5">
+                                      <Badge className={`text-[7px] px-1 py-0 ${
+                                        line.normalizedProduct !== "UNKNOWN" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF3333] bg-[#FF3333]/10"
+                                      }`}>
+                                        {line.normalizedProduct}
+                                      </Badge>
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(line.qty)}</td>
+                                    <td className="px-2 py-1.5 text-[#888888]">{line.unit}</td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">
+                                      {line.rate != null ? `£${Number(line.rate).toFixed(2)}` : "—"}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0] font-bold">
+                                      {line.amount != null ? `£${Number(line.amount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "—"}
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <span className={`text-[9px] bb-mono ${
+                                        line.billingConfidence === "HIGH" ? "text-[#00CC66]" :
+                                        line.billingConfidence === "MEDIUM" ? "text-[#FF9900]" :
+                                        "text-[#FF3333]"
+                                      }`}>
+                                        {line.billingConfidence}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              {doc.totalAmount != null && (
+                                <tfoot>
+                                  <tr className="border-t border-[#FF6600]/30">
+                                    <td colSpan={5} className="px-2 py-2 text-right text-[9px] uppercase tracking-widest text-[#888888]">TOTAL</td>
+                                    <td className="px-2 py-2 text-right bb-mono text-[#FF6600] font-bold">
+                                      £{Number(doc.totalAmount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td></td>
+                                  </tr>
+                                </tfoot>
+                              )}
+                            </table>
+                          </div>
+                        )}
+
+                        {doc.lines.length === 0 && doc.parseStatus === "PARSED" && (
+                          <div className="text-xs text-[#FF9900]">No line items could be extracted from this invoice.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </TabsContent>
 
         {/* RECONCILIATION TAB */}

@@ -23,8 +23,10 @@ export async function POST(request: Request) {
     let totalCreated = 0;
 
     for (const inv of invoices) {
-      // Site aliasing — async lookup from database
-      const { canonical: canonicalSite, aliasUsed: siteAliasUsed } = await canonicalizeSiteAsync(inv.site);
+      // Site aliasing — async lookup from database with ambiguity detection
+      const siteMatch = await canonicalizeSiteAsync(inv.site);
+      const canonicalSite = siteMatch.canonical;
+      const siteAliasUsed = siteMatch.aliasUsed;
 
       // Order ref parsing
       const orderRef = parseOrderRef(inv.orderRef);

@@ -1,15 +1,29 @@
 /**
- * Site Aliasing — uses Site.aliases from database.
+ * Site Aliasing — uses Site.aliases + SiteAlias table from database.
  * Canonical site = Site.siteName (single source of truth).
  * Aliases are for matching ONLY.
+ *
+ * Strict matching rules:
+ * - Exact match on siteName or alias → HIGH confidence
+ * - Address number differentiation: "12 High St" !== "14 High St"
+ * - If multiple sites match the same input → AMBIGUOUS_SITE_MATCH (no auto-resolve)
+ * - Partial/substring matches → MEDIUM confidence, flagged for review
  */
 
 import { prisma } from "@/lib/prisma";
 
-let aliasCache: Map<string, { siteId: string; siteName: string }> | null = null;
+type SiteEntry = {
+  siteId: string;
+  siteName: string;
+  aliasText: string;
+  isExact: boolean;
+  manualConfirmed: boolean;
+};
+
+let aliasCache: SiteEntry[] | null = null;
 let cacheTime = 0;
 
-async function loadAliases(): Promise<Map<string, { siteId: string; siteName: string }>> {
+async function loadAliases(): Promise<SiteEntry[]> {
   if (aliasCache && Date.now() - cacheTime < 60000) return aliasCache;
 
   const sites = await prisma.site.findMany({
@@ -17,47 +31,175 @@ async function loadAliases(): Promise<Map<string, { siteId: string; siteName: st
     select: { id: true, siteName: true, aliases: true },
   });
 
-  const map = new Map<string, { siteId: string; siteName: string }>();
+  const siteAliases = await prisma.siteAlias.findMany({
+    where: { isActive: true },
+    select: { siteId: true, aliasText: true, manualConfirmed: true, site: { select: { siteName: true } } },
+  });
+
+  const entries: SiteEntry[] = [];
+
   for (const site of sites) {
-    map.set(site.siteName.toLowerCase().trim(), { siteId: site.id, siteName: site.siteName });
+    // Canonical name is always exact
+    entries.push({
+      siteId: site.id,
+      siteName: site.siteName,
+      aliasText: site.siteName.toLowerCase().trim(),
+      isExact: true,
+      manualConfirmed: true,
+    });
+    // Legacy aliases array
     for (const alias of site.aliases) {
-      map.set(alias.toLowerCase().trim(), { siteId: site.id, siteName: site.siteName });
+      entries.push({
+        siteId: site.id,
+        siteName: site.siteName,
+        aliasText: alias.toLowerCase().trim(),
+        isExact: true,
+        manualConfirmed: false,
+      });
     }
   }
 
-  aliasCache = map;
+  // SiteAlias table entries (higher authority)
+  for (const sa of siteAliases) {
+    entries.push({
+      siteId: sa.siteId,
+      siteName: sa.site.siteName,
+      aliasText: sa.aliasText.toLowerCase().trim(),
+      isExact: true,
+      manualConfirmed: sa.manualConfirmed,
+    });
+  }
+
+  aliasCache = entries;
   cacheTime = Date.now();
-  return map;
+  return entries;
 }
 
-export async function canonicalizeSiteAsync(rawSite: string | null | undefined): Promise<{
+/** Extract address number from text, e.g. "12 High Street" → "12" */
+function extractAddressNumber(text: string): string | null {
+  const match = text.match(/^(\d+)\s/);
+  return match ? match[1] : null;
+}
+
+/** Normalize text for comparison: lowercase, trim, collapse whitespace */
+function normalize(text: string): string {
+  return text.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+export type SiteMatchResult = {
   canonical: string;
   siteId: string | null;
   aliasUsed: boolean;
-}> {
-  if (!rawSite) return { canonical: "UNKNOWN", siteId: null, aliasUsed: false };
+  confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
+  matchType: "EXACT" | "ALIAS_EXACT" | "PARTIAL" | "AMBIGUOUS" | "NONE";
+  ambiguousCandidates?: Array<{ siteId: string; siteName: string }>;
+  manualConfirmed: boolean;
+};
 
-  const lower = rawSite.toLowerCase().trim();
+export async function canonicalizeSiteAsync(rawSite: string | null | undefined): Promise<SiteMatchResult> {
+  if (!rawSite) {
+    return { canonical: "UNKNOWN", siteId: null, aliasUsed: false, confidence: "NONE", matchType: "NONE", manualConfirmed: false };
+  }
+
+  const lower = normalize(rawSite);
   const aliases = await loadAliases();
+  const inputAddrNum = extractAddressNumber(lower);
 
-  const match = aliases.get(lower);
-  if (match) {
+  // Phase 1: Exact matches (siteName or alias text matches exactly)
+  const exactMatches = aliases.filter((a) => a.aliasText === lower);
+
+  if (exactMatches.length === 1) {
+    const m = exactMatches[0];
     return {
-      canonical: match.siteName,
-      siteId: match.siteId,
-      aliasUsed: lower !== match.siteName.toLowerCase().trim(),
+      canonical: m.siteName,
+      siteId: m.siteId,
+      aliasUsed: lower !== m.siteName.toLowerCase().trim(),
+      confidence: "HIGH",
+      matchType: m.siteName.toLowerCase().trim() === lower ? "EXACT" : "ALIAS_EXACT",
+      manualConfirmed: m.manualConfirmed,
     };
   }
 
-  for (const [alias, data] of aliases) {
-    if (lower.includes(alias) || alias.includes(lower)) {
-      return { canonical: data.siteName, siteId: data.siteId, aliasUsed: true };
+  if (exactMatches.length > 1) {
+    // Multiple exact matches = ambiguous (different sites, same alias)
+    const uniqueSites = [...new Map(exactMatches.map((m) => [m.siteId, m])).values()];
+    if (uniqueSites.length === 1) {
+      // All match same site — not ambiguous
+      const m = uniqueSites[0];
+      return {
+        canonical: m.siteName,
+        siteId: m.siteId,
+        aliasUsed: true,
+        confidence: "HIGH",
+        matchType: "ALIAS_EXACT",
+        manualConfirmed: m.manualConfirmed,
+      };
+    }
+    // Genuinely ambiguous
+    return {
+      canonical: rawSite,
+      siteId: null,
+      aliasUsed: false,
+      confidence: "LOW",
+      matchType: "AMBIGUOUS",
+      ambiguousCandidates: uniqueSites.map((s) => ({ siteId: s.siteId, siteName: s.siteName })),
+      manualConfirmed: false,
+    };
+  }
+
+  // Phase 2: Partial/substring matches with address number check
+  const partialMatches: SiteEntry[] = [];
+  for (const entry of aliases) {
+    if (lower.includes(entry.aliasText) || entry.aliasText.includes(lower)) {
+      // Address number guard: if both have an address number, they must match
+      const entryAddrNum = extractAddressNumber(entry.aliasText);
+      if (inputAddrNum && entryAddrNum && inputAddrNum !== entryAddrNum) {
+        continue; // Skip — different address numbers
+      }
+      partialMatches.push(entry);
     }
   }
 
-  return { canonical: rawSite, siteId: null, aliasUsed: false };
+  // Deduplicate by site
+  const uniquePartials = [...new Map(partialMatches.map((m) => [m.siteId, m])).values()];
+
+  if (uniquePartials.length === 1) {
+    const m = uniquePartials[0];
+    return {
+      canonical: m.siteName,
+      siteId: m.siteId,
+      aliasUsed: true,
+      confidence: "MEDIUM",
+      matchType: "PARTIAL",
+      manualConfirmed: m.manualConfirmed,
+    };
+  }
+
+  if (uniquePartials.length > 1) {
+    // Ambiguous partial match
+    return {
+      canonical: rawSite,
+      siteId: null,
+      aliasUsed: false,
+      confidence: "LOW",
+      matchType: "AMBIGUOUS",
+      ambiguousCandidates: uniquePartials.map((s) => ({ siteId: s.siteId, siteName: s.siteName })),
+      manualConfirmed: false,
+    };
+  }
+
+  // No match
+  return {
+    canonical: rawSite,
+    siteId: null,
+    aliasUsed: false,
+    confidence: "NONE",
+    matchType: "NONE",
+    manualConfirmed: false,
+  };
 }
 
+/** Synchronous fallback — no DB access, returns raw input */
 export function canonicalizeSite(rawSite: string | null | undefined): { canonical: string; aliasUsed: boolean } {
   if (!rawSite) return { canonical: "UNKNOWN", aliasUsed: false };
   return { canonical: rawSite, aliasUsed: false };

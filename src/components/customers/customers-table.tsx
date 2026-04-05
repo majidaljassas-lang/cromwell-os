@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, MoreHorizontal } from "lucide-react";
+import { Plus, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,8 +36,10 @@ type CustomerWithLinks = {
   paymentTerms: string | null;
   poRequiredDefault: boolean;
   isCashCustomer: boolean;
+  parentCustomerEntityId: string | null;
   notes: string | null;
   siteCommercialLinks: { id: string }[];
+  subsidiaries: { id: string; name: string }[];
 };
 
 export function CustomersTable({
@@ -48,6 +50,12 @@ export function CustomersTable({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`Delete customer "${name}"? This will remove all aliases and site links.`)) return;
+    await fetch(`/api/customers/${id}`, { method: "DELETE" });
+    router.refresh();
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -214,18 +222,46 @@ export function CustomersTable({
                 </TableCell>
               </TableRow>
             ) : (
-              customers.map((customer) => (
+              (() => {
+                // Build hierarchy: show parents first, then subsidiaries indented
+                const parentIds = new Set(customers.filter(c => c.subsidiaries?.length > 0).map(c => c.id));
+                const childIds = new Set(customers.filter(c => c.parentCustomerEntityId).map(c => c.id));
+
+                // Order: top-level first (not a child), then for each parent show its children
+                const ordered: Array<{ customer: CustomerWithLinks; isChild: boolean }> = [];
+                const topLevel = customers.filter(c => !c.parentCustomerEntityId);
+                for (const parent of topLevel) {
+                  ordered.push({ customer: parent, isChild: false });
+                  // Find children of this parent
+                  const children = customers.filter(c => c.parentCustomerEntityId === parent.id);
+                  for (const child of children) {
+                    ordered.push({ customer: child, isChild: true });
+                  }
+                }
+                // Add orphan children (parent not in this list)
+                const addedIds = new Set(ordered.map(o => o.customer.id));
+                for (const c of customers) {
+                  if (!addedIds.has(c.id)) {
+                    ordered.push({ customer: c, isChild: !!c.parentCustomerEntityId });
+                  }
+                }
+
+                return ordered.map(({ customer, isChild }) => (
                 <TableRow
                   key={customer.id}
-                  className="cursor-pointer hover:bg-[#222222]"
+                  className={`cursor-pointer hover:bg-[#222222] ${isChild ? "bg-[#0D0D0D]" : ""}`}
                 >
                   <TableCell>
                     <Link
                       href={`/customers/${customer.id}`}
-                      className="font-medium text-[#FF6600] hover:text-[#FF9900] hover:underline"
+                      className="font-medium text-[#FF6600] hover:text-[#FF9900] hover:underline flex items-center gap-1"
                     >
+                      {isChild && <span className="text-[#333333] mr-1">└</span>}
                       {customer.name}
                     </Link>
+                    {!isChild && customer.subsidiaries?.length > 0 && (
+                      <span className="text-[8px] text-[#3399FF] ml-2">{customer.subsidiaries.length} subsidiary</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-[#888888]">
                     {customer.legalName || "—"}
@@ -253,14 +289,20 @@ export function CustomersTable({
                     {customer.siteCommercialLinks.length}
                   </TableCell>
                   <TableCell>
-                    <Link href={`/customers/${customer.id}`}>
-                      <Button variant="ghost" size="icon-xs">
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </Link>
+                    <div className="flex items-center gap-1">
+                      <Link href={`/customers/${customer.id}`}>
+                        <Button variant="ghost" size="icon-xs">
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </Link>
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(customer.id, customer.name); }} className="p-1 hover:bg-[#FF3333]/10" title="Delete customer">
+                        <Trash2 className="size-3.5 text-[#FF3333]" />
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ))
+                ));
+              })()
             )}
           </TableBody>
         </Table>

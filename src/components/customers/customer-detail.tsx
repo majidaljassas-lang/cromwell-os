@@ -3,13 +3,22 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Building2, Plus, Check, X, Pencil } from "lucide-react";
+import { ArrowLeft, Building2, Plus, Check, X, Pencil, Users, Tag, Trash2, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+
+type CustomerAlias = {
+  id: string;
+  aliasText: string;
+  aliasSource: string | null;
+  confidenceScore: number | null;
+  manualConfirmed: boolean;
+  createdAt: string;
+};
 
 type Customer = {
   id: string;
@@ -20,8 +29,13 @@ type Customer = {
   paymentTerms: string | null;
   poRequiredDefault: boolean;
   isCashCustomer: boolean;
+  isBillingEntity: boolean;
+  parentCustomerEntityId: string | null;
+  entityType: string | null;
   notes: string | null;
-  aliases: string[];
+  parentEntity: { id: string; name: string } | null;
+  subsidiaries: Array<{ id: string; name: string; legalName: string | null; isBillingEntity: boolean }>;
+  customerAliases: CustomerAlias[];
   siteCommercialLinks: Array<{
     id: string;
     role: string;
@@ -37,13 +51,41 @@ type Customer = {
   customerPOs: Array<{ id: string; poNo: string; poType: string; status: string; totalValue: number | null }>;
 };
 
-export function CustomerDetail({ customer, allSites }: { customer: Customer; allSites: Array<{ id: string; siteName: string }> }) {
+export function CustomerDetail({
+  customer,
+  allSites,
+  allCustomers,
+}: {
+  customer: Customer;
+  allSites: Array<{ id: string; siteName: string }>;
+  allCustomers: Array<{ id: string; name: string }>;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkSubmitting, setLinkSubmitting] = useState(false);
   const [selectedSiteId, setSelectedSiteId] = useState("");
+
+  // Alias management
+  const [newAlias, setNewAlias] = useState("");
+  const [addingAlias, setAddingAlias] = useState(false);
+
+  // Hierarchy
+  const [setParentOpen, setSetParentOpen] = useState(false);
+  const [selectedParentId, setSelectedParentId] = useState(customer.parentCustomerEntityId || "");
+  const [savingParent, setSavingParent] = useState(false);
+
+  // Add subsidiary
+  const [addSubOpen, setAddSubOpen] = useState(false);
+  const [selectedSubId, setSelectedSubId] = useState("");
+  const [savingSub, setSavingSub] = useState(false);
+
+  async function handleDelete() {
+    if (!confirm(`Delete customer "${customer.name}"? This will remove all aliases and site links.`)) return;
+    await fetch(`/api/customers/${customer.id}`, { method: "DELETE" });
+    router.push("/customers");
+  }
 
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -57,6 +99,8 @@ export function CustomerDetail({ customer, allSites }: { customer: Customer; all
       paymentTerms: (fd.get("paymentTerms") as string) || null,
       notes: (fd.get("notes") as string) || null,
       poRequiredDefault: fd.get("poRequired") === "on",
+      entityType: (fd.get("entityType") as string) || null,
+      isBillingEntity: fd.get("isBillingEntity") === "on",
     };
     await fetch(`/api/customers/${customer.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -87,6 +131,55 @@ export function CustomerDetail({ customer, allSites }: { customer: Customer; all
     router.refresh();
   }
 
+  async function handleAddAlias() {
+    if (!newAlias.trim()) return;
+    setAddingAlias(true);
+    await fetch("/api/customer-aliases", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerId: customer.id, aliasText: newAlias.trim() }),
+    });
+    setNewAlias("");
+    setAddingAlias(false);
+    router.refresh();
+  }
+
+  async function handleDeleteAlias(aliasId: string) {
+    await fetch(`/api/customer-aliases?id=${aliasId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function handleSetParent() {
+    setSavingParent(true);
+    await fetch(`/api/customers/${customer.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentCustomerEntityId: selectedParentId || null }),
+    });
+    setSavingParent(false);
+    setSetParentOpen(false);
+    router.refresh();
+  }
+
+  async function handleAddSubsidiary() {
+    if (!selectedSubId) return;
+    setSavingSub(true);
+    await fetch(`/api/customers/${selectedSubId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentCustomerEntityId: customer.id }),
+    });
+    setSavingSub(false);
+    setAddSubOpen(false);
+    setSelectedSubId("");
+    router.refresh();
+  }
+
+  async function handleRemoveSubsidiary(subId: string) {
+    await fetch(`/api/customers/${subId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentCustomerEntityId: null }),
+    });
+    router.refresh();
+  }
+
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Header */}
@@ -100,16 +193,32 @@ export function CustomerDetail({ customer, allSites }: { customer: Customer; all
             {customer.legalName && <span>{customer.legalName}</span>}
             {customer.poRequiredDefault && <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">PO REQUIRED</Badge>}
             {customer.isCashCustomer && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">CASH</Badge>}
+            {customer.isBillingEntity && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">BILLING ENTITY</Badge>}
+            {customer.parentEntity && (
+              <Link href={`/customers/${customer.parentEntity.id}`}>
+                <Badge className="text-[8px] px-1 py-0 text-[#FF6600] bg-[#FF6600]/10 cursor-pointer hover:bg-[#FF6600]/20">
+                  PARENT: {customer.parentEntity.name}
+                </Badge>
+              </Link>
+            )}
+            {customer.entityType && <Badge className="text-[8px] px-1 py-0 text-[#888888] bg-[#333333]">{customer.entityType}</Badge>}
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setEditing(!editing)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
-          <Pencil className="size-3.5 mr-1" />{editing ? "Cancel" : "Edit"}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleDelete} className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
+            <Trash2 className="size-3.5 mr-1" />Delete
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditing(!editing)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
+            <Pencil className="size-3.5 mr-1" />{editing ? "Cancel" : "Edit"}
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="hierarchy">Hierarchy ({customer.subsidiaries.length})</TabsTrigger>
+          <TabsTrigger value="aliases">Aliases ({customer.customerAliases.length})</TabsTrigger>
           <TabsTrigger value="sites">Sites ({customer.siteCommercialLinks.length})</TabsTrigger>
           <TabsTrigger value="tickets">Tickets ({customer.ticketsAsPayer.length})</TabsTrigger>
           <TabsTrigger value="contacts">Contacts ({customer.siteContactLinks.length})</TabsTrigger>
@@ -125,10 +234,17 @@ export function CustomerDetail({ customer, allSites }: { customer: Customer; all
                 <div className="space-y-1.5"><Label>Billing Address</Label><Input name="billingAddress" defaultValue={customer.billingAddress || ""} /></div>
                 <div className="space-y-1.5"><Label>VAT Number</Label><Input name="vatNumber" defaultValue={customer.vatNumber || ""} /></div>
                 <div className="space-y-1.5"><Label>Payment Terms</Label><Input name="paymentTerms" defaultValue={customer.paymentTerms || ""} /></div>
+                <div className="space-y-1.5"><Label>Entity Type</Label><Input name="entityType" defaultValue={customer.entityType || ""} placeholder="e.g. HEAD_OFFICE, DIVISION, SUBSIDIARY" /></div>
                 <div className="space-y-1.5"><Label>Notes</Label><Input name="notes" defaultValue={customer.notes || ""} /></div>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" name="poRequired" id="poRequired" defaultChecked={customer.poRequiredDefault} />
-                  <Label htmlFor="poRequired">PO Required by Default</Label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" name="poRequired" id="poRequired" defaultChecked={customer.poRequiredDefault} />
+                    <Label htmlFor="poRequired">PO Required</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" name="isBillingEntity" id="isBillingEntity" defaultChecked={customer.isBillingEntity} />
+                    <Label htmlFor="isBillingEntity">Billing Entity</Label>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <Button type="submit" disabled={saving} className="bg-[#FF6600] text-black hover:bg-[#FF9900]"><Check className="size-4 mr-1" />{saving ? "Saving..." : "Save"}</Button>
@@ -142,9 +258,167 @@ export function CustomerDetail({ customer, allSites }: { customer: Customer; all
                 <div><dt className="text-[#888888]">Billing Address</dt><dd>{customer.billingAddress || "—"}</dd></div>
                 <div><dt className="text-[#888888]">VAT Number</dt><dd>{customer.vatNumber || "—"}</dd></div>
                 <div><dt className="text-[#888888]">Payment Terms</dt><dd>{customer.paymentTerms || "—"}</dd></div>
+                <div><dt className="text-[#888888]">Entity Type</dt><dd>{customer.entityType || "—"}</dd></div>
                 <div><dt className="text-[#888888]">PO Required</dt><dd>{customer.poRequiredDefault ? "Yes" : "No"}</dd></div>
+                <div><dt className="text-[#888888]">Billing Entity</dt><dd>{customer.isBillingEntity ? "Yes" : "No"}</dd></div>
                 {customer.notes && <div className="col-span-2"><dt className="text-[#888888]">Notes</dt><dd>{customer.notes}</dd></div>}
               </dl>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* HIERARCHY */}
+        <TabsContent value="hierarchy" className="mt-4 space-y-4">
+          {/* Parent entity */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#888888] flex items-center gap-2">
+                <Network className="size-3.5" /> PARENT ENTITY
+              </div>
+              <Sheet open={setParentOpen} onOpenChange={setSetParentOpen}>
+                <SheetTrigger render={<Button size="sm" variant="outline" className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs h-7">{customer.parentEntity ? "Change" : "Set Parent"}</Button>} />
+                <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+                  <SheetHeader><SheetTitle className="text-[#E0E0E0]">Set Parent Entity</SheetTitle></SheetHeader>
+                  <div className="flex flex-col gap-4 px-4">
+                    <div className="space-y-1.5">
+                      <Label>Parent Customer</Label>
+                      <select value={selectedParentId} onChange={(e) => setSelectedParentId(e.target.value)} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                        <option value="">None (top-level entity)</option>
+                        {allCustomers.filter((c) => c.id !== customer.id).map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <SheetFooter>
+                      <Button onClick={handleSetParent} disabled={savingParent} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                        {savingParent ? "Saving..." : "Save"}
+                      </Button>
+                    </SheetFooter>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+            {customer.parentEntity ? (
+              <Link href={`/customers/${customer.parentEntity.id}`}>
+                <div className="flex items-center gap-3 p-3 border border-[#333333] bg-[#222222] hover:bg-[#2A2A2A] cursor-pointer">
+                  <Users className="size-5 text-[#FF6600]" />
+                  <div>
+                    <div className="font-medium text-[#E0E0E0]">{customer.parentEntity.name}</div>
+                    <div className="text-[9px] text-[#888888]">Parent Entity</div>
+                  </div>
+                </div>
+              </Link>
+            ) : (
+              <div className="text-xs text-[#666666] italic">No parent entity set — this is a top-level customer.</div>
+            )}
+          </div>
+
+          {/* Subsidiaries */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#888888] flex items-center gap-2">
+                <Building2 className="size-3.5" /> SUBSIDIARIES ({customer.subsidiaries.length})
+              </div>
+              <Sheet open={addSubOpen} onOpenChange={setAddSubOpen}>
+                <SheetTrigger render={<Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900] text-xs h-7"><Plus className="size-3.5 mr-1" />Add Subsidiary</Button>} />
+                <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+                  <SheetHeader><SheetTitle className="text-[#E0E0E0]">Add Subsidiary</SheetTitle></SheetHeader>
+                  <div className="flex flex-col gap-4 px-4">
+                    <div className="space-y-1.5">
+                      <Label>Customer</Label>
+                      <select value={selectedSubId} onChange={(e) => setSelectedSubId(e.target.value)} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                        <option value="">Select customer...</option>
+                        {allCustomers.filter((c) => c.id !== customer.id && !customer.subsidiaries.some((s) => s.id === c.id)).map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <SheetFooter>
+                      <Button onClick={handleAddSubsidiary} disabled={savingSub || !selectedSubId} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                        {savingSub ? "Adding..." : "Add as Subsidiary"}
+                      </Button>
+                    </SheetFooter>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+            {customer.subsidiaries.length === 0 ? (
+              <div className="text-xs text-[#666666] italic">No subsidiaries.</div>
+            ) : (
+              <div className="space-y-2">
+                {customer.subsidiaries.map((sub) => (
+                  <div key={sub.id} className="flex items-center justify-between border border-[#333333] bg-[#222222] p-3">
+                    <Link href={`/customers/${sub.id}`} className="flex items-center gap-3 flex-1 hover:opacity-80">
+                      <Building2 className="size-4 text-[#3399FF]" />
+                      <div>
+                        <div className="text-sm text-[#E0E0E0] font-medium">{sub.name}</div>
+                        {sub.legalName && <div className="text-[9px] text-[#666666]">{sub.legalName}</div>}
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-2">
+                      {sub.isBillingEntity && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">BILLING</Badge>}
+                      <button onClick={() => handleRemoveSubsidiary(sub.id)} className="text-[#FF3333] hover:text-[#FF6666] p-1" title="Remove subsidiary link">
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ALIASES */}
+        <TabsContent value="aliases" className="mt-4 space-y-4">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] uppercase tracking-widest text-[#888888] flex items-center gap-2">
+                <Tag className="size-3.5" /> CUSTOMER ALIASES
+              </div>
+            </div>
+            <p className="text-[10px] text-[#666666] mb-3">
+              Aliases allow the system to match different names/spellings to this customer during import and reconciliation.
+            </p>
+
+            {/* Add alias */}
+            <div className="flex items-center gap-2 mb-4">
+              <Input
+                value={newAlias}
+                onChange={(e) => setNewAlias(e.target.value)}
+                placeholder="Add alias text..."
+                className="h-8 text-xs bg-[#222222] border-[#333333] flex-1"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddAlias(); } }}
+              />
+              <Button size="sm" onClick={handleAddAlias} disabled={addingAlias || !newAlias.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900] h-8">
+                <Plus className="size-3.5 mr-1" />{addingAlias ? "Adding..." : "Add"}
+              </Button>
+            </div>
+
+            {/* Alias list */}
+            {customer.customerAliases.length === 0 ? (
+              <div className="text-xs text-[#666666] italic">No aliases defined.</div>
+            ) : (
+              <div className="space-y-1">
+                {customer.customerAliases.map((alias) => (
+                  <div key={alias.id} className="flex items-center justify-between border border-[#333333] bg-[#222222] px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-[#E0E0E0] bb-mono">{alias.aliasText}</span>
+                      <Badge className={`text-[7px] px-1 py-0 ${alias.manualConfirmed ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"}`}>
+                        {alias.manualConfirmed ? "CONFIRMED" : "AUTO"}
+                      </Badge>
+                      {alias.aliasSource && (
+                        <Badge className="text-[7px] px-1 py-0 text-[#888888] bg-[#333333]">{alias.aliasSource.toUpperCase()}</Badge>
+                      )}
+                      {alias.confidenceScore != null && (
+                        <span className="text-[9px] text-[#888888] bb-mono">{Number(alias.confidenceScore)}%</span>
+                      )}
+                    </div>
+                    <button onClick={() => handleDeleteAlias(alias.id)} className="text-[#FF3333] hover:text-[#FF6666] p-1" title="Remove alias">
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </TabsContent>
