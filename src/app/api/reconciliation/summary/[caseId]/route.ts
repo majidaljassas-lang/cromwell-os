@@ -1,8 +1,15 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * GET: Reconciliation summary for a case.
- * Returns flat table + commercial summary.
+ * GET: Reconciliation summary — STRICT rules.
+ *
+ * ONLY shows data traceable to real sources:
+ * - REQ from messages only
+ * - INV from linked invoice lines only (0 if none linked)
+ * - DIFF only calculated when invoice lines exist
+ * - STATUS: MESSAGE_LINKED / AWAITING_INVOICE / INVOICE_LINKED / PARTIAL / COMPLETE / UNDERBILLED
+ *
+ * NO assumptions. NO placeholders. NO inferred values.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ caseId: string }> }) {
   const { caseId } = await params;
@@ -10,6 +17,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
     const ticketLines = await prisma.backlogTicketLine.findMany({
       where: { caseId },
       include: {
+        orderThread: { select: { id: true, label: true } },
         invoiceMatches: {
           include: { invoiceLine: true },
         },
@@ -17,28 +25,45 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
       orderBy: { normalizedProduct: "asc" },
     });
 
-    // Build reconciliation table
     const rows = ticketLines.map((tl) => {
-      const invoicedQty = tl.invoiceMatches.reduce((s, m) => s + Number(m.invoiceLine.qty), 0);
+      const hasInvoiceLinks = tl.invoiceMatches.length > 0;
+      const invoicedQty = hasInvoiceLinks ? tl.invoiceMatches.reduce((s, m) => s + Number(m.invoiceLine.qty), 0) : 0;
+      const invoicedAmount = hasInvoiceLinks ? tl.invoiceMatches.reduce((s, m) => s + Number(m.invoiceLine.amount || 0), 0) : 0;
       const requestedQty = Number(tl.requestedQty);
-      const difference = invoicedQty - requestedQty;
 
-      const invoicedAmount = tl.invoiceMatches.reduce((s, m) => s + Number(m.invoiceLine.amount || 0), 0);
-
-      // Status
+      // STRICT STATUS RULES — no assumptions
       let status: string;
-      if (invoicedQty === 0) status = "NOT_INVOICED";
-      else if (invoicedQty >= requestedQty) status = "COMPLETE";
-      else if (invoicedQty > 0 && tl.invoiceMatches.length > 1) status = "PARTIAL";
-      else status = "UNDERBILLED";
+      if (!hasInvoiceLinks) {
+        status = "AWAITING_INVOICE"; // No financial data linked
+      } else if (invoicedQty >= requestedQty) {
+        status = "COMPLETE";
+      } else if (invoicedQty > 0 && invoicedQty < requestedQty) {
+        status = "UNDERBILLED";
+      } else {
+        status = "INVOICE_LINKED";
+      }
 
-      // Invoice line types
-      const billLinkedCount = tl.invoiceMatches.filter((m) => m.invoiceLine.isBillLinked).length;
-      const manualCount = tl.invoiceMatches.filter((m) => !m.invoiceLine.isBillLinked).length;
+      // Confidence — based on source quality, NOT assumptions
+      let confidence: string;
+      if (tl.normalizedProduct !== "UNKNOWN" && requestedQty > 0) {
+        confidence = "HIGH"; // Message clearly defines order
+      } else if (tl.normalizedProduct !== "UNKNOWN") {
+        confidence = "MEDIUM";
+      } else {
+        confidence = "LOW";
+      }
 
-      // Billing confidence — worst case across matches
-      const confidences = tl.invoiceMatches.map((m) => m.invoiceLine.billingConfidence);
-      const billingConfidence = confidences.includes("LOW") ? "LOW" : confidences.includes("MEDIUM") ? "MEDIUM" : confidences.length > 0 ? "HIGH" : "NONE";
+      // Type — based on actual links
+      let lineType: string;
+      if (!hasInvoiceLinks) {
+        lineType = "MESSAGE_LINKED"; // Only linked to WhatsApp, no financial data
+      } else {
+        const billLinked = tl.invoiceMatches.filter((m) => m.invoiceLine.isBillLinked).length;
+        const manual = tl.invoiceMatches.filter((m) => !m.invoiceLine.isBillLinked).length;
+        if (billLinked > 0 && manual === 0) lineType = "BILL_LINKED";
+        else if (manual > 0 && billLinked === 0) lineType = "MANUAL_INVOICE";
+        else lineType = "MIXED";
+      }
 
       return {
         id: tl.id,
@@ -46,16 +71,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
         rawText: tl.rawText,
         sender: tl.sender,
         date: tl.date,
+        orderThread: tl.orderThread?.label || null,
         requestedQty,
         requestedUnit: tl.requestedUnit,
         invoicedQty,
-        difference,
+        difference: hasInvoiceLinks ? invoicedQty - requestedQty : 0,
         invoicedAmount,
         status,
-        billLinkedCount,
-        manualCount,
-        invoiceLineType: billLinkedCount > 0 && manualCount === 0 ? "BILL_LINKED" : manualCount > 0 && billLinkedCount === 0 ? "MANUAL_INVOICE_LINE" : billLinkedCount > 0 ? "MIXED" : "NONE",
-        billingConfidence,
+        lineType,
+        confidence,
+        sourceMessageId: tl.sourceMessageId,
         invoiceMatches: tl.invoiceMatches.map((m) => ({
           invoiceNumber: m.invoiceLine.invoiceNumber,
           qty: Number(m.invoiceLine.qty),
@@ -74,44 +99,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
       };
     });
 
-    // Unmatched invoice lines (invoiced but not linked to any ticket line)
+    // Summary — only real values
     const allInvoiceLines = await prisma.backlogInvoiceLine.findMany({ where: { caseId } });
-    const matchedInvoiceIds = new Set(ticketLines.flatMap((tl) => tl.invoiceMatches.map((m) => m.invoiceLineId)));
-    const unmatchedInvoiceLines = allInvoiceLines.filter((il) => !matchedInvoiceIds.has(il.id));
-
-    // Commercial summary
-    const totalRequestedValue = rows.reduce((s, r) => s + r.invoicedAmount, 0); // approximate
     const totalInvoicedValue = allInvoiceLines.reduce((s, il) => s + Number(il.amount || 0), 0);
     const totalBillLinkedValue = allInvoiceLines.filter((il) => il.isBillLinked).reduce((s, il) => s + Number(il.amount || 0), 0);
     const totalManualValue = allInvoiceLines.filter((il) => !il.isBillLinked).reduce((s, il) => s + Number(il.amount || 0), 0);
-    const totalUninvoicedLines = rows.filter((r) => r.status === "NOT_INVOICED").length;
 
     return Response.json({
       caseId,
       reconciliation: rows,
-      unmatchedInvoiceLines: unmatchedInvoiceLines.map((il) => ({
-        id: il.id,
-        invoiceNumber: il.invoiceNumber,
-        productDescription: il.productDescription,
-        normalizedProduct: il.normalizedProduct,
-        qty: Number(il.qty),
-        amount: Number(il.amount || 0),
-        isBillLinked: il.isBillLinked,
-        invoiceLineType: il.invoiceLineType,
-        billingConfidence: il.billingConfidence,
-      })),
       summary: {
-        totalTicketLines: ticketLines.length,
+        totalOrderLines: ticketLines.length,
         totalInvoiceLines: allInvoiceLines.length,
         totalInvoicedValue: Math.round(totalInvoicedValue * 100) / 100,
         totalBillLinkedValue: Math.round(totalBillLinkedValue * 100) / 100,
         totalManualValue: Math.round(totalManualValue * 100) / 100,
-        totalUninvoicedLines,
+        awaitingInvoice: rows.filter((r) => r.status === "AWAITING_INVOICE").length,
         statusCounts: {
+          MESSAGE_LINKED: rows.filter((r) => r.status === "MESSAGE_LINKED" || r.status === "AWAITING_INVOICE").length,
           COMPLETE: rows.filter((r) => r.status === "COMPLETE").length,
-          PARTIAL: rows.filter((r) => r.status === "PARTIAL").length,
           UNDERBILLED: rows.filter((r) => r.status === "UNDERBILLED").length,
-          NOT_INVOICED: rows.filter((r) => r.status === "NOT_INVOICED").length,
+          AWAITING_INVOICE: rows.filter((r) => r.status === "AWAITING_INVOICE").length,
         },
       },
     });

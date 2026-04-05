@@ -1779,9 +1779,24 @@ model BacklogMessage {
 
 // ─── BACKLOG RECONCILIATION ─────────────────────────────────────────────────
 
+model BacklogOrderThread {
+  id          String   @id @default(uuid())
+  caseId      String
+  label       String
+  description String?
+  messageIds  String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderLines BacklogTicketLine[]
+
+  @@index([caseId])
+}
+
 model BacklogTicketLine {
   id                    String   @id @default(uuid())
   caseId                String
+  orderThreadId         String?
   sourceMessageId       String?
   date                  DateTime
   sender                String
@@ -1792,14 +1807,16 @@ model BacklogTicketLine {
   requestedQtyBase      Decimal? @db.Decimal(14, 4)
   baseUnit              String?
   notes                 String?
-  status                String   @default("UNMATCHED")
+  status                String   @default("MESSAGE_LINKED")
   createdAt             DateTime @default(now())
 
+  orderThread  BacklogOrderThread? @relation(fields: [orderThreadId], references: [id])
   invoiceMatches BacklogInvoiceMatch[]
 
   @@index([caseId])
   @@index([normalizedProduct])
   @@index([sourceMessageId])
+  @@index([orderThreadId])
 }
 
 model BacklogInvoiceLine {

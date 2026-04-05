@@ -2,16 +2,15 @@ import { prisma } from "@/lib/prisma";
 import { normalizeProduct, extractQtyUnit, convertToBase } from "@/lib/reconciliation/normalizer";
 
 /**
- * POST: Extract ticket lines from a backlog message.
- * Body: { messageId: string, caseId: string }
+ * POST: Extract order lines from a backlog message into an order thread.
  *
- * Parses each line of the message's rawText into ticket line candidates.
- * User reviews before confirming.
+ * Status = MESSAGE_LINKED only. No financial status until invoices/bills linked.
+ * Every value traceable to the source message. No assumptions.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { messageId, caseId, confirm } = body;
+    const { messageId, caseId, threadLabel, confirm } = body;
 
     if (!messageId || !caseId) {
       return Response.json({ error: "messageId and caseId required" }, { status: 400 });
@@ -20,7 +19,6 @@ export async function POST(request: Request) {
     const msg = await prisma.backlogMessage.findUnique({ where: { id: messageId } });
     if (!msg) return Response.json({ error: "Message not found" }, { status: 404 });
 
-    // Parse each line of the message
     const lines = msg.rawText.split("\n").filter((l) => l.trim());
     const candidates: Array<{
       rawText: string;
@@ -31,51 +29,37 @@ export async function POST(request: Request) {
       qtyBase: number;
       baseUnit: string;
       confidence: number;
-      notes: string | null;
     }> = [];
 
     for (const line of lines) {
       const trimmed = line.replace(/^[•\-\s]+/, "").trim();
       if (trimmed.length < 5) continue;
-
       const qtyUnit = extractQtyUnit(trimmed);
-      if (!qtyUnit) continue; // Skip lines without quantities
-
+      if (!qtyUnit) continue;
       const { normalized, category, confidence } = normalizeProduct(trimmed);
-      if (normalized === "UNKNOWN" && confidence === 0) continue;
-
       const base = convertToBase(normalized, qtyUnit.qty, qtyUnit.unit);
-
-      candidates.push({
-        rawText: trimmed,
-        normalizedProduct: normalized,
-        category,
-        qty: qtyUnit.qty,
-        unit: qtyUnit.unit,
-        qtyBase: base.qtyBase,
-        baseUnit: base.baseUnit,
-        confidence,
-        notes: null,
-      });
+      candidates.push({ rawText: trimmed, normalizedProduct: normalized, category, qty: qtyUnit.qty, unit: qtyUnit.unit, qtyBase: base.qtyBase, baseUnit: base.baseUnit, confidence });
     }
 
     if (!confirm) {
-      return Response.json({
-        preview: true,
-        messageId,
-        sender: msg.sender,
-        timestamp: msg.parsedTimestamp,
-        totalLines: lines.length,
-        candidates,
-      });
+      return Response.json({ preview: true, messageId, sender: msg.sender, timestamp: msg.parsedTimestamp, totalLines: lines.length, candidates });
     }
 
-    // Confirm: create BacklogTicketLines
+    const thread = await prisma.backlogOrderThread.create({
+      data: {
+        caseId,
+        label: threadLabel || `${msg.sender} — ${new Date(msg.parsedTimestamp).toLocaleDateString("en-GB")}`,
+        description: msg.rawText.slice(0, 200),
+        messageIds: [messageId],
+      },
+    });
+
     const created = [];
     for (const c of candidates) {
       const tl = await prisma.backlogTicketLine.create({
         data: {
           caseId,
+          orderThreadId: thread.id,
           sourceMessageId: messageId,
           date: msg.parsedTimestamp,
           sender: msg.sender,
@@ -85,18 +69,13 @@ export async function POST(request: Request) {
           requestedUnit: c.unit,
           requestedQtyBase: c.qtyBase,
           baseUnit: c.baseUnit,
-          notes: c.notes,
-          status: "UNMATCHED",
+          status: "MESSAGE_LINKED",
         },
       });
       created.push(tl);
     }
 
-    return Response.json({
-      confirmed: true,
-      created: created.length,
-      ticketLines: created,
-    }, { status: 201 });
+    return Response.json({ confirmed: true, threadId: thread.id, threadLabel: thread.label, created: created.length, ticketLines: created }, { status: 201 });
   } catch (error) {
     console.error("Extraction failed:", error);
     return Response.json({ error: "Extraction failed" }, { status: 500 });

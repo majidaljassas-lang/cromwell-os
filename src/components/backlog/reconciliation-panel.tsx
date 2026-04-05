@@ -14,7 +14,7 @@ type InvoiceMatch = {
   siteAliasUsed: boolean;
   orderRefRaw: string | null;
   isBillLinked: boolean;
-  invoiceLineType: string;
+  lineType: string;
   billingConfidence: string;
   matchMethod: string | null;
   matchUsedSiteAlias: boolean;
@@ -33,7 +33,7 @@ type ReconRow = {
   difference: number;
   invoicedAmount: number;
   status: string;
-  invoiceLineType: string;
+  lineType: string;
   billingConfidence: string;
   billLinkedCount: number;
   manualCount: number;
@@ -41,21 +41,21 @@ type ReconRow = {
 };
 
 type Summary = {
-  totalTicketLines: number;
+  totalOrderLines: number;
   totalInvoiceLines: number;
   totalInvoicedValue: number;
   totalBillLinkedValue: number;
   totalManualValue: number;
-  totalUninvoicedLines: number;
+  awaitingInvoice: number;
   statusCounts: Record<string, number>;
 };
 
 const STATUS_COLORS: Record<string, string> = {
   COMPLETE: "text-[#00CC66] bg-[#00CC66]/10",
-  PARTIAL: "text-[#FF9900] bg-[#FF9900]/10",
+  INVOICE_LINKED: "text-[#3399FF] bg-[#3399FF]/10",
   UNDERBILLED: "text-[#FF3333] bg-[#FF3333]/10",
-  NOT_INVOICED: "text-[#FF3333] bg-[#FF3333]/10",
-  UNMATCHED: "text-[#888888] bg-[#333333]",
+  AWAITING_INVOICE: "text-[#888888] bg-[#333333]",
+  MESSAGE_LINKED: "text-[#FF6600] bg-[#FF6600]/10",
 };
 
 const CONF_COLORS: Record<string, string> = {
@@ -117,8 +117,8 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
           <div className="text-lg font-bold bb-mono text-[#FF9900] mt-1">{fmt(summary.totalManualValue)}</div>
         </div>
         <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-          <div className="text-[9px] uppercase tracking-widest text-[#888888]">UNINVOICED</div>
-          <div className="text-lg font-bold bb-mono text-[#FF3333] mt-1">{summary.totalUninvoicedLines}</div>
+          <div className="text-[9px] uppercase tracking-widest text-[#888888]">AWAITING INVOICE</div>
+          <div className="text-lg font-bold bb-mono text-[#888888] mt-1">{summary.awaitingInvoice}</div>
         </div>
         <div className="border border-[#333333] bg-[#1A1A1A] p-3">
           <div className="text-[9px] uppercase tracking-widest text-[#888888]">STATUS</div>
@@ -136,7 +136,7 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
         <Input value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)} placeholder="Product..." className="h-6 w-36 text-[10px] bg-[#222222] border-[#333333]" />
         <Input value={filterInvoice} onChange={(e) => setFilterInvoice(e.target.value)} placeholder="Invoice #..." className="h-6 w-28 text-[10px] bg-[#222222] border-[#333333]" />
         <span className="text-[#555555]">|</span>
-        {["ALL", "COMPLETE", "UNDERBILLED", "PARTIAL", "NOT_INVOICED"].map((s) => (
+        {["ALL", "AWAITING_INVOICE", "COMPLETE", "UNDERBILLED", "MESSAGE_LINKED"].map((s) => (
           <button key={s} onClick={() => setFilterStatus(s)} className={`text-[9px] px-2 py-0.5 ${filterStatus === s ? "bg-[#FF6600] text-black" : "text-[#888888]"}`}>{s === "ALL" ? "All" : s.replace(/_/g, " ")}</button>
         ))}
         <span className="text-[#555555]">|</span>
@@ -180,7 +180,7 @@ export function ReconciliationPanel({ caseId }: { caseId: string }) {
                       <div className="w-16 text-right text-xs bb-mono text-[#E0E0E0]">{row.invoicedQty}</div>
                       <div className={`w-16 text-right text-xs bb-mono ${row.difference >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>{row.difference >= 0 ? "+" : ""}{row.difference}</div>
                       <div className="w-20 px-2"><Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${STATUS_COLORS[row.status] || "text-[#888888] bg-[#333333]"}`}>{row.status.replace(/_/g, " ")}</Badge></div>
-                      <div className="w-20 px-2"><Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${row.invoiceLineType === "BILL_LINKED" ? "text-[#00CC66] bg-[#00CC66]/10" : row.invoiceLineType === "MANUAL_INVOICE_LINE" ? "text-[#FF9900] bg-[#FF9900]/10" : row.invoiceLineType === "MIXED" ? "text-[#3399FF] bg-[#3399FF]/10" : "text-[#666666] bg-[#222222]"}`}>{row.invoiceLineType === "BILL_LINKED" ? "BILL-LINKED" : row.invoiceLineType === "MANUAL_INVOICE_LINE" ? "MANUAL" : row.invoiceLineType}</Badge></div>
+                      <div className="w-20 px-2"><Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${row.lineType === "BILL_LINKED" ? "text-[#00CC66] bg-[#00CC66]/10" : row.lineType === "MESSAGE_LINKED" ? "text-[#FF6600] bg-[#FF6600]/10" : row.lineType === "MANUAL_INVOICE" ? "text-[#FF9900] bg-[#FF9900]/10" : "text-[#666666] bg-[#222222]"}`}>{row.lineType === "MESSAGE_LINKED" ? "MSG ONLY" : row.lineType === "BILL_LINKED" ? "BILL-LINKED" : row.lineType === "MANUAL_INVOICE" ? "MANUAL" : row.lineType}</Badge></div>
                       <div className={`w-14 text-xs bb-mono ${CONF_COLORS[row.billingConfidence] || "text-[#666666]"}`}>{row.billingConfidence}</div>
                       <div className="w-20 text-right text-xs bb-mono text-[#E0E0E0]">{fmt(row.invoicedAmount)}</div>
                     </div>
