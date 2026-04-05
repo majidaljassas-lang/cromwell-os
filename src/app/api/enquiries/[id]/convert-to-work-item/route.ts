@@ -1,5 +1,18 @@
 import { prisma } from "@/lib/prisma";
 
+/**
+ * POST /api/enquiries/[id]/convert-to-work-item
+ *
+ * FLOW: Enquiry → Tasks → Decision → Ticket
+ *
+ * This endpoint creates a work item and validation tasks.
+ * Ticket creation ONLY happens when:
+ *   - All validation tasks are complete (status = READY_FOR_TICKET)
+ *   - User explicitly requests ticket creation (createTicket = true)
+ *   - AND customer is resolved
+ *
+ * Body: { mode, notes?, customerId?, createTicket?: boolean }
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -10,15 +23,15 @@ export async function POST(
     const { mode, notes, customerId, createTicket } = body;
 
     if (!mode) {
-      return Response.json(
-        { error: "Missing required field: mode" },
-        { status: 400 }
-      );
+      return Response.json({ error: "Missing required field: mode" }, { status: 400 });
     }
 
     const enquiry = await prisma.enquiry.findUnique({
       where: { id: enquiryId },
-      include: { workItems: { select: { id: true, status: true, customerId: true } } },
+      include: {
+        workItems: { select: { id: true, status: true, customerId: true } },
+        enquiryTasks: { select: { id: true, taskType: true, status: true } },
+      },
     });
 
     if (!enquiry) {
@@ -30,19 +43,9 @@ export async function POST(
     let workItemCustomerId: string | null;
 
     if (enquiry.workItems.length > 0) {
-      // Work item already exists — use it
       workItemId = enquiry.workItems[0].id;
       workItemCustomerId = enquiry.workItems[0].customerId;
-
-      // Heal enquiry status if stuck
-      if (enquiry.status === "OPEN") {
-        await prisma.enquiry.update({
-          where: { id: enquiryId },
-          data: { status: "READY_TO_CONVERT" },
-        });
-      }
     } else {
-      // Create new work item
       const workItem = await prisma.inquiryWorkItem.create({
         data: {
           enquiryId,
@@ -51,34 +54,67 @@ export async function POST(
           siteCommercialLinkId: enquiry.suggestedSiteCommercialLinkId,
           customerId: customerId || enquiry.suggestedCustomerId,
           requestedByContactId: enquiry.sourceContactId,
-          mode: mode as "DIRECT_ORDER" | "PRICING_FIRST" | "SPEC_DRIVEN" | "COMPETITIVE_BID" | "RECOVERY" | "CASH_SALE" | "LABOUR_ONLY" | "PROJECT_WORK" | "NON_SITE",
+          mode: mode as any,
           status: "OPEN",
           notes,
         },
       });
-
-      await prisma.enquiry.update({
-        where: { id: enquiryId },
-        data: { status: "READY_TO_CONVERT" },
-      });
-
       workItemId = workItem.id;
       workItemCustomerId = workItem.customerId;
     }
 
-    // Step 2: If createTicket requested, convert work item → ticket
-    if (createTicket) {
-      const resolvedCustomerId = customerId || workItemCustomerId;
+    // Step 2: Create validation tasks if not already created
+    if (enquiry.enquiryTasks.length === 0) {
+      const taskTypes = [
+        "REVIEW_ENQUIRY",
+        "IDENTIFY_CUSTOMER",
+        "IDENTIFY_SITE",
+        "EXTRACT_SCOPE",
+        "VALIDATE_SCOPE",
+      ];
+      for (const taskType of taskTypes) {
+        await prisma.enquiryTask.create({
+          data: { enquiryId, taskType },
+        });
+      }
+    }
 
-      if (!resolvedCustomerId) {
+    // Update enquiry status to IN_REVIEW
+    await prisma.enquiry.update({
+      where: { id: enquiryId },
+      data: { status: "IN_REVIEW" },
+    });
+
+    // Step 3: Only create ticket if explicitly requested AND validation complete
+    if (createTicket) {
+      // Check all tasks are complete
+      const tasks = await prisma.enquiryTask.findMany({
+        where: { enquiryId },
+      });
+      const allComplete = tasks.length > 0 && tasks.every((t) => t.status === "COMPLETE");
+      const enquiryReady = enquiry.status === "READY_FOR_TICKET" || allComplete;
+
+      if (!enquiryReady) {
         return Response.json({
           workItemId,
-          needsCustomer: true,
-          error: "Customer required to create ticket. Pass customerId in the request.",
+          converted: false,
+          blocked: true,
+          reason: "Validation tasks not complete. Complete all tasks before creating ticket.",
+          tasks: tasks.map((t) => ({ taskType: t.taskType, status: t.status })),
         }, { status: 422 });
       }
 
-      // Update work item with customer if it was missing
+      const resolvedCustomerId = customerId || workItemCustomerId;
+      if (!resolvedCustomerId) {
+        return Response.json({
+          workItemId,
+          converted: false,
+          needsCustomer: true,
+          error: "Customer required to create ticket.",
+        }, { status: 422 });
+      }
+
+      // Update work item customer if missing
       if (!workItemCustomerId && resolvedCustomerId) {
         await prisma.inquiryWorkItem.update({
           where: { id: workItemId },
@@ -96,7 +132,7 @@ export async function POST(
             requestedByContactId: enquiry.sourceContactId,
             title: enquiry.subjectOrLabel || enquiry.rawText.slice(0, 80),
             description: enquiry.rawText,
-            ticketMode: mode as "DIRECT_ORDER" | "PRICING_FIRST" | "SPEC_DRIVEN" | "COMPETITIVE_BID" | "RECOVERY" | "CASH_SALE" | "LABOUR_ONLY" | "PROJECT_WORK" | "NON_SITE",
+            ticketMode: mode as any,
             status: "CAPTURED",
           },
         }),
@@ -113,13 +149,20 @@ export async function POST(
       return Response.json({ workItemId, ticket, converted: true }, { status: 201 });
     }
 
-    // If not creating ticket, just return the work item
-    return Response.json({ workItemId, converted: false }, { status: 201 });
+    // Not creating ticket — return work item with tasks
+    const tasks = await prisma.enquiryTask.findMany({
+      where: { enquiryId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return Response.json({
+      workItemId,
+      converted: false,
+      status: "IN_REVIEW",
+      tasks: tasks.map((t) => ({ id: t.id, taskType: t.taskType, status: t.status })),
+    }, { status: 201 });
   } catch (error) {
     console.error("Failed to convert enquiry:", error);
-    return Response.json(
-      { error: "Failed to convert enquiry" },
-      { status: 500 }
-    );
+    return Response.json({ error: "Failed to convert enquiry" }, { status: 500 });
   }
 }

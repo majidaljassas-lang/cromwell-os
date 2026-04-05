@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { parseWhatsAppMessage, type WhatsAppMessagePayload } from "@/lib/ingestion/whatsapp-parser";
 import { logAudit } from "@/lib/ingestion/audit";
+import { resolveLink } from "@/lib/ingestion/link-resolver";
 import crypto from "crypto";
 
 export async function POST(request: Request) {
@@ -125,6 +126,22 @@ export async function POST(request: Request) {
 
         results.created++;
         results.events.push(event.id);
+
+        // Auto-link via LinkResolver (non-blocking — don't fail import on link errors)
+        try {
+          await resolveLink({
+            eventType: "WHATSAPP_MESSAGE",
+            sourceType: "WHATSAPP",
+            sender: msgPayload.sender_name || msgPayload.sender_phone || null,
+            senderPhone: msgPayload.sender_phone || null,
+            receivedAt: new Date(msgPayload.timestamp),
+            rawText: msgPayload.message_text || null,
+            ingestionEventId: event.id,
+          });
+        } catch (linkErr) {
+          // Link resolution is best-effort — don't break import
+          console.error("Link resolution failed for message:", msgPayload.message_id, linkErr);
+        }
       } catch (err) {
         console.error("Failed to process message:", msgPayload.message_id, err);
         results.errors++;

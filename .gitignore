@@ -43,3 +43,9 @@ next-env.d.ts
 /src/generated/prisma
 public/quotes/
 public/backlog-uploads/
+
+# Media evidence uploads (binary assets)
+public/media-evidence/
+# OCR trained data
+eng.traineddata
+

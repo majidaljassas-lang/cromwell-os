@@ -20,10 +20,12 @@ import {
   BarChart3,
   FolderArchive,
   Archive,
+  Scale,
 } from "lucide-react";
 
 const navItems = [
   { label: "DASHBOARD", href: "/", icon: LayoutDashboard },
+  { label: "COMMERCIAL", href: "/commercial", icon: Scale },
   { label: "WORK QUEUE", href: "/work-queue", icon: ListTodo },
   { label: "JOBS / SITES", href: "/sites", icon: Building2 },
   { label: "CUSTOMERS", href: "/customers", icon: Users },

@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, Image } from "lucide-react";
 import { ReconciliationPanel } from "./reconciliation-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,11 +56,20 @@ type BacklogCase = {
   id: string;
   name: string;
   description: string | null;
+  siteId: string | null;
   siteRef: string | null;
   status: string;
   dateFrom: string | null;
   dateTo: string | null;
   sourceGroups: SourceGroup[];
+  site?: {
+    siteName: string;
+    siteCommercialLinks?: {
+      role: string;
+      billingAllowed: boolean;
+      customer: { id: string; name: string };
+    }[];
+  } | null;
 };
 
 const MSG_TYPES = ["UNCLASSIFIED", "ORDER", "FOLLOW-UP", "DUPLICATE", "CONFIRMATION", "DELIVERY", "OTHER"];
@@ -497,6 +506,36 @@ export function BacklogCaseView({
   const [editingSourceLabel, setEditingSourceLabel] = useState("");
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
 
+  // Media upload state
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const [mediaUploadSourceId, setMediaUploadSourceId] = useState<string | null>(null);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadResult, setMediaUploadResult] = useState<{ uploaded: number } | null>(null);
+
+  async function handleMediaUpload(sourceId: string, files: FileList | File[]) {
+    if (!files || files.length === 0) return;
+    setMediaUploading(true);
+    setMediaUploadSourceId(sourceId);
+    setMediaUploadResult(null);
+    try {
+      const fd = new FormData();
+      for (const file of Array.from(files)) {
+        fd.append("file", file);
+      }
+      fd.append("sourceId", sourceId);
+      fd.append("siteId", backlogCase.siteId || "");
+      const res = await fetch("/api/commercial/media/upload", { method: "POST", body: fd });
+      if (res.ok) {
+        const data = await res.json();
+        setMediaUploadResult(data);
+      }
+    } catch (err) {
+      console.error("Media upload failed:", err);
+    } finally {
+      setMediaUploading(false);
+    }
+  }
+
   // Invoice upload state
   type InvoiceDoc = {
     id: string;
@@ -662,6 +701,17 @@ export function BacklogCaseView({
             <Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#00CC66] bg-[#00CC66]/10">{backlogCase.status}</Badge>
           </div>
           {backlogCase.siteRef && <div className="text-xs text-[#888888] ml-[72px]">{backlogCase.siteRef}</div>}
+          {backlogCase.site?.siteCommercialLinks && backlogCase.site.siteCommercialLinks.length > 0 && (
+            <div className="flex items-center gap-2 ml-[72px] mt-0.5">
+              <Users className="size-3 text-[#FF6600]" />
+              {backlogCase.site.siteCommercialLinks.map((l, i) => (
+                <span key={i} className="text-[10px] bb-mono text-[#E0E0E0]">
+                  <span className="text-[#FF6600] font-bold">{l.customer.name}</span>
+                  <span className="text-[#666666]"> ({l.role}{l.billingAllowed ? " · Billing" : ""})</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={deleteCase} className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
@@ -1074,8 +1124,29 @@ export function BacklogCaseView({
                     ) : (
                       <button onClick={() => { setEditingSourceId(s.id); setEditingSourceLabel(s.label); }} className="p-0.5 hover:bg-[#FF6600]/10" title="Edit label"><Pencil className="size-3 text-[#888888]" /></button>
                     )}
+                    <label className="p-0.5 hover:bg-[#AA66FF]/10 cursor-pointer" title="Attach media files (images, PDFs, voice notes)">
+                      <Image className="size-3 text-[#AA66FF]" />
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.mp3,.m4a,.ogg,.opus,.mp4,.mov"
+                        className="hidden"
+                        onChange={(e) => { if (e.target.files) handleMediaUpload(s.id, e.target.files); e.target.value = ""; }}
+                      />
+                    </label>
                     <button onClick={() => deleteSource(s.id, s.label)} className="p-0.5 hover:bg-[#FF3333]/10" title="Delete source"><Trash2 className="size-3 text-[#FF3333]" /></button>
                   </div>
+                  {/* Media upload feedback */}
+                  {mediaUploadSourceId === s.id && mediaUploading && (
+                    <div className="mt-1 text-[9px] text-[#AA66FF] bb-mono flex items-center gap-1">
+                      <Loader2 className="size-3 animate-spin" /> Uploading media...
+                    </div>
+                  )}
+                  {mediaUploadSourceId === s.id && mediaUploadResult && (
+                    <div className="mt-1 text-[9px] text-[#00CC66] bb-mono flex items-center gap-1">
+                      <CheckCircle2 className="size-3" /> {mediaUploadResult.uploaded} media file{mediaUploadResult.uploaded !== 1 ? "s" : ""} uploaded — review in Commercial → Media Evidence
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -6,6 +6,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const c = await prisma.backlogCase.findUnique({
       where: { id },
       include: {
+        site: {
+          include: {
+            siteCommercialLinks: {
+              where: { isActive: true },
+              include: { customer: { select: { id: true, name: true } } },
+            },
+          },
+        },
         sourceGroups: {
           include: {
             sources: {

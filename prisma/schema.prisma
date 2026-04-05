@@ -73,12 +73,15 @@ enum TicketLineStatus {
 }
 
 enum InquiryStatus {
+  NEW_ENQUIRY
   OPEN
+  IN_REVIEW
   AWAITING_SITE
   AWAITING_CUSTOMER
   PRICING
   QUOTE_SENT
   AWAITING_RESPONSE
+  READY_FOR_TICKET
   READY_TO_CONVERT
   CONVERTED
   CLOSED_LOST
@@ -204,6 +207,174 @@ enum EventType {
   INVOICE_UNLOCKED
 }
 
+// ─── COMMERCIAL RECONCILIATION ENUMS ────────────────────────────────────────
+
+enum OrderEventType {
+  INITIAL_ORDER
+  ADDITION
+  REDUCTION
+  SUBSTITUTION_OUT
+  SUBSTITUTION_IN
+  CANCELLATION
+  CONFIRMATION
+  QUERY_ONLY
+}
+
+enum FulfilmentType {
+  DELIVERED
+  PART_DELIVERED
+  SUBSTITUTED
+  RETURNED
+  CREDITED
+}
+
+enum ZohoInvoiceStatus {
+  DRAFT
+  SENT
+  OVERDUE
+  PAID
+  PART_PAID
+  VOID
+}
+
+enum InvoiceLineAllocStatus {
+  UNALLOCATED
+  PARTIALLY_ALLOCATED
+  ALLOCATED
+}
+
+enum OrderClosureStatus {
+  OPEN
+  PARTIALLY_BILLED
+  BILLED_NOT_SENT
+  SENT_AWAITING_PAYMENT
+  PART_PAID_CLOSURE
+  CLOSED
+  REVIEW_REQUIRED
+  DISPUTED
+}
+
+enum OrderFulfilmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  OVER_FULFILLED
+  REVIEW_REQUIRED_FULFILMENT
+}
+
+enum OrderBillingStatus {
+  UNBILLED
+  PARTIALLY_BILLED_STATUS
+  BILLED
+  OVERBILLED
+  REVIEW_REQUIRED_BILLING
+}
+
+enum ReconciliationStatus {
+  COMPLETE
+  UNDERBILLED
+  OVERBILLED
+  OVER_SUPPLIED
+  OVER_SUPPLIED_UNDERBILLED
+  AWAITING_INVOICE
+  SATISFIED_BY_SUBSTITUTION
+  REVIEW_REQUIRED_RECON
+}
+
+enum CostLinkStatus {
+  NO_COST_LINKED
+  PARTIALLY_LINKED
+  FULLY_LINKED
+  NEGATIVE_MARGIN
+  LOW_MARGIN
+}
+
+enum ReviewQueueType {
+  UNRESOLVED_SITE
+  UNRESOLVED_PRODUCT
+  UOM_MISMATCH
+  UNALLOCATED_INVOICE_LINE
+  MISSING_ORDER_EVIDENCE
+  SUBSTITUTION_NO_EVIDENCE
+  NEGATIVE_MARGIN_REVIEW
+  MEDIA_PENDING
+}
+
+enum ReviewQueueStatus {
+  OPEN_REVIEW
+  IN_PROGRESS_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum MediaType {
+  IMAGE
+  PDF
+  DOCUMENT
+  VOICE_NOTE
+  VIDEO
+}
+
+enum MediaEvidenceRole {
+  ORDER_EVIDENCE
+  DELIVERY_EVIDENCE
+  INVOICE_EVIDENCE
+  PRODUCT_REFERENCE
+  IRRELEVANT
+  UNKNOWN_MEDIA
+}
+
+enum MediaProcessingStatus {
+  PENDING
+  EXTRACTING
+  EXTRACTED
+  CLASSIFIED
+  LINKED
+  FAILED
+  EXCLUDED
+}
+
+enum MediaConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum OrderEventSource {
+  TEXT_MESSAGE
+  MEDIA_OCR
+  VOICE_TRANSCRIPT
+  MEDIA_EXTRACTION
+  MANUAL_ENTRY
+}
+
+enum SourceConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum SiteConfidence {
+  CONFIRMED
+  PROBABLE
+  UNKNOWN_SITE
+  NOT_THIS_SITE
+}
+
+enum ContaminationRisk {
+  LOW_RISK
+  MEDIUM_RISK
+  HIGH_RISK
+}
+
+enum OrderGroupApproval {
+  AUTO_APPROVED
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  EXCLUDED
+}
+
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 
 model User {
@@ -315,6 +486,7 @@ model Site {
   siteAliases         SiteAlias[]
   sourceSiteMatches   SourceSiteMatch[]
   backlogCases        BacklogCase[]
+  orderGroups         OrderGroup[]
 
   @@index([siteName])
   @@index([siteCode])
@@ -351,6 +523,9 @@ model Customer {
   customerPOs         CustomerPO[]
   invoices            SalesInvoice[]
   supplierBillLines   SupplierBillLine[]
+  pricingHistory      PricingHistory[]
+  pricingLocked       Boolean          @default(false)
+  defaultMarginPct    Decimal?         @db.Decimal(6, 3)
 
   @@index([name])
 }
@@ -559,9 +734,28 @@ model Enquiry {
   suggestedSiteCommercialLink SiteCommercialLink? @relation("SuggestedSiteCommercialLink", fields: [suggestedSiteCommercialLinkId], references: [id])
   workItems                   InquiryWorkItem[]
   ingestionLinks              IngestionLink[]
+  enquiryTasks                EnquiryTask[]
 
   @@index([status])
   @@index([sourceType])
+}
+
+model EnquiryTask {
+  id          String   @id @default(uuid())
+  enquiryId   String
+  taskType    String
+  status      String   @default("PENDING")
+  assignedTo  String?
+  completedBy String?
+  completedAt DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  enquiry Enquiry @relation(fields: [enquiryId], references: [id])
+
+  @@index([enquiryId])
+  @@index([status])
 }
 
 model InquiryWorkItem {
@@ -1943,4 +2137,508 @@ model ProductNormalization {
 
   @@unique([rawPattern])
   @@index([normalizedName])
+}
+
+// ─── COMMERCIAL RECONCILIATION ENGINE ───────────────────────────────────────
+
+model CanonicalProduct {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String
+  category        String?
+  canonicalUom    String
+  aliases         String[] @default([])
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  substitutionMemberships SubstitutionFamilyMember[]
+  uomConversions          UomConversion[]
+  orderEvents             OrderEvent[]
+  supplyEvents            SupplyEvent[]
+  commercialInvoiceLines  CommercialInvoiceLine[]
+  commercialBillLines     CommercialBillLine[]
+  reconciliationResults   ReconciliationResult[]
+  pricingHistory          PricingHistory[]
+
+  @@index([code])
+  @@index([category])
+}
+
+model SubstitutionFamily {
+  id                  String   @id @default(uuid())
+  familyCode          String   @unique
+  name                String
+  substitutionAllowed Boolean  @default(true)
+  directionality      String   @default("BIDIRECTIONAL")
+  evidenceRequired    Boolean  @default(true)
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  members SubstitutionFamilyMember[]
+}
+
+model SubstitutionFamilyMember {
+  id                   String   @id @default(uuid())
+  familyId             String
+  canonicalProductId   String
+  isPrimary            Boolean  @default(false)
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+
+  family           SubstitutionFamily @relation(fields: [familyId], references: [id])
+  canonicalProduct CanonicalProduct   @relation(fields: [canonicalProductId], references: [id])
+
+  @@unique([familyId, canonicalProductId])
+}
+
+model UomConversion {
+  id                 String  @id @default(uuid())
+  canonicalProductId String
+  fromUom            String
+  toUom              String
+  factor             Decimal @db.Decimal(14, 6)
+  isVerified         Boolean @default(false)
+  notes              String?
+
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+
+  @@unique([canonicalProductId, fromUom, toUom])
+}
+
+model OrderGroup {
+  id                String              @id @default(uuid())
+  siteId            String
+  customerId        String?
+  label             String
+  description       String?
+  fulfilmentStatus  OrderFulfilmentStatus @default(UNFULFILLED)
+  billingStatus     OrderBillingStatus    @default(UNBILLED)
+  closureStatus     OrderClosureStatus    @default(OPEN)
+  approvalStatus    OrderGroupApproval    @default(PENDING_REVIEW)
+  orderedQty        Decimal              @default(0) @db.Decimal(14, 4)
+  suppliedQty       Decimal              @default(0) @db.Decimal(14, 4)
+  billedQty         Decimal              @default(0) @db.Decimal(14, 4)
+  siteConfidence    SiteConfidence        @default(UNKNOWN_SITE)
+  contaminationRisk ContaminationRisk     @default(HIGH_RISK)
+  sourceChat        String?
+  primarySender     String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  rejectionReason   String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  site                    Site                    @relation(fields: [siteId], references: [id])
+  orderEvents             OrderEvent[]
+  supplyEvents            SupplyEvent[]
+  invoiceLineAllocations  InvoiceLineAllocation[]
+
+  @@index([siteId])
+  @@index([closureStatus])
+  @@index([approvalStatus])
+  @@index([siteConfidence])
+}
+
+model OrderEvent {
+  id                 String           @id @default(uuid())
+  orderGroupId       String
+  canonicalProductId String
+  siteId             String
+  customerId         String?
+  eventType          OrderEventType
+  qty                Decimal          @db.Decimal(14, 4)
+  rawUom             String
+  normalisedQty      Decimal?         @db.Decimal(14, 4)
+  canonicalUom       String?
+  uomResolved        Boolean          @default(false)
+  sourceMessageId    String?
+  sourceText         String?
+  sourceType         OrderEventSource @default(TEXT_MESSAGE)
+  mediaEvidenceId    String?
+  sourceConfidence   SourceConfidence @default(LOW)
+  siteConfidence     SiteConfidence   @default(UNKNOWN_SITE)
+  contaminationRisk  ContaminationRisk @default(HIGH_RISK)
+  timestamp          DateTime
+  notes              String?
+  createdAt          DateTime         @default(now())
+
+  orderGroup       OrderGroup       @relation(fields: [orderGroupId], references: [id])
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+  mediaEvidence    MediaEvidence?   @relation(fields: [mediaEvidenceId], references: [id])
+
+  @@index([orderGroupId])
+  @@index([canonicalProductId])
+  @@index([siteId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([sourceType])
+}
+
+model SupplyEvent {
+  id                 String        @id @default(uuid())
+  orderGroupId       String?
+  canonicalProductId String
+  siteId             String
+  fulfilmentType     FulfilmentType
+  qty                Decimal       @db.Decimal(14, 4)
+  rawUom             String
+  normalisedQty      Decimal?      @db.Decimal(14, 4)
+  canonicalUom       String?
+  uomResolved        Boolean       @default(false)
+  sourceRef          String?
+  evidenceRef        String?
+  timestamp          DateTime
+  notes              String?
+  createdAt          DateTime      @default(now())
+
+  orderGroup       OrderGroup?      @relation(fields: [orderGroupId], references: [id])
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+
+  @@index([orderGroupId])
+  @@index([canonicalProductId])
+  @@index([siteId])
+  @@index([fulfilmentType])
+}
+
+model CommercialInvoice {
+  id              String            @id @default(uuid())
+  zohoInvoiceId   String?           @unique
+  invoiceNumber   String
+  invoiceStatus   ZohoInvoiceStatus @default(DRAFT)
+  invoiceDate     DateTime
+  dueDate         DateTime?
+  customerId      String?
+  siteId          String?
+  total           Decimal           @db.Decimal(14, 2)
+  paidAmount      Decimal           @default(0) @db.Decimal(14, 2)
+  balance         Decimal           @default(0) @db.Decimal(14, 2)
+  sourceJson      Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  lines CommercialInvoiceLine[]
+
+  @@index([invoiceNumber])
+  @@index([invoiceStatus])
+  @@index([siteId])
+}
+
+model CommercialInvoiceLine {
+  id                   String                @id @default(uuid())
+  commercialInvoiceId  String
+  canonicalProductId   String?
+  description          String
+  rawProductText       String?
+  qty                  Decimal               @db.Decimal(14, 4)
+  rawUom               String
+  normalisedQty        Decimal?              @db.Decimal(14, 4)
+  canonicalUom         String?
+  uomResolved          Boolean               @default(false)
+  sellRate             Decimal?              @db.Decimal(14, 4)
+  sellAmount           Decimal?              @db.Decimal(14, 2)
+  allocationStatus     InvoiceLineAllocStatus @default(UNALLOCATED)
+  allocationConfidence Decimal?              @db.Decimal(5, 2)
+  manualOverride       Boolean               @default(false)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  commercialInvoice CommercialInvoice       @relation(fields: [commercialInvoiceId], references: [id])
+  canonicalProduct  CanonicalProduct?       @relation(fields: [canonicalProductId], references: [id])
+  allocations       InvoiceLineAllocation[]
+  billLineLinks     BillLineLink[]
+
+  @@index([commercialInvoiceId])
+  @@index([canonicalProductId])
+  @@index([allocationStatus])
+}
+
+model InvoiceLineAllocation {
+  id                      String  @id @default(uuid())
+  commercialInvoiceLineId String
+  orderGroupId            String
+  allocatedQty            Decimal @db.Decimal(14, 4)
+  confidence              Decimal? @db.Decimal(5, 2)
+  manualOverride          Boolean @default(false)
+  notes                   String?
+  createdAt               DateTime @default(now())
+
+  commercialInvoiceLine CommercialInvoiceLine @relation(fields: [commercialInvoiceLineId], references: [id])
+  orderGroup            OrderGroup            @relation(fields: [orderGroupId], references: [id])
+
+  @@index([commercialInvoiceLineId])
+  @@index([orderGroupId])
+}
+
+model CommercialBill {
+  id            String   @id @default(uuid())
+  zohoBillId    String?  @unique
+  billNumber    String
+  supplierId    String?
+  supplierName  String?
+  billDate      DateTime
+  dueDate       DateTime?
+  total         Decimal  @db.Decimal(14, 2)
+  paidAmount    Decimal  @default(0) @db.Decimal(14, 2)
+  balance       Decimal  @default(0) @db.Decimal(14, 2)
+  status        String   @default("DRAFT")
+  sourceJson    Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines CommercialBillLine[]
+
+  @@index([billNumber])
+  @@index([supplierId])
+}
+
+model CommercialBillLine {
+  id                 String  @id @default(uuid())
+  commercialBillId   String
+  canonicalProductId String?
+  description        String
+  rawProductText     String?
+  qty                Decimal @db.Decimal(14, 4)
+  rawUom             String
+  normalisedQty      Decimal? @db.Decimal(14, 4)
+  canonicalUom       String?
+  uomResolved        Boolean @default(false)
+  costRate           Decimal? @db.Decimal(14, 4)
+  costAmount         Decimal? @db.Decimal(14, 2)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  commercialBill   CommercialBill    @relation(fields: [commercialBillId], references: [id])
+  canonicalProduct CanonicalProduct? @relation(fields: [canonicalProductId], references: [id])
+  billLineLinks    BillLineLink[]
+
+  @@index([commercialBillId])
+  @@index([canonicalProductId])
+}
+
+model BillLineLink {
+  id                      String  @id @default(uuid())
+  commercialInvoiceLineId String
+  commercialBillLineId    String
+  linkedQty               Decimal @db.Decimal(14, 4)
+  costRate                Decimal? @db.Decimal(14, 4)
+  costAmount              Decimal? @db.Decimal(14, 2)
+  marginAmount            Decimal? @db.Decimal(14, 2)
+  marginPct               Decimal? @db.Decimal(8, 4)
+  costLinkStatus          CostLinkStatus @default(NO_COST_LINKED)
+  createdAt               DateTime @default(now())
+
+  commercialInvoiceLine CommercialInvoiceLine @relation(fields: [commercialInvoiceLineId], references: [id])
+  commercialBillLine    CommercialBillLine    @relation(fields: [commercialBillLineId], references: [id])
+
+  @@index([commercialInvoiceLineId])
+  @@index([commercialBillLineId])
+}
+
+model ReconciliationResult {
+  id                 String               @id @default(uuid())
+  siteId             String
+  canonicalProductId String
+  orderedQty         Decimal              @default(0) @db.Decimal(14, 4)
+  suppliedQty        Decimal              @default(0) @db.Decimal(14, 4)
+  billedQty          Decimal              @default(0) @db.Decimal(14, 4)
+  baseQty            Decimal              @default(0) @db.Decimal(14, 4)
+  recoverableQty     Decimal              @default(0) @db.Decimal(14, 4)
+  sellTotal          Decimal              @default(0) @db.Decimal(14, 2)
+  costTotal          Decimal              @default(0) @db.Decimal(14, 2)
+  marginTotal        Decimal              @default(0) @db.Decimal(14, 2)
+  marginPct          Decimal?             @db.Decimal(8, 4)
+  orderGap           Decimal              @default(0) @db.Decimal(14, 4)
+  billingGap         Decimal              @default(0) @db.Decimal(14, 4)
+  status             ReconciliationStatus @default(REVIEW_REQUIRED_RECON)
+  familyStatus       String?
+  uomValid           Boolean              @default(false)
+  allocationComplete Boolean              @default(false)
+  orderCoverageComplete Boolean           @default(false)
+  substitutionEvidenced Boolean           @default(false)
+  lastCalculatedAt   DateTime             @default(now())
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+
+  @@unique([siteId, canonicalProductId])
+  @@index([siteId])
+  @@index([status])
+}
+
+model ReviewQueueItem {
+  id             String            @id @default(uuid())
+  queueType      ReviewQueueType
+  status         ReviewQueueStatus @default(OPEN_REVIEW)
+  siteId         String?
+  productCode    String?
+  entityId       String?
+  entityType     String?
+  description    String
+  rawValue       String?
+  resolvedValue  String?
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([queueType])
+  @@index([status])
+  @@index([siteId])
+}
+
+// ─── PRICING HISTORY ────────────────────────────────────────────────────────
+
+model PricingHistory {
+  id                 String   @id @default(uuid())
+  customerId         String
+  canonicalProductId String
+  salePrice          Decimal  @db.Decimal(14, 4)
+  costPrice          Decimal? @db.Decimal(14, 4)
+  qty                Decimal  @db.Decimal(14, 4)
+  marginAmount       Decimal? @db.Decimal(14, 2)
+  marginPct          Decimal? @db.Decimal(8, 4)
+  date               DateTime
+  siteId             String?
+  source             String
+  sourceRef          String?
+  createdAt          DateTime @default(now())
+
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+
+  @@index([customerId, canonicalProductId])
+  @@index([customerId, canonicalProductId, date])
+  @@index([date])
+}
+
+// ─── INBOUND EVENT LINKING ───────────────────────────────────────────────────
+
+enum InboundLinkStatus {
+  LINKED_HIGH
+  LINKED_MEDIUM
+  NEEDS_REVIEW
+  NEW_ENQUIRY_CANDIDATE
+  UNPROCESSED
+}
+
+enum InboundEventType {
+  WHATSAPP_MESSAGE
+  EMAIL
+  VOICE_NOTE
+  ATTACHMENT
+  MEDIA_IMAGE
+  MEDIA_PDF
+  MEDIA_DOCUMENT
+  PHONE_CALL
+  MANUAL_NOTE
+}
+
+model InboundEvent {
+  id                String           @id @default(uuid())
+  eventType         InboundEventType
+  sourceType        SourceType
+  externalRef       String?
+  sender            String?
+  senderPhone       String?
+  senderEmail       String?
+  receivedAt        DateTime
+  rawText           String?
+  subject           String?
+  attachmentRef     String?
+  siteId            String?
+  customerId        String?
+  // Link resolution
+  linkStatus        InboundLinkStatus @default(UNPROCESSED)
+  linkConfidence    Decimal?         @db.Decimal(5, 2)
+  linkReasons       String[]         @default([])
+  linkedEntityType  String?
+  linkedEntityId    String?
+  linkedTicketId    String?
+  linkedEnquiryId   String?
+  linkedOrderGroupId String?
+  linkedBacklogCaseId String?
+  // Provisional link
+  provisionalLink   Boolean          @default(false)
+  reviewTaskCreated Boolean          @default(false)
+  // Resolution
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  overrideEntityId  String?
+  overrideReason    String?
+  // Source references
+  ingestionEventId  String?
+  backlogMessageId  String?
+  mediaEvidenceId   String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([linkStatus])
+  @@index([sender])
+  @@index([senderPhone])
+  @@index([senderEmail])
+  @@index([siteId])
+  @@index([customerId])
+  @@index([linkedTicketId])
+  @@index([linkedEnquiryId])
+  @@index([linkedOrderGroupId])
+  @@index([receivedAt])
+}
+
+// ─── MEDIA EVIDENCE ─────────────────────────────────────────────────────────
+
+model MediaEvidence {
+  id                  String                @id @default(uuid())
+  sourceChat          String?
+  linkedMessageId     String?
+  backlogMessageId    String?
+  sender              String?
+  timestamp           DateTime
+  mediaType           MediaType
+  fileName            String?
+  filePath            String?
+  fileSize            Int?
+  mimeType            String?
+  rawText             String?
+  extractedText       String?
+  extractionMethod    String?
+  processingStatus    MediaProcessingStatus @default(PENDING)
+  processingError     String?
+  evidenceRole        MediaEvidenceRole     @default(UNKNOWN_MEDIA)
+  roleConfidence      MediaConfidence       @default(LOW)
+  classificationNotes String?
+  siteId              String?
+  orderGroupId        String?
+  candidateProducts   String[]              @default([])
+  candidateQtys       Json?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  orderEvents OrderEvent[]
+
+  @@index([processingStatus])
+  @@index([evidenceRole])
+  @@index([siteId])
+  @@index([linkedMessageId])
+  @@index([backlogMessageId])
+}
+
+// ─── BACKLOG COMPLETENESS TRACKING ──────────────────────────────────────────
+
+model BacklogCompleteness {
+  id                  String   @id @default(uuid())
+  caseId              String   @unique
+  totalMessages       Int      @default(0)
+  messagesProcessed   Int      @default(0)
+  totalMedia          Int      @default(0)
+  mediaProcessed      Int      @default(0)
+  mediaExcluded       Int      @default(0)
+  isComplete          Boolean  @default(false)
+  completedAt         DateTime?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([caseId])
 }
