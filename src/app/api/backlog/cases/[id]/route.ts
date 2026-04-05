@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const body = await request.json();
     const allowed: Record<string, unknown> = {};
-    for (const f of ["name", "description", "siteRef", "status", "dateFrom", "dateTo"]) {
+    for (const f of ["name", "description", "siteId", "siteRef", "status", "dateFrom", "dateTo"]) {
       if (body[f] !== undefined) allowed[f] = body[f];
     }
     const c = await prisma.backlogCase.update({ where: { id }, data: allowed });

@@ -31,9 +31,13 @@ export async function PATCH(
   const { id } = await params;
   try {
     const body = await request.json();
+    const allowed: Record<string, unknown> = {};
+    for (const f of ["siteName", "siteCode", "addressLine1", "addressLine2", "city", "postcode", "country", "notes", "aliases", "isActive"]) {
+      if (body[f] !== undefined) allowed[f] = body[f];
+    }
     const site = await prisma.site.update({
       where: { id },
-      data: body,
+      data: allowed,
     });
     return Response.json(site);
   } catch (error) {

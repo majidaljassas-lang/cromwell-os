@@ -314,6 +314,7 @@ model Site {
   salesInvoices       SalesInvoice[]
   siteAliases         SiteAlias[]
   sourceSiteMatches   SourceSiteMatch[]
+  backlogCases        BacklogCase[]
 
   @@index([siteName])
   @@index([siteCode])
@@ -1685,12 +1686,15 @@ model BacklogCase {
   id          String   @id @default(uuid())
   name        String
   description String?
+  siteId      String?
   siteRef     String?
   status      String   @default("ACTIVE")
   dateFrom    DateTime?
   dateTo      DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  site         Site?              @relation(fields: [siteId], references: [id])
 
   sourceGroups BacklogSourceGroup[]
 

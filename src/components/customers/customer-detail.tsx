@@ -1,0 +1,254 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, Building2, Plus, Check, X, Pencil } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+
+type Customer = {
+  id: string;
+  name: string;
+  legalName: string | null;
+  billingAddress: string | null;
+  vatNumber: string | null;
+  paymentTerms: string | null;
+  poRequiredDefault: boolean;
+  isCashCustomer: boolean;
+  notes: string | null;
+  aliases: string[];
+  siteCommercialLinks: Array<{
+    id: string;
+    role: string;
+    billingAllowed: boolean;
+    defaultBillingCustomer: boolean;
+    site: { id: string; siteName: string; siteCode: string | null; city: string | null; postcode: string | null; aliases: string[] };
+  }>;
+  siteContactLinks: Array<{
+    id: string;
+    contact: { id: string; fullName: string; phone: string | null; email: string | null };
+  }>;
+  ticketsAsPayer: Array<{ id: string; title: string; status: string; ticketMode: string; createdAt: string }>;
+  customerPOs: Array<{ id: string; poNo: string; poType: string; status: string; totalValue: number | null }>;
+};
+
+export function CustomerDetail({ customer, allSites }: { customer: Customer; allSites: Array<{ id: string; siteName: string }> }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
+
+  async function handleSave(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    const fd = new FormData(e.currentTarget);
+    const body = {
+      name: fd.get("name") as string,
+      legalName: (fd.get("legalName") as string) || null,
+      billingAddress: (fd.get("billingAddress") as string) || null,
+      vatNumber: (fd.get("vatNumber") as string) || null,
+      paymentTerms: (fd.get("paymentTerms") as string) || null,
+      notes: (fd.get("notes") as string) || null,
+      poRequiredDefault: fd.get("poRequired") === "on",
+    };
+    await fetch(`/api/customers/${customer.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    setEditing(false);
+    router.refresh();
+  }
+
+  async function handleLinkSite(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedSiteId) return;
+    setLinkSubmitting(true);
+    const fd = new FormData(e.currentTarget);
+    await fetch(`/api/sites/${selectedSiteId}/commercial-links`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customerId: customer.id,
+        role: (fd.get("role") as string) || "Main Contractor",
+        billingAllowed: fd.get("billingAllowed") === "on",
+        defaultBillingCustomer: fd.get("defaultBilling") === "on",
+      }),
+    });
+    setLinkSubmitting(false);
+    setLinkOpen(false);
+    setSelectedSiteId("");
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <Link href="/customers"><Button variant="ghost" size="sm"><ArrowLeft className="size-4 mr-1" />Back</Button></Link>
+            <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono">{customer.name}</h1>
+          </div>
+          <div className="flex items-center gap-2 ml-[72px] text-xs text-[#888888]">
+            {customer.legalName && <span>{customer.legalName}</span>}
+            {customer.poRequiredDefault && <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">PO REQUIRED</Badge>}
+            {customer.isCashCustomer && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">CASH</Badge>}
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setEditing(!editing)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">
+          <Pencil className="size-3.5 mr-1" />{editing ? "Cancel" : "Edit"}
+        </Button>
+      </div>
+
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="sites">Sites ({customer.siteCommercialLinks.length})</TabsTrigger>
+          <TabsTrigger value="tickets">Tickets ({customer.ticketsAsPayer.length})</TabsTrigger>
+          <TabsTrigger value="contacts">Contacts ({customer.siteContactLinks.length})</TabsTrigger>
+        </TabsList>
+
+        {/* OVERVIEW */}
+        <TabsContent value="overview" className="mt-4">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-6 max-w-2xl">
+            {editing ? (
+              <form onSubmit={handleSave} className="space-y-4">
+                <div className="space-y-1.5"><Label>Customer Name *</Label><Input name="name" defaultValue={customer.name} required /></div>
+                <div className="space-y-1.5"><Label>Legal Name</Label><Input name="legalName" defaultValue={customer.legalName || ""} /></div>
+                <div className="space-y-1.5"><Label>Billing Address</Label><Input name="billingAddress" defaultValue={customer.billingAddress || ""} /></div>
+                <div className="space-y-1.5"><Label>VAT Number</Label><Input name="vatNumber" defaultValue={customer.vatNumber || ""} /></div>
+                <div className="space-y-1.5"><Label>Payment Terms</Label><Input name="paymentTerms" defaultValue={customer.paymentTerms || ""} /></div>
+                <div className="space-y-1.5"><Label>Notes</Label><Input name="notes" defaultValue={customer.notes || ""} /></div>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" name="poRequired" id="poRequired" defaultChecked={customer.poRequiredDefault} />
+                  <Label htmlFor="poRequired">PO Required by Default</Label>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={saving} className="bg-[#FF6600] text-black hover:bg-[#FF9900]"><Check className="size-4 mr-1" />{saving ? "Saving..." : "Save"}</Button>
+                  <Button type="button" variant="outline" onClick={() => setEditing(false)} className="bg-[#222222] border-[#333333] text-[#E0E0E0]"><X className="size-4 mr-1" />Cancel</Button>
+                </div>
+              </form>
+            ) : (
+              <dl className="grid grid-cols-2 gap-4 text-sm">
+                <div><dt className="text-[#888888]">Name</dt><dd className="font-medium">{customer.name}</dd></div>
+                <div><dt className="text-[#888888]">Legal Name</dt><dd>{customer.legalName || "—"}</dd></div>
+                <div><dt className="text-[#888888]">Billing Address</dt><dd>{customer.billingAddress || "—"}</dd></div>
+                <div><dt className="text-[#888888]">VAT Number</dt><dd>{customer.vatNumber || "—"}</dd></div>
+                <div><dt className="text-[#888888]">Payment Terms</dt><dd>{customer.paymentTerms || "—"}</dd></div>
+                <div><dt className="text-[#888888]">PO Required</dt><dd>{customer.poRequiredDefault ? "Yes" : "No"}</dd></div>
+                {customer.notes && <div className="col-span-2"><dt className="text-[#888888]">Notes</dt><dd>{customer.notes}</dd></div>}
+              </dl>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* SITES */}
+        <TabsContent value="sites" className="mt-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888]">LINKED SITES</div>
+            <Sheet open={linkOpen} onOpenChange={setLinkOpen}>
+              <SheetTrigger render={<Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900]"><Plus className="size-4 mr-1" />Link Site</Button>} />
+              <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+                <SheetHeader><SheetTitle className="text-[#E0E0E0]">Link Site to Customer</SheetTitle></SheetHeader>
+                <form onSubmit={handleLinkSite} className="flex flex-col gap-4 px-4">
+                  <div className="space-y-1.5">
+                    <Label>Site</Label>
+                    <select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                      <option value="">Select site...</option>
+                      {allSites.map((s) => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5"><Label>Role</Label><Input name="role" defaultValue="Main Contractor" /></div>
+                  <div className="flex items-center gap-2"><input type="checkbox" name="billingAllowed" id="billingAllowed" defaultChecked /><Label htmlFor="billingAllowed">Billing Allowed</Label></div>
+                  <div className="flex items-center gap-2"><input type="checkbox" name="defaultBilling" id="defaultBilling" /><Label htmlFor="defaultBilling">Default Billing Customer</Label></div>
+                  <SheetFooter><Button type="submit" disabled={linkSubmitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">{linkSubmitting ? "Linking..." : "Link Site"}</Button></SheetFooter>
+                </form>
+              </SheetContent>
+            </Sheet>
+          </div>
+          {customer.siteCommercialLinks.length === 0 ? (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No sites linked yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {customer.siteCommercialLinks.map((link) => (
+                <Link key={link.id} href={`/sites/${link.site.id}`}>
+                  <div className="border border-[#333333] bg-[#1A1A1A] p-4 hover:bg-[#222222] cursor-pointer flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Building2 className="size-5 text-[#FF6600]" />
+                      <div>
+                        <div className="font-medium text-[#E0E0E0]">{link.site.siteName}</div>
+                        <div className="text-[10px] text-[#666666]">
+                          {link.site.city && `${link.site.city} `}{link.site.postcode || ""}
+                          {link.site.siteCode && ` · ${link.site.siteCode}`}
+                        </div>
+                        {link.site.aliases.length > 0 && (
+                          <div className="flex gap-1 mt-0.5">
+                            {link.site.aliases.map((a, i) => (
+                              <span key={i} className="text-[8px] px-1 py-0 text-[#FF6600] bg-[#FF6600]/10 border border-[#FF6600]/20">{a}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-[9px] px-1.5 py-0.5 text-[#888888] bg-[#333333]">{link.role}</Badge>
+                      {link.billingAllowed && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">BILLING</Badge>}
+                      {link.defaultBillingCustomer && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">DEFAULT</Badge>}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* TICKETS */}
+        <TabsContent value="tickets" className="mt-4">
+          {customer.ticketsAsPayer.length === 0 ? (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No tickets.</div>
+          ) : (
+            <div className="border border-[#333333] bg-[#1A1A1A]">
+              {customer.ticketsAsPayer.map((t) => (
+                <Link key={t.id} href={`/tickets/${t.id}`}>
+                  <div className="border-b border-[#2A2A2A] px-3 py-2 hover:bg-[#222222] flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-[#E0E0E0]">{t.title}</div>
+                      <div className="text-[9px] text-[#666666]">{new Date(t.createdAt).toLocaleDateString("en-GB")}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge className="text-[8px] px-1 py-0 text-[#888888] bg-[#333333]">{t.ticketMode.replace(/_/g, " ")}</Badge>
+                      <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">{t.status}</Badge>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* CONTACTS */}
+        <TabsContent value="contacts" className="mt-4">
+          {customer.siteContactLinks.length === 0 ? (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No contacts linked.</div>
+          ) : (
+            <div className="border border-[#333333] bg-[#1A1A1A]">
+              {customer.siteContactLinks.map((cl) => (
+                <div key={cl.id} className="border-b border-[#2A2A2A] px-3 py-2 flex items-center justify-between">
+                  <div className="text-xs text-[#E0E0E0]">{cl.contact.fullName}</div>
+                  <div className="text-[10px] text-[#888888]">{cl.contact.email || cl.contact.phone || "—"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
