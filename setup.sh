@@ -23,6 +23,11 @@ echo ""
 echo "Installing dependencies..."
 npm install
 
+# Generate Prisma client
+echo ""
+echo "Generating Prisma client..."
+npx prisma generate
+
 # Set up .env if missing
 if [ ! -f .env ]; then
   echo ""
@@ -41,18 +46,24 @@ PRISMA_PID=$!
 
 # Wait for Prisma to be ready
 echo "Waiting for database to be ready..."
-sleep 8
+for i in {1..30}; do
+  if node -e "const{Client}=require('pg');const c=new Client({connectionString:process.env.DATABASE_URL});c.connect().then(()=>{c.end();process.exit(0)}).catch(()=>process.exit(1))" 2>/dev/null; then
+    echo "✓ Database is ready"
+    break
+  fi
+  sleep 1
+done
 
-# Run migrations
+# Create tables from migration
 echo ""
 echo "Applying database migrations..."
-npx prisma migrate deploy
+npx prisma migrate deploy || {
+  echo "migrate deploy failed, falling back to db push..."
+  npx prisma db push --accept-data-loss
+}
 
-# Seed if seed script exists
-if grep -q '"seed"' package.json 2>/dev/null; then
-  echo "Running database seed..."
-  npx prisma db seed
-fi
+# Create upload directories
+mkdir -p public/quotes public/backlog-uploads public/media-evidence
 
 echo ""
 echo "=== Setup Complete ==="
