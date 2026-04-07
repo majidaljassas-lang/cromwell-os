@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, ChevronDown, ChevronRight, Send, CheckCircle, ExternalLink, FileText } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Send, CheckCircle, ExternalLink, FileText, Trash2, Undo2, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,6 +86,8 @@ function statusVariant(
       return "outline";
     case "REJECTED":
       return "destructive";
+    case "SUPERSEDED":
+      return "secondary";
     default:
       return "outline";
   }
@@ -97,6 +99,12 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
   const [submitting, setSubmitting] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [reviseQuoteId, setReviseQuoteId] = useState<string | null>(null);
+  const [reviseReason, setReviseReason] = useState("");
+  const [reviseSelectedLines, setReviseSelectedLines] = useState<Set<string>>(new Set());
+  const [reviseReplacements, setReviseReplacements] = useState<Record<string, { description: string; qty: string; cost: string; sale: string }>>({});
+  const [revising, setRevising] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false);
 
   async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -122,15 +130,75 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
     }
   }
 
+  async function handleDelete(quoteId: string, quoteNo: string) {
+    if (!confirm(`Delete quote ${quoteNo}? This cannot be undone.`)) return;
+    await fetch(`/api/quotes/${quoteId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
   async function updateStatus(quoteId: string, status: string) {
     const body: Record<string, unknown> = { status };
     if (status === "SENT") body.issuedAt = new Date().toISOString();
-    await fetch(`/api/tickets/${ticketId}/quotes/${quoteId}`, {
+    await fetch(`/api/quotes/${quoteId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     router.refresh();
+  }
+
+  function openRevise(quoteId: string) {
+    setReviseQuoteId(quoteId);
+    setReviseReason("");
+    setReviseSelectedLines(new Set());
+    setReviseOpen(true);
+  }
+
+  function toggleReviseLine(lineId: string) {
+    setReviseSelectedLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(lineId)) {
+        next.delete(lineId);
+        setReviseReplacements((r) => { const n = { ...r }; delete n[lineId]; return n; });
+      } else {
+        next.add(lineId);
+        setReviseReplacements((r) => ({ ...r, [lineId]: { description: "", qty: "", cost: "", sale: "" } }));
+      }
+      return next;
+    });
+  }
+
+  function updateReplacement(lineId: string, field: string, value: string) {
+    setReviseReplacements((prev) => ({
+      ...prev,
+      [lineId]: { ...prev[lineId], [field]: value },
+    }));
+  }
+
+  async function handleRevise() {
+    if (!reviseQuoteId || reviseSelectedLines.size === 0) return;
+    setRevising(true);
+    try {
+      const res = await fetch(`/api/quotes/${reviseQuoteId}/revise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: reviseReason.trim(),
+          affectedLineIds: [...reviseSelectedLines],
+          replacements: reviseReplacements,
+        }),
+      });
+      if (res.ok) {
+        setReviseOpen(false);
+        setReviseQuoteId(null);
+        setReviseReason("");
+        setReviseSelectedLines(new Set());
+        setReviseReplacements({});
+        router.refresh();
+      }
+    } finally {
+      setRevising(false);
+    }
   }
 
   return (
@@ -216,8 +284,9 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
         <div className="space-y-3">
           {quotes.map((quote) => {
             const isExpanded = expandedId === quote.id;
+            const isSuperseded = quote.status === "SUPERSEDED";
             return (
-              <Card key={quote.id}>
+              <Card key={quote.id} className={isSuperseded ? "opacity-60" : ""}>
                 <CardContent className="py-3">
                   <div className="flex items-center justify-between">
                     <button
@@ -257,10 +326,10 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                         <Link href={`/quotes/${quote.id}`}>
                           <Button size="sm" variant="outline" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
                             <ExternalLink className="size-3.5 mr-1" />
-                            Open
+                            {isSuperseded ? "View" : "Open"}
                           </Button>
                         </Link>
-                        {quote.status === "DRAFT" && (
+                        {!isSuperseded && quote.status === "DRAFT" && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -270,7 +339,7 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                             Mark Sent
                           </Button>
                         )}
-                        {quote.status === "SENT" && (
+                        {!isSuperseded && quote.status === "SENT" && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -278,6 +347,27 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                           >
                             <CheckCircle className="size-3.5 mr-1" />
                             Approved
+                          </Button>
+                        )}
+                        {!isSuperseded && (quote.status === "SENT" || quote.status === "APPROVED") && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-[#FF9900] hover:text-[#FF6600] border-[#333333]"
+                            onClick={() => openRevise(quote.id)}
+                          >
+                            <PenLine className="size-3.5 mr-1" />
+                            Revise
+                          </Button>
+                        )}
+                        {!isSuperseded && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
+                            onClick={() => handleDelete(quote.id, quote.quoteNo)}
+                          >
+                            <Trash2 className="size-3.5" />
                           </Button>
                         )}
                       </div>
@@ -323,6 +413,118 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
           })}
         </div>
       )}
+
+      {/* Revise Quote Dialog */}
+      <Sheet open={reviseOpen} onOpenChange={(open) => { setReviseOpen(open); if (!open) { setReviseQuoteId(null); setReviseSelectedLines(new Set()); } }}>
+        <SheetContent side="right" className="w-[500px] sm:max-w-[500px]">
+          <SheetHeader>
+            <SheetTitle>Revise Quote</SheetTitle>
+            <SheetDescription>
+              Select the lines that need changing and explain why.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-4 px-4 overflow-y-auto">
+            {/* Lines to select */}
+            {reviseQuoteId && (() => {
+              const q = quotes.find((qt) => qt.id === reviseQuoteId);
+              if (!q) return null;
+              return (
+                <div className="space-y-1.5">
+                  <Label>Select lines to revise ({reviseSelectedLines.size} selected)</Label>
+                  <div className="border border-[#333333] max-h-[300px] overflow-y-auto">
+                    {q.lines.map((line) => {
+                      const isSelected = reviseSelectedLines.has(line.id);
+                      const rep = reviseReplacements[line.id];
+                      return (
+                        <div key={line.id} className={`border-b border-[#2A2A2A] ${isSelected ? "bg-[#FF9900]/10 border-l-2 border-l-[#FF9900]" : ""}`}>
+                          <label className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#222222]">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleReviseLine(line.id)}
+                              className="accent-[#FF9900] shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium truncate">{line.description}</div>
+                              <div className="text-[10px] text-[#888888] tabular-nums">
+                                Qty: {dec(line.qty)} &middot; Price: {dec(line.unitPrice)} &middot; Total: {dec(line.lineTotal)}
+                              </div>
+                            </div>
+                          </label>
+                          {isSelected && rep && (
+                            <div className="px-3 pb-3 pt-1 ml-6 space-y-2 border-t border-[#FF9900]/20">
+                              <div className="text-[10px] uppercase tracking-widest text-[#FF9900] font-bold">Replace with</div>
+                              <Input
+                                value={rep.description}
+                                onChange={(e) => updateReplacement(line.id, "description", e.target.value)}
+                                placeholder="New item description"
+                                className="h-7 text-xs"
+                              />
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="text-[9px] text-[#888888]">Qty</label>
+                                  <Input
+                                    type="number"
+                                    value={rep.qty}
+                                    onChange={(e) => updateReplacement(line.id, "qty", e.target.value)}
+                                    placeholder={String(Number(line.qty))}
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] text-[#888888]">Cost</label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={rep.cost}
+                                    onChange={(e) => updateReplacement(line.id, "cost", e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] text-[#888888]">Sale</label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={rep.sale}
+                                    onChange={(e) => updateReplacement(line.id, "sale", e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="space-y-1.5">
+              <Label>Reason (optional)</Label>
+              <Textarea
+                value={reviseReason}
+                onChange={(e) => setReviseReason(e.target.value)}
+                rows={3}
+                placeholder="e.g. Wrong valves quoted — 35mm should be 22mm. Client advised via phone."
+              />
+            </div>
+            <SheetFooter>
+              <Button
+                onClick={handleRevise}
+                disabled={revising || reviseSelectedLines.size === 0}
+                className="bg-[#FF9900] text-black hover:bg-[#FF6600]"
+              >
+                {revising ? "Revising..." : `Revise ${reviseSelectedLines.size} line${reviseSelectedLines.size !== 1 ? "s" : ""} & Reset to Draft`}
+              </Button>
+            </SheetFooter>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

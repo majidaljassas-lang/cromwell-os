@@ -114,7 +114,16 @@ export function QuoteBuilder({ quote }: { quote: Quote & { pdfFileName?: string;
   }
 
   async function handleDownloadPdf() {
-    window.open(`/api/quotes/${quote.id}/generate-pdf`, "_blank");
+    // Always regenerate to ensure latest template
+    setGeneratingPdf(true);
+    try {
+      const res = await fetch(`/api/quotes/${quote.id}/generate-pdf`, { method: "POST" });
+      if (res.ok) {
+        window.open(`/api/quotes/${quote.id}/generate-pdf`, "_blank");
+      }
+    } finally {
+      setGeneratingPdf(false);
+    }
   }
 
   async function handleStatusChange(newStatus: string) {

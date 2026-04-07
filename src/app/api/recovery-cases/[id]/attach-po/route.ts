@@ -30,6 +30,15 @@ export async function POST(
       },
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: recoveryCase.ticketId,
+        eventType: "PO_RECEIVED",
+        timestamp: new Date(),
+        notes: `PO attached to recovery case ${id}${poNo ? ` (PO: ${poNo})` : ''}`,
+      },
+    });
+
     return Response.json(recoveryCase);
   } catch (error) {
     console.error("Failed to attach PO to recovery case:", error);

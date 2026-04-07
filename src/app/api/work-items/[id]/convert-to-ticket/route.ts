@@ -39,6 +39,7 @@ export async function POST(
           ...overrides,
           payingCustomerId: workItem.customerId,
           ticketMode: workItem.mode,
+          revenueState: "OPERATIONAL",
         },
       }),
       prisma.inquiryWorkItem.update({

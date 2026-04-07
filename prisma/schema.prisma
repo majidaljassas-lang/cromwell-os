@@ -205,6 +205,8 @@ enum EventType {
   PACK_SENT_FOR_PO
   PO_FOLLOWUP_SENT
   INVOICE_UNLOCKED
+  EXTRA_ORDER_ADDED
+  QUOTE_REVISED
 }
 
 // ─── COMMERCIAL RECONCILIATION ENUMS ────────────────────────────────────────
@@ -804,6 +806,7 @@ model Ticket {
   poRequired                Boolean      @default(false)
   poStatus                  String?
   recoveryRequired          Boolean      @default(false)
+  revenueState              String       @default("OPERATIONAL")
   isLocked                  Boolean      @default(false)
   createdAt                 DateTime     @default(now())
   closedAt                  DateTime?
@@ -844,6 +847,7 @@ model Ticket {
   @@index([payingCustomerId])
   @@index([siteId])
   @@index([ticketMode])
+  @@index([revenueState])
 }
 
 model TicketPhase {
@@ -901,6 +905,7 @@ model TicketLine {
   salesStatus          String?
   mergedIntoLineId     String?
   sourceItemIds        String[]       @default([])
+  sectionLabel         String?
   isLocked             Boolean        @default(false)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
@@ -1160,15 +1165,16 @@ model ProcurementOrder {
 model ProcurementOrderLine {
   id                 String  @id @default(uuid())
   procurementOrderId String
-  ticketLineId       String
+  ticketLineId       String?
   supplierOptionId   String?
   description        String
   qty                Decimal @db.Decimal(14, 4)
   unitCost           Decimal @db.Decimal(14, 4)
   lineTotal          Decimal @db.Decimal(14, 2)
+  matchStatus        String  @default("UNMATCHED")
 
   procurementOrder ProcurementOrder @relation(fields: [procurementOrderId], references: [id])
-  ticketLine       TicketLine       @relation(fields: [ticketLineId], references: [id])
+  ticketLine       TicketLine?      @relation(fields: [ticketLineId], references: [id])
   supplierOption   SupplierOption?  @relation(fields: [supplierOptionId], references: [id])
   costAllocations  CostAllocation[]
 }
@@ -1622,7 +1628,7 @@ model CreditNoteAllocation {
 
 model AbsorbedCostAllocation {
   id                 String   @id @default(uuid())
-  supplierBillLineId String
+  supplierBillLineId String?
   ticketId           String
   ticketLineId       String?
   description        String
@@ -1630,15 +1636,17 @@ model AbsorbedCostAllocation {
   allocationBasis    String?
   createdAt          DateTime @default(now())
 
-  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
-  ticket           Ticket           @relation(fields: [ticketId], references: [id])
-  ticketLine       TicketLine?      @relation(fields: [ticketLineId], references: [id])
+  supplierBillLine SupplierBillLine? @relation(fields: [supplierBillLineId], references: [id])
+  ticket           Ticket            @relation(fields: [ticketId], references: [id])
+  ticketLine       TicketLine?       @relation(fields: [ticketLineId], references: [id])
 }
 
 model StockExcessRecord {
   id                 String   @id @default(uuid())
-  supplierBillLineId String
+  supplierBillLineId String?
   ticketLineId       String?
+  description        String?
+  excessQty          Decimal? @db.Decimal(14, 4)
   purchasedCost      Decimal  @db.Decimal(14, 2)
   usedCost           Decimal  @db.Decimal(14, 2)
   excessCost         Decimal  @db.Decimal(14, 2)
@@ -1647,8 +1655,8 @@ model StockExcessRecord {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  supplierBillLine SupplierBillLine @relation(fields: [supplierBillLineId], references: [id])
-  ticketLine       TicketLine?      @relation(fields: [ticketLineId], references: [id])
+  supplierBillLine SupplierBillLine? @relation(fields: [supplierBillLineId], references: [id])
+  ticketLine       TicketLine?       @relation(fields: [ticketLineId], references: [id])
 }
 
 model ReallocationRecord {

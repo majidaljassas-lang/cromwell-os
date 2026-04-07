@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ArrowLeft } from "lucide-react";
+import { Plus, ArrowLeft, SeparatorHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,7 @@ import { TicketProcurementTab } from "@/components/procurement/ticket-procuremen
 import { RfqExploder } from "@/components/tickets/rfq-exploder";
 import { TicketPOTab } from "@/components/po-register/ticket-po-tab";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
+import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
 
 const LINE_TYPES = [
   "MATERIAL",
@@ -207,6 +208,7 @@ type TicketLine = {
   supplierId: string | null;
   supplierName: string | null;
   supplierReference: string | null;
+  sectionLabel: string | null;
   status: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
@@ -365,6 +367,7 @@ type TicketData = {
   description: string | null;
   ticketMode: string;
   status: string;
+  revenueState: string;
   createdAt: Date;
   closedAt: Date | null;
   payingCustomer: { id: string; name: string };
@@ -480,6 +483,15 @@ export function TicketDetail({
   const [lineType, setLineType] = useState<string>("MATERIAL");
   const [lineUnit, setLineUnit] = useState<string>("EA");
   const [editingLine, setEditingLine] = useState<TicketLine | null>(null);
+  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
+  const [sectionLabel, setSectionLabel] = useState("EXTRA ORDER");
+  const [sectionSource, setSectionSource] = useState("CALL");
+  const [sectionMaterials, setSectionMaterials] = useState("");
+  const [addingSection, setAddingSection] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<{ id: string; notes: string; sourceRef: string } | null>(null);
+  const [editEventOpen, setEditEventOpen] = useState(false);
+  const [editEventNotes, setEditEventNotes] = useState("");
+  const [editEventSourceRef, setEditEventSourceRef] = useState("");
   const [editSheetOpen, setEditSheetOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingLine, setDeletingLine] = useState(false);
@@ -620,7 +632,7 @@ export function TicketDetail({
     const form = e.currentTarget;
     const formData = new FormData(form);
 
-    const body = {
+    const body: Record<string, unknown> = {
       lineType,
       description: formData.get("description") as string,
       qty: Number(formData.get("qty")) || 1,
@@ -651,6 +663,56 @@ export function TicketDetail({
     }
   }
 
+  function openEditEvent(ev: { id: string; notes: string | null; sourceRef: string | null }) {
+    setEditingEvent({ id: ev.id, notes: ev.notes || "", sourceRef: ev.sourceRef || "" });
+    setEditEventNotes(ev.notes || "");
+    setEditEventSourceRef(ev.sourceRef || "");
+    setEditEventOpen(true);
+  }
+
+  async function handleSaveEvent() {
+    if (!editingEvent) return;
+    await fetch(`/api/events/${editingEvent.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: editEventNotes, sourceRef: editEventSourceRef }),
+    });
+    setEditEventOpen(false);
+    setEditingEvent(null);
+    router.refresh();
+  }
+
+  async function handleDeleteEvent(eventId: string) {
+    if (!confirm("Delete this event?")) return;
+    await fetch(`/api/events/${eventId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function handleAddSection() {
+    if (!sectionLabel.trim()) return;
+    setAddingSection(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/section`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: sectionLabel.trim(),
+          source: sectionSource,
+          materials: sectionMaterials.trim(),
+          payingCustomerId: ticket.payingCustomer.id,
+        }),
+      });
+      if (res.ok) {
+        setSectionDialogOpen(false);
+        setSectionLabel("EXTRA ORDER");
+        setSectionMaterials("");
+        router.refresh();
+      }
+    } finally {
+      setAddingSection(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -674,6 +736,11 @@ export function TicketDetail({
             <Badge variant={statusVariant(ticket.status)}>
               {ticket.status.replace(/_/g, " ")}
             </Badge>
+            {ticket.revenueState && ticket.revenueState !== "OPERATIONAL" && (
+              <Badge className={ticket.revenueState === "RECOVERY_PIPELINE" ? "text-[9px] bg-[#FF9900]/15 text-[#FF9900] border border-[#FF9900]/30" : "text-[9px] bg-[#00CC66]/15 text-[#00CC66] border border-[#00CC66]/30"}>
+                {ticket.revenueState === "RECOVERY_PIPELINE" ? "RECOVERY PIPELINE" : "REALISED"}
+              </Badge>
+            )}
             <span className="text-sm text-[#888888]">
               {ticket.payingCustomer.name}
             </span>
@@ -828,6 +895,67 @@ export function TicketDetail({
         <TabsContent value="lines" className="mt-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Ticket Lines</h2>
+            <div className="flex gap-2">
+            <Sheet open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
+              <SheetTrigger
+                render={
+                  <Button size="sm" variant="outline" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
+                    <SeparatorHorizontal className="size-4 mr-1" />
+                    Add Section
+                  </Button>
+                }
+              />
+              <SheetContent side="right">
+                <SheetHeader>
+                  <SheetTitle>Add Section & Lines</SheetTitle>
+                  <SheetDescription>
+                    Type the items from a call/email. Lines will be created automatically with events logged.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex flex-col gap-4 px-4">
+                  <div className="space-y-1.5">
+                    <Label>Source</Label>
+                    <Select value={sectionSource} onValueChange={setSectionSource}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CALL">Phone Call</SelectItem>
+                        <SelectItem value="EMAIL">Email</SelectItem>
+                        <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+                        <SelectItem value="IN_PERSON">In Person</SelectItem>
+                        <SelectItem value="OTHER">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Section Label</Label>
+                    <Input
+                      value={sectionLabel}
+                      onChange={(e) => setSectionLabel(e.target.value)}
+                      placeholder="e.g. EXTRA ORDER"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Materials / Items</Label>
+                    <Textarea
+                      value={sectionMaterials}
+                      onChange={(e) => setSectionMaterials(e.target.value)}
+                      rows={6}
+                      placeholder={"Type or paste the items, e.g.:\n35mm Compression Lever Ball Valve Red Handle - 2 no.\n22mm Compression Lever Ball Valve Blue - 1 no.\n15mm Copper Tube 3m - 10 lengths"}
+                    />
+                    <p className="text-[10px] text-[#666666]">
+                      One item per line. The system will auto-parse quantities and descriptions.
+                    </p>
+                  </div>
+                  <SheetFooter>
+                    <Button onClick={handleAddSection} disabled={addingSection || !sectionLabel.trim() || !sectionMaterials.trim()}>
+                      {addingSection ? "Processing..." : "Add Section & Lines"}
+                    </Button>
+                  </SheetFooter>
+                </div>
+              </SheetContent>
+            </Sheet>
             <Sheet open={lineSheetOpen} onOpenChange={setLineSheetOpen}>
               <SheetTrigger
                 render={
@@ -946,6 +1074,7 @@ export function TicketDetail({
                 </form>
               </SheetContent>
             </Sheet>
+            </div>
           </div>
 
           <div className="border border-[#333333] bg-[#1A1A1A]">
@@ -975,12 +1104,22 @@ export function TicketDetail({
                   </TableRow>
                 ) : (
                   activeLines.map((line) => (
-                    <InlineLineRow
-                      key={line.id}
-                      line={line}
-                      onClickRow={() => { setEditingLine(line); setEditSheetOpen(true); }}
-                      onSaved={() => { router.refresh(); fetch(`/api/tickets/${ticket.id}/commercial-summary`).then(r => r.ok ? r.json() : null).then(d => setSummary(d)); }}
-                    />
+                    <React.Fragment key={line.id}>
+                      {line.sectionLabel && (
+                        <TableRow className="bg-[#252525] border-t-2 border-[#555555]">
+                          <TableCell colSpan={9} className="py-2 px-3">
+                            <span className="text-[11px] uppercase tracking-widest font-bold text-[#FF9900]">
+                              {line.sectionLabel}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      <InlineLineRow
+                        line={line}
+                        onClickRow={() => { setEditingLine(line); setEditSheetOpen(true); }}
+                        onSaved={() => { router.refresh(); fetch(`/api/tickets/${ticket.id}/commercial-summary`).then(r => r.ok ? r.json() : null).then(d => setSummary(d)); }}
+                      />
+                    </React.Fragment>
                   ))
                 )}
               </TableBody>
@@ -1090,7 +1229,12 @@ export function TicketDetail({
           <RfqExploder
             ticketId={ticket.id}
             payingCustomerId={ticket.payingCustomer.id}
-            sourceText={ticket.description || ""}
+            sourceText={[
+              ticket.description,
+              ...ticket.events
+                .filter((ev) => ev.notes)
+                .map((ev) => (ev.notes || "").replace(/^Section added:\s*/i, "")),
+            ].filter(Boolean).join("\n\n")}
           />
         </TabsContent>
 
@@ -1176,7 +1320,7 @@ export function TicketDetail({
               {ticket.events.map((ev) => (
                 <div
                   key={ev.id}
-                  className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2"
+                  className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2 group"
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -1194,12 +1338,43 @@ export function TicketDetail({
                     )}
                     {ev.sourceRef && (
                       <p className="text-xs text-[#888888] mt-0.5">
-                        Ref: {ev.sourceRef}
+                        Source: {ev.sourceRef}
                       </p>
                     )}
                   </div>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openEditEvent(ev)}>
+                      <Pencil className="size-3" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-red-500 hover:text-red-400" onClick={() => handleDeleteEvent(ev.id)}>
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </div>
                 </div>
               ))}
+
+              {/* Edit Event Sheet */}
+              <Sheet open={editEventOpen} onOpenChange={(open) => { setEditEventOpen(open); if (!open) setEditingEvent(null); }}>
+                <SheetContent side="right">
+                  <SheetHeader>
+                    <SheetTitle>Edit Event</SheetTitle>
+                    <SheetDescription>Update the event details.</SheetDescription>
+                  </SheetHeader>
+                  <div className="flex flex-col gap-4 px-4">
+                    <div className="space-y-1.5">
+                      <Label>Source</Label>
+                      <Input value={editEventSourceRef} onChange={(e) => setEditEventSourceRef(e.target.value)} placeholder="e.g. CALL, EMAIL, WhatsApp" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Notes</Label>
+                      <Textarea value={editEventNotes} onChange={(e) => setEditEventNotes(e.target.value)} rows={4} />
+                    </div>
+                    <SheetFooter>
+                      <Button onClick={handleSaveEvent}>Save</Button>
+                    </SheetFooter>
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           )}
         </TabsContent>
@@ -1338,6 +1513,12 @@ export function TicketDetail({
               ))}
             </div>
           )}
+
+          {/* ── COMPETITIVE BID PANEL ── */}
+          <div className="mt-6">
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-3">Competitive Bids</h2>
+            <CompetitiveBidPanel ticketId={ticket.id} />
+          </div>
         </TabsContent>
 
         {/* ── BUNDLES TAB ─────────────────────────────────────────── */}
@@ -1365,6 +1546,8 @@ export function TicketDetail({
         <TabsContent value="procurement" className="mt-4">
           <TicketProcurementTab
             ticketId={ticket.id}
+            ticketTitle={ticket.title}
+            ticketStatus={ticket.status}
             procurementOrders={procurementOrders}
             supplierBills={[]}
             costAllocations={costAllocations}
@@ -1373,6 +1556,12 @@ export function TicketDetail({
             ticketLines={ticket.lines.map((l) => ({
               id: l.id,
               description: l.description,
+              qty: l.qty,
+              unit: l.unit,
+              expectedCostUnit: l.expectedCostUnit,
+              status: l.status,
+              sectionLabel: l.sectionLabel,
+              supplierName: l.supplierName,
             }))}
           />
         </TabsContent>

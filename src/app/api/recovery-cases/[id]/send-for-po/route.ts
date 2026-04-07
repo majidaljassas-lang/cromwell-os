@@ -31,6 +31,15 @@ export async function POST(
       },
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: recoveryCase.ticketId,
+        eventType: "PACK_SENT_FOR_PO",
+        timestamp: new Date(),
+        notes: `Evidence pack sent for PO on recovery case ${id}`,
+      },
+    });
+
     return Response.json(recoveryCase);
   } catch (error) {
     console.error("Failed to mark pack sent for PO:", error);

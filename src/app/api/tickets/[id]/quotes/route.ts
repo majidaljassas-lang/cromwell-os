@@ -102,6 +102,15 @@ export async function POST(
       return created;
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: id,
+        eventType: "QUOTE_REQUESTED",
+        timestamp: new Date(),
+        notes: `Quote ${quote.quoteNo} created for ${quote.customer?.name || 'Unknown'}`,
+      },
+    });
+
     return Response.json(quote, { status: 201 });
   } catch (error) {
     console.error("Failed to create quote:", error);

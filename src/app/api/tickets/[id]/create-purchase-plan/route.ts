@@ -115,6 +115,15 @@ export async function POST(
         }
       }
 
+      await prisma.event.create({
+        data: {
+          ticketId,
+          eventType: "PURCHASE_ORDER_SENT",
+          timestamp: new Date(),
+          notes: `PO ${po.poNo} created for ${po.supplier?.name || supplierName}`,
+        },
+      });
+
       createdPOs.push(po);
     }
 

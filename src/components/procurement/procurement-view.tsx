@@ -1586,7 +1586,7 @@ function StockTab({
                 stockExcess.map((se) => (
                   <TableRow key={se.id}>
                     <TableCell className="font-medium max-w-[200px] truncate">
-                      {se.supplierBillLine.description}
+                      {se.supplierBillLine?.description || se.description || "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {dec(se.purchasedCost)}

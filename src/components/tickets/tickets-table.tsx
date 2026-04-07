@@ -67,6 +67,7 @@ type TicketRow = {
   description: string | null;
   ticketMode: string;
   status: string;
+  revenueState: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
   site: { id: string; siteName: string } | null;
@@ -317,9 +318,16 @@ export function TicketsTable({
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(ticket.status)}>
-                      {ticket.status.replace(/_/g, " ")}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant={statusVariant(ticket.status)}>
+                        {ticket.status.replace(/_/g, " ")}
+                      </Badge>
+                      {ticket.revenueState !== "OPERATIONAL" && (
+                        <Badge className={ticket.revenueState === "RECOVERY_PIPELINE" ? "text-[9px] bg-[#FF9900]/15 text-[#FF9900] border border-[#FF9900]/30" : "text-[9px] bg-[#00CC66]/15 text-[#00CC66] border border-[#00CC66]/30"}>
+                          {ticket.revenueState === "RECOVERY_PIPELINE" ? "RECOVERY" : "REALISED"}
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-[#888888]">
                     {ticket.payingCustomer.name}

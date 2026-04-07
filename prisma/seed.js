@@ -8,9 +8,48 @@ async function main() {
 
   const sql = readFileSync(join(__dirname, "seed.sql"), "utf-8");
 
-  const statements = sql
-    .split("\n")
-    .filter((line) => line.trim() && !line.startsWith("--"));
+  // Split on semicolons that end a statement (not inside quoted strings)
+  const statements = [];
+  let current = "";
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (escape) {
+      current += ch;
+      escape = false;
+      continue;
+    }
+    if (ch === "'") {
+      // Handle '' (escaped quote in PostgreSQL)
+      if (inString && sql[i + 1] === "'") {
+        current += "''";
+        i++;
+        continue;
+      }
+      inString = !inString;
+    }
+    // Strip single-line comments outside strings
+    if (ch === "-" && sql[i + 1] === "-" && !inString) {
+      // Skip to end of line
+      while (i < sql.length && sql[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === ";" && !inString) {
+      const trimmed = current.trim();
+      if (trimmed) {
+        statements.push(trimmed);
+      }
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  // Handle last statement without trailing semicolon
+  const last = current.trim();
+  if (last) {
+    statements.push(last);
+  }
 
   console.log(`Running ${statements.length} statements...`);
 

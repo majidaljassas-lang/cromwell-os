@@ -46,7 +46,8 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     try {
       const res = await fetch("/api/suppliers", {
         method: "POST",
@@ -60,7 +61,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
         }),
       });
       if (res.ok) {
-        e.currentTarget.reset();
+        form.reset();
         setOpen(false);
         router.refresh();
       }

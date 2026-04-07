@@ -28,6 +28,7 @@ export async function POST(
       expectedCostUnit,
       suggestedSaleUnit,
       actualSaleUnit,
+      sectionLabel,
       ...rest
     } = body;
 
@@ -85,9 +86,24 @@ export async function POST(
         actualSaleTotal,
         expectedMarginTotal,
         actualMarginTotal,
+        sectionLabel: sectionLabel || undefined,
         ...safeRest,
       },
     });
+
+    // If this line has a section label, create an event linked to the line
+    if (sectionLabel) {
+      await prisma.event.create({
+        data: {
+          ticketId,
+          ticketLineId: line.id,
+          eventType: "EXTRA_ORDER_ADDED",
+          timestamp: new Date(),
+          sourceRef: rest.sectionSource || undefined,
+          notes: `${sectionLabel}: ${description}`,
+        },
+      });
+    }
 
     return Response.json(line, { status: 201 });
   } catch (error) {

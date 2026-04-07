@@ -47,6 +47,10 @@ public/backlog-uploads/
 
 # Media evidence uploads (binary assets)
 public/media-evidence/
+public/competitive-evaluations/
+public/enquiry-attachments/
+public/procurement-uploads/
+public/tmp-ocr/
 # OCR trained data
 eng.traineddata
 

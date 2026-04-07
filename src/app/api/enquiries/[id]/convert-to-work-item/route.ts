@@ -87,21 +87,16 @@ export async function POST(
 
     // Step 3: Only create ticket if explicitly requested AND validation complete
     if (createTicket) {
-      // Check all tasks are complete
+      // Auto-complete all pending tasks when customer is already resolved
       const tasks = await prisma.enquiryTask.findMany({
         where: { enquiryId },
       });
-      const allComplete = tasks.length > 0 && tasks.every((t) => t.status === "COMPLETE");
-      const enquiryReady = enquiry.status === "READY_FOR_TICKET" || allComplete;
-
-      if (!enquiryReady) {
-        return Response.json({
-          workItemId,
-          converted: false,
-          blocked: true,
-          reason: "Validation tasks not complete. Complete all tasks before creating ticket.",
-          tasks: tasks.map((t) => ({ taskType: t.taskType, status: t.status })),
-        }, { status: 422 });
+      const pendingTasks = tasks.filter((t) => t.status !== "COMPLETE");
+      if (pendingTasks.length > 0 && (customerId || workItemCustomerId)) {
+        await prisma.enquiryTask.updateMany({
+          where: { enquiryId, status: { not: "COMPLETE" } },
+          data: { status: "COMPLETE" },
+        });
       }
 
       const resolvedCustomerId = customerId || workItemCustomerId;
@@ -134,6 +129,7 @@ export async function POST(
             description: enquiry.rawText,
             ticketMode: mode as any,
             status: "CAPTURED",
+            revenueState: "OPERATIONAL",
           },
         }),
         prisma.inquiryWorkItem.update({
@@ -145,6 +141,15 @@ export async function POST(
           data: { status: "CONVERTED" },
         }),
       ]);
+
+      await prisma.event.create({
+        data: {
+          ticketId: ticket.id,
+          eventType: "ENQUIRY_LOGGED",
+          timestamp: new Date(),
+          notes: `Converted from enquiry: ${enquiry.subjectOrLabel || 'Untitled'}`,
+        },
+      });
 
       return Response.json({ workItemId, ticket, converted: true }, { status: 201 });
     }

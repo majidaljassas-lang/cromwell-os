@@ -139,6 +139,23 @@ export async function POST(
       });
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: id,
+        eventType: "INVOICE_RAISED",
+        timestamp: new Date(),
+        notes: `Draft invoice ${invoice?.invoiceNo || invoiceNo} generated`,
+      },
+    });
+
+    // After invoice creation, if recovery pipeline, transition to REALISED
+    if (ticket.revenueState === "RECOVERY_PIPELINE") {
+      await prisma.ticket.update({
+        where: { id },
+        data: { revenueState: "REALISED" },
+      });
+    }
+
     return Response.json(
       { ...invoice, readinessWarnings },
       { status: 201 }

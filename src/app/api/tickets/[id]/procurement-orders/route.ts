@@ -109,6 +109,15 @@ export async function POST(
       });
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: id,
+        eventType: "PURCHASE_ORDER_SENT",
+        timestamp: new Date(),
+        notes: `PO ${procurementOrder?.poNo || poNo} created for ${procurementOrder?.supplier?.name || 'Unknown'}`,
+      },
+    });
+
     return Response.json(procurementOrder, { status: 201 });
   } catch (error) {
     console.error("Failed to create procurement order:", error);

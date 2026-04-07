@@ -152,6 +152,17 @@ export function EnquiriesTable({
         body: JSON.stringify(body),
       });
 
+      // If file attached and enquiry created, upload it as evidence
+      const file = (form.querySelector('input[name="attachment"]') as HTMLInputElement)?.files?.[0];
+      if (res.ok && file) {
+        const data = await res.json();
+        const uploadData = new FormData();
+        uploadData.append("file", file);
+        uploadData.append("enquiryId", data.id);
+        uploadData.append("sourceType", sourceType);
+        await fetch("/api/enquiries/upload-attachment", { method: "POST", body: uploadData });
+      }
+
       if (res.ok) {
         form.reset();
         setOpen(false);
@@ -200,7 +211,7 @@ export function EnquiriesTable({
       } else if (data.needsCustomer) {
         setConvertError("Customer is required to create a ticket");
       } else if (!res.ok) {
-        setConvertError(data.error || `Failed with status ${res.status}`);
+        setConvertError(data.reason || data.error || `Failed with status ${res.status}`);
       } else {
         // Work item created but no ticket — refresh to show updated state
         setConvertDialogOpen(false);
@@ -298,6 +309,16 @@ export function EnquiriesTable({
                   type="datetime-local"
                   defaultValue={new Date().toISOString().slice(0, 16)}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Attachment</Label>
+                <Input
+                  type="file"
+                  name="attachment"
+                  accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.eml"
+                  className="text-xs"
+                />
+                <p className="text-[10px] text-[#666666]">Upload email screenshot, PDF, or document</p>
               </div>
               <SheetFooter>
                 <Button type="submit" disabled={submitting} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">

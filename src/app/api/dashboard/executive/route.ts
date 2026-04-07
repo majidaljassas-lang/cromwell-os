@@ -15,9 +15,16 @@ export async function GET() {
       openRecoveryCases,
       cashSalesData,
       unallocatedLines,
+      recoverableRevenueLines,
     ] = await Promise.all([
       prisma.ticketLine.findMany({
-        where: { ticket: { status: { in: ["VERIFIED", "LOCKED"] } }, actualSaleTotal: { not: null } },
+        where: {
+          ticket: {
+            status: { in: ["VERIFIED", "LOCKED"] },
+            revenueState: { in: ["OPERATIONAL", "REALISED"] },
+          },
+          actualSaleTotal: { not: null },
+        },
         select: { actualSaleTotal: true },
       }),
       prisma.recoveryCase.findMany({
@@ -29,7 +36,13 @@ export async function GET() {
         select: { poRemainingValue: true },
       }),
       prisma.salesInvoice.findMany({
-        where: { issuedAt: { gte: startOfMonth, lt: endOfMonth }, ticket: { status: "INVOICED" } },
+        where: {
+          issuedAt: { gte: startOfMonth, lt: endOfMonth },
+          ticket: {
+            status: "INVOICED",
+            revenueState: { in: ["OPERATIONAL", "REALISED"] },
+          },
+        },
         select: { ticketId: true },
       }),
       prisma.absorbedCostAllocation.findMany({
@@ -44,6 +57,14 @@ export async function GET() {
       prisma.supplierBillLine.findMany({
         where: { allocationStatus: "UNALLOCATED" },
         select: { lineTotal: true },
+      }),
+      // Recoverable Revenue: sale totals from RECOVERY_PIPELINE tickets (shown separately)
+      prisma.ticketLine.findMany({
+        where: {
+          ticket: { revenueState: "RECOVERY_PIPELINE" },
+          actualSaleTotal: { not: null },
+        },
+        select: { actualSaleTotal: true },
       }),
     ]);
 
@@ -67,6 +88,7 @@ export async function GET() {
     const absorbedCostThisMonth = absorbedThisMonth.reduce((sum, a) => sum + Number(a.amount), 0);
     const cashSalesThisMonth = cashSalesData.reduce((sum, c) => sum + Number(c.receivedAmount), 0);
     const unallocatedCostValue = unallocatedLines.reduce((sum, l) => sum + Number(l.lineTotal), 0);
+    const recoverableRevenue = recoverableRevenueLines.reduce((sum, l) => sum + Number(l.actualSaleTotal ?? 0), 0);
 
     return Response.json({
       readyToInvoice,
@@ -77,6 +99,7 @@ export async function GET() {
       openRecoveryCases,
       cashSalesThisMonth,
       unallocatedCostValue,
+      recoverableRevenue,
     });
   } catch (error) {
     console.error("Failed to compute executive dashboard:", error);

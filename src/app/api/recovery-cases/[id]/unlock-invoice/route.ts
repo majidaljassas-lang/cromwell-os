@@ -25,6 +25,15 @@ export async function POST(
       },
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: recoveryCase.ticketId,
+        eventType: "INVOICE_UNLOCKED",
+        timestamp: new Date(),
+        notes: `Invoice unlocked for recovery case ${id}`,
+      },
+    });
+
     return Response.json(recoveryCase);
   } catch (error) {
     console.error("Failed to unlock invoice for recovery case:", error);

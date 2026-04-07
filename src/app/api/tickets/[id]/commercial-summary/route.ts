@@ -79,9 +79,22 @@ export async function GET(
       };
     });
 
-    // Compute totals
+    // Get stock excess and absorbed costs to deduct from job cost
+    const stockExcess = await prisma.stockExcessRecord.findMany({
+      where: { ticketLine: { ticketId: id } },
+      select: { excessCost: true },
+    });
+    const absorbedCosts = await prisma.absorbedCostAllocation.findMany({
+      where: { ticketId: id },
+      select: { amount: true },
+    });
+    const totalStockExcess = round2(stockExcess.reduce((s, r) => s + Number(r.excessCost), 0));
+    const totalAbsorbed = round2(absorbedCosts.reduce((s, r) => s + Number(r.amount), 0));
+
+    // Compute totals — deduct stock excess and absorbed from job cost
     const totalSale = round2(lineDetails.reduce((s, l) => s + l.sale, 0));
-    const totalCost = round2(lineDetails.reduce((s, l) => s + (l.allocatedCost > 0 ? l.allocatedCost : l.expectedCost), 0));
+    const grossCost = round2(lineDetails.reduce((s, l) => s + (l.allocatedCost > 0 ? l.allocatedCost : l.expectedCost), 0));
+    const totalCost = round2(grossCost - totalStockExcess);
     const totalMargin = round2(totalSale - totalCost);
     const totalMarginPct = totalSale > 0 ? round2((totalMargin / totalSale) * 100) : 0;
     const totalExpectedCost = round2(lineDetails.reduce((s, l) => s + l.expectedCost, 0));
@@ -97,6 +110,9 @@ export async function GET(
         totalMarginPct,
         totalExpectedCost,
         totalAllocatedCost,
+        grossCost,
+        totalStockExcess,
+        totalAbsorbed,
       },
       lines: lineDetails,
     });

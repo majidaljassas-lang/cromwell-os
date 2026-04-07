@@ -113,6 +113,15 @@ export async function POST(
       });
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: recoveryCase.ticketId,
+        eventType: "EVIDENCE_PACK_GENERATED",
+        timestamp: new Date(),
+        notes: `Evidence pack built for recovery case ${id}`,
+      },
+    });
+
     return Response.json(result);
   } catch (error) {
     console.error("Failed to build evidence pack:", error);

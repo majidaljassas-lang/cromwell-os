@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { DownloadPdfButton } from "@/components/quotes/download-pdf-button";
 
@@ -18,7 +19,7 @@ export default async function QuoteViewPage({
   const quote = await prisma.quote.findUnique({
     where: { id },
     include: {
-      lines: { include: { ticketLine: { select: { unit: true } } } },
+      lines: { include: { ticketLine: { select: { unit: true, sectionLabel: true } } } },
       customer: true,
       site: true,
       ticket: { select: { title: true } },
@@ -37,8 +38,14 @@ export default async function QuoteViewPage({
         {/* Header */}
         <div className="flex justify-between items-start mb-10">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-black">CROMWELL</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Plumbing & Mechanical Services</p>
+            <h1 className="text-xl font-bold tracking-tight text-black">Cromwell Plumbing Ltd</h1>
+            <div className="text-xs text-gray-600 mt-2 leading-relaxed">
+              <p>Company ID : 10611686</p>
+              <p>423 Harrow Road</p>
+              <p>Westminster London W10 4RE</p>
+              <p>United Kingdom</p>
+              <p>VAT 262 6274 02</p>
+            </div>
           </div>
           <div className="text-right">
             <h2 className="text-xl font-bold text-black">QUOTATION</h2>
@@ -76,23 +83,40 @@ export default async function QuoteViewPage({
           </thead>
           <tbody>
             {quote.lines.map((line, i) => (
-              <tr key={line.id} className="border-b border-gray-100">
+              <Fragment key={line.id}>
+                {line.ticketLine?.sectionLabel && (
+                  <tr className="border-t-2 border-gray-400">
+                    <td colSpan={5} className="py-2 px-2 text-xs font-bold uppercase tracking-widest text-gray-500 bg-gray-50">
+                      {line.ticketLine.sectionLabel}
+                    </td>
+                  </tr>
+                )}
+              <tr className="border-b border-gray-100">
                 <td className="py-3 text-sm text-gray-400">{i + 1}</td>
                 <td className="py-3 text-sm font-medium text-black">{line.description}</td>
                 <td className="py-3 text-sm text-center tabular-nums">{Number(line.qty)} {line.ticketLine?.unit || ""}</td>
                 <td className="py-3 text-sm text-right tabular-nums">{fmt(line.unitPrice)}</td>
                 <td className="py-3 text-sm text-right tabular-nums font-medium">{fmt(line.lineTotal)}</td>
               </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>
 
         {/* Totals */}
         <div className="flex justify-end mb-10">
-          <div className="w-64">
-            <div className="flex justify-between py-2 border-t-2 border-black">
-              <span className="font-bold text-sm">Total (Ex VAT)</span>
-              <span className="font-bold text-sm tabular-nums">{fmt(totalSale)}</span>
+          <div className="w-72">
+            <div className="flex justify-between py-2.5 border-t border-gray-200">
+              <span className="text-sm text-gray-600">Sub Total</span>
+              <span className="text-sm tabular-nums">{fmt(totalSale)}</span>
+            </div>
+            <div className="flex justify-between py-2.5 border-t border-gray-100">
+              <span className="text-sm text-gray-600">Standard Rate (20%)</span>
+              <span className="text-sm tabular-nums">{fmt(totalSale * 0.2)}</span>
+            </div>
+            <div className="flex justify-between py-3 border-t-2 border-black">
+              <span className="font-bold text-sm">Total</span>
+              <span className="font-bold text-sm tabular-nums">{fmt(totalSale * 1.2)}</span>
             </div>
           </div>
         </div>
@@ -108,7 +132,7 @@ export default async function QuoteViewPage({
         {/* Footer */}
         <div className="border-t border-gray-200 pt-4 text-center">
           <p className="text-xs text-gray-400">This quotation is valid for 30 days from the date of issue.</p>
-          <p className="text-xs text-gray-400 mt-1">All prices are exclusive of VAT unless stated otherwise.</p>
+          <p className="text-xs text-gray-400 mt-1">All prices include VAT at 20% where applicable.</p>
         </div>
 
         {/* Download PDF button */}

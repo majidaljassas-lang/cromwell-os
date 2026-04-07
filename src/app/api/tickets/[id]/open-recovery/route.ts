@@ -61,6 +61,15 @@ export async function POST(
       });
     });
 
+    await prisma.event.create({
+      data: {
+        ticketId: id,
+        eventType: "RECOVERY_TRIGGERED",
+        timestamp: new Date(),
+        notes: `Recovery case opened: ${reasonType || 'No reason specified'}`,
+      },
+    });
+
     return Response.json(result, { status: 201 });
   } catch (error) {
     console.error("Failed to open recovery case:", error);

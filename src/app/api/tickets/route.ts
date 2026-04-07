@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { payingCustomerId, title, ticketMode, status, ...rest } = body;
+    const { payingCustomerId, title, ticketMode, status, revenueState, ...rest } = body;
 
     if (!payingCustomerId || !title || !ticketMode || !status) {
       return Response.json(
@@ -50,6 +50,7 @@ export async function POST(request: Request) {
         title,
         ticketMode,
         status,
+        revenueState: revenueState || "OPERATIONAL",
         ...rest,
       },
     });
