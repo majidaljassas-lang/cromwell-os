@@ -62,6 +62,11 @@ npx prisma migrate deploy || {
   npx prisma db push --accept-data-loss
 }
 
+# Seed the database with data
+echo ""
+echo "Seeding database..."
+node prisma/seed.js
+
 # Create upload directories
 mkdir -p public/quotes public/backlog-uploads public/media-evidence
 
