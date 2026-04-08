@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
@@ -385,9 +385,8 @@ export function IngestionView({
                 const isRawVisible = rawVisible.has(ev.id);
 
                 return (
-                  <>
+                  <React.Fragment key={ev.id}>
                     <TableRow
-                      key={ev.id}
                       className={`border-b border-[#333333] hover:bg-[#222222] ${idx % 2 === 1 ? "bg-[#151515]" : "bg-[#1A1A1A]"}`}
                     >
                       <TableCell className="p-1">
@@ -555,7 +554,7 @@ export function IngestionView({
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </TableBody>
