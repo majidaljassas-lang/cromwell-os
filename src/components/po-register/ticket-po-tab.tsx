@@ -1,7 +1,29 @@
 "use client";
 
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -63,16 +85,60 @@ type CustomerPOForTicket = {
 };
 
 type TicketLineOption = { id: string; description: string };
+type CustomerOption = { id: string; name: string };
 
 export function TicketPOTab({
   ticketId,
   customerPOs,
   ticketLines = [],
+  customers = [],
 }: {
   ticketId: string;
   customerPOs: CustomerPOForTicket[];
   ticketLines?: TicketLineOption[];
+  customers?: CustomerOption[];
 }) {
+  const router = useRouter();
+  const [addOpen, setAddOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [poType, setPoType] = useState("STANDARD_FIXED");
+  const [customerId, setCustomerId] = useState("");
+
+  async function handleAddPO(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSubmitting(true);
+    const fd = new FormData(e.currentTarget);
+    const body = {
+      ticketId,
+      customerId,
+      poNo: fd.get("poNo") as string,
+      poType,
+      poDate: fd.get("poDate") as string || undefined,
+      totalValue: Number(fd.get("totalValue") || 0) || undefined,
+      poLimitValue: Number(fd.get("poLimitValue") || 0) || undefined,
+      notes: fd.get("notes") as string || undefined,
+    };
+    try {
+      const res = await fetch("/api/customer-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setAddOpen(false);
+        setPoType("STANDARD_FIXED");
+        setCustomerId("");
+        (e.target as HTMLFormElement).reset();
+        router.refresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to add PO");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const totalValue = customerPOs.reduce(
     (s, po) => s + n(po.poLimitValue ?? po.totalValue),
     0
@@ -88,7 +154,80 @@ export function TicketPOTab({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Purchase Orders</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Purchase Orders</h2>
+        <Sheet open={addOpen} onOpenChange={setAddOpen}>
+          <SheetTrigger
+            render={
+              <Button size="sm" className="bg-[#3399FF] text-white hover:bg-[#2277DD]">
+                <Plus className="size-4 mr-1" />
+                Add PO
+              </Button>
+            }
+          />
+          <SheetContent side="right">
+            <SheetHeader>
+              <SheetTitle>Add Customer PO</SheetTitle>
+              <SheetDescription>Record a purchase order received from the customer.</SheetDescription>
+            </SheetHeader>
+            <form onSubmit={handleAddPO} className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto">
+              <div className="space-y-1.5">
+                <Label>PO Number *</Label>
+                <Input name="poNo" required placeholder="e.g. W11PO3922" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Customer *</Label>
+                <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>PO Type</Label>
+                <Select value={poType} onValueChange={(v) => setPoType(v ?? "STANDARD_FIXED")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="STANDARD_FIXED">Standard / Fixed</SelectItem>
+                    <SelectItem value="DRAWDOWN_LABOUR">Labour Drawdown</SelectItem>
+                    <SelectItem value="DRAWDOWN_MATERIALS">Materials Drawdown</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>PO Date</Label>
+                  <Input name="poDate" type="date" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Total Value (£)</Label>
+                  <Input name="totalValue" type="number" step="0.01" placeholder="0.00" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>PO Limit (£)</Label>
+                <Input name="poLimitValue" type="number" step="0.01" placeholder="Leave blank if same as total" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Notes</Label>
+                <Input name="notes" placeholder="e.g. Approved by Lee Dawson via email" />
+              </div>
+              <SheetFooter>
+                <Button type="submit" disabled={submitting || !customerId} className="bg-[#3399FF] text-white hover:bg-[#2277DD]">
+                  {submitting ? "Adding..." : "Add PO"}
+                </Button>
+              </SheetFooter>
+            </form>
+          </SheetContent>
+        </Sheet>
+      </div>
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4">

@@ -44,12 +44,9 @@ export async function POST(request: Request) {
       allocationBasis,
     } = body;
 
-    if (!supplierBillLineId || !ticketId || !description || amount === undefined) {
+    if (!ticketId || !description || amount === undefined) {
       return Response.json(
-        {
-          error:
-            "Missing required fields: supplierBillLineId, ticketId, description, amount",
-        },
+        { error: "Missing required fields: ticketId, description, amount" },
         { status: 400 }
       );
     }
@@ -57,7 +54,7 @@ export async function POST(request: Request) {
     const allocation = await prisma.$transaction(async (tx) => {
       const created = await tx.absorbedCostAllocation.create({
         data: {
-          supplierBillLineId,
+          supplierBillLineId: supplierBillLineId || undefined,
           ticketId,
           ticketLineId,
           description,
@@ -75,13 +72,15 @@ export async function POST(request: Request) {
         },
       });
 
-      // Update the supplier bill line's cost classification to ABSORBED
-      await tx.supplierBillLine.update({
-        where: { id: supplierBillLineId },
-        data: {
-          costClassification: "ABSORBED",
-        },
-      });
+      // Update the supplier bill line's cost classification to ABSORBED (if linked)
+      if (supplierBillLineId) {
+        await tx.supplierBillLine.update({
+          where: { id: supplierBillLineId },
+          data: {
+            costClassification: "ABSORBED",
+          },
+        });
+      }
 
       return created;
     });
@@ -93,5 +92,17 @@ export async function POST(request: Request) {
       { error: "Failed to create absorbed cost allocation" },
       { status: 500 }
     );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+    if (!id) return Response.json({ error: "id required" }, { status: 400 });
+    await prisma.absorbedCostAllocation.delete({ where: { id } });
+    return Response.json({ deleted: true });
+  } catch (error) {
+    return Response.json({ error: "Failed to delete" }, { status: 500 });
   }
 }

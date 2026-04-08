@@ -92,11 +92,11 @@ export default async function DealSheetPage({
         </Link>
       </div>
       <DealSheetView
-        ticket={ticket as any}
-        dealSheet={dealSheet as any}
-        supplierOptions={supplierOptions as any}
-        benchmarks={benchmarks as any}
-        compSheets={compSheets as any}
+        ticket={JSON.parse(JSON.stringify(ticket))}
+        dealSheet={JSON.parse(JSON.stringify(dealSheet))}
+        supplierOptions={JSON.parse(JSON.stringify(supplierOptions))}
+        benchmarks={JSON.parse(JSON.stringify(benchmarks))}
+        compSheets={JSON.parse(JSON.stringify(compSheets))}
         suppliers={suppliers as any}
       />
     </div>

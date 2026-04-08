@@ -54,3 +54,7 @@ public/tmp-ocr/
 # OCR trained data
 eng.traineddata
 
+.wwebjs_auth*
+whatsapp-filter.json
+public/email-attachments/
+public/whatsapp-qr.html

@@ -21,6 +21,7 @@ import {
   FolderArchive,
   Archive,
   Scale,
+  Warehouse,
 } from "lucide-react";
 
 const navItems = [
@@ -32,6 +33,7 @@ const navItems = [
   { label: "CONTACTS", href: "/contacts", icon: Contact },
   { label: "TICKETS", href: "/tickets", icon: Ticket },
   { label: "SUPPLIERS", href: "/suppliers", icon: Package },
+  { label: "STOCK / RETURNS", href: "/stock", icon: Warehouse },
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "PO REGISTER", href: "/po-register", icon: FileBarChart },
   { label: "INVOICES", href: "/invoices", icon: Receipt },

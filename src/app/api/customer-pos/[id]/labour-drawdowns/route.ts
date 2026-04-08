@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { NextRequest } from "next/server";
 
 export async function GET(
   _request: Request,
@@ -43,14 +44,18 @@ export async function POST(
       dayType,
       plumberCount,
       daysWorked,
+      invoiceNo,
+      invoiceDate,
+      overrideBillable,
+      deliveryAgainstAdvance,
       status = "LOGGED",
     } = body;
 
-    if (!ticketId || !siteId || !workDate || !dayType || !plumberCount || daysWorked === undefined) {
+    if (!siteId || !workDate || !dayType || !plumberCount || daysWorked === undefined) {
       return Response.json(
         {
           error:
-            "Missing required fields: ticketId, siteId, workDate, dayType, plumberCount, daysWorked",
+            "Missing required fields: siteId, workDate, dayType, plumberCount, daysWorked",
         },
         { status: 400 }
       );
@@ -69,17 +74,28 @@ export async function POST(
       const weekendCost = Number(po.weekendCostRate) || weekdayCost * 1.5;
 
       const billableDayRate = isWeekend ? weekendSell : weekdaySell;
-      const billableValue = billableDayRate * Number(daysWorked) * Number(plumberCount);
+      const isAdvanceBilling = !!overrideBillable;
+      const isDeliveryAgainstAdvance = !!deliveryAgainstAdvance;
       const internalDayCost = isWeekend ? weekendCost : weekdayCost;
-      const internalCostValue = internalDayCost * Number(daysWorked) * Number(plumberCount);
+
+      // Delivery against advance: real work done, but billing was already covered
+      // Billable = 0 (don't double-count), cost = real, status = DELIVERED_AGAINST_ADVANCE
+      const billableValue = isAdvanceBilling
+        ? Number(overrideBillable)
+        : isDeliveryAgainstAdvance
+          ? 0
+          : billableDayRate * Number(daysWorked) * Number(plumberCount);
+      const internalCostValue = isAdvanceBilling
+        ? 0
+        : internalDayCost * Number(daysWorked) * Number(plumberCount);
       const overheadPct = Number(po.overheadPct) || 10;
-      const overheadValue = billableValue * overheadPct / 100;
+      const overheadValue = (isAdvanceBilling || isDeliveryAgainstAdvance) ? 0 : billableValue * overheadPct / 100;
       const grossProfitValue = billableValue - internalCostValue - overheadValue;
 
       const entry = await tx.labourDrawdownEntry.create({
         data: {
           customerPOId: id,
-          ticketId,
+          ticketId: ticketId || undefined,
           siteId,
           weekEndingDate: weekEndingDate ? new Date(weekEndingDate) : undefined,
           workDate: new Date(workDate),
@@ -94,7 +110,9 @@ export async function POST(
           overheadPct,
           overheadValue,
           grossProfitValue,
-          status,
+          invoiceNo: invoiceNo || null,
+          invoiceDate: invoiceDate ? new Date(invoiceDate) : null,
+          status: isDeliveryAgainstAdvance ? "DELIVERED_AGAINST_ADVANCE" : isAdvanceBilling ? "ADVANCE_BILLED" : invoiceNo ? "INVOICED" : status,
         },
         include: {
           ticket: true,
@@ -118,12 +136,22 @@ export async function POST(
         0
       );
 
+      // Auto-progress PO status based on consumption
+      let newStatus = po.status;
+      if (newConsumed > 0 && po.status === "RECEIVED") {
+        newStatus = "ACTIVE";
+      }
+      if (poLimitValue > 0 && newConsumed >= poLimitValue) {
+        newStatus = "EXHAUSTED";
+      }
+
       await tx.customerPO.update({
         where: { id },
         data: {
           poConsumedValue: newConsumed,
           poRemainingValue: poLimitValue - newConsumed,
           profitToDate,
+          status: newStatus,
         },
       });
 
@@ -137,5 +165,56 @@ export async function POST(
       { error: "Failed to create labour drawdown" },
       { status: 500 }
     );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: poId } = await params;
+  try {
+    const { searchParams } = new URL(request.url);
+    const entryId = searchParams.get("entryId");
+    if (!entryId) {
+      return Response.json({ error: "entryId required" }, { status: 400 });
+    }
+
+    const entry = await prisma.labourDrawdownEntry.findUnique({
+      where: { id: entryId },
+      select: { billableValue: true, grossProfitValue: true, customerPOId: true },
+    });
+    if (!entry || entry.customerPOId !== poId) {
+      return Response.json({ error: "Entry not found" }, { status: 404 });
+    }
+
+    await prisma.labourDrawdownEntry.delete({ where: { id: entryId } });
+
+    // Recalculate PO consumed/remaining
+    const po = await prisma.customerPO.findUnique({ where: { id: poId } });
+    if (po) {
+      const allEntries = await prisma.labourDrawdownEntry.findMany({
+        where: { customerPOId: poId },
+        select: { billableValue: true, grossProfitValue: true },
+      });
+      const consumed = allEntries.reduce((s, e) => s + Number(e.billableValue), 0);
+      const profit = allEntries.reduce((s, e) => s + (Number(e.grossProfitValue) || 0), 0);
+      const limit = Number(po.poLimitValue) || 0;
+      // Recalculate status
+      let newStatus = po.status;
+      if (consumed <= 0 && allEntries.length === 0) newStatus = "RECEIVED";
+      else if (limit > 0 && consumed >= limit) newStatus = "EXHAUSTED";
+      else if (consumed > 0) newStatus = "ACTIVE";
+
+      await prisma.customerPO.update({
+        where: { id: poId },
+        data: { poConsumedValue: consumed, poRemainingValue: limit - consumed, profitToDate: profit, status: newStatus },
+      });
+    }
+
+    return Response.json({ deleted: true });
+  } catch (error) {
+    console.error("Failed to delete labour entry:", error);
+    return Response.json({ error: "Failed to delete" }, { status: 500 });
   }
 }

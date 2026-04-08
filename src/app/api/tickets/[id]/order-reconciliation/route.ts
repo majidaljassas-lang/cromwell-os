@@ -80,7 +80,10 @@ export async function PATCH(
     if (action === "allocate_stock" && poLineId) {
       const poLine = await prisma.procurementOrderLine.findUnique({
         where: { id: poLineId },
-        include: { ticketLine: { select: { qty: true, unit: true, description: true } } },
+        include: {
+          ticketLine: { select: { qty: true, unit: true, description: true } },
+          procurementOrder: { select: { poNo: true, ticketId: true, supplier: { select: { name: true } }, ticket: { select: { title: true } } } },
+        },
       });
       if (!poLine) return Response.json({ error: "PO line not found" }, { status: 404 });
 
@@ -111,6 +114,23 @@ export async function PATCH(
             excessCost,
             treatment: "STOCK",
             status: "ALLOCATED",
+          },
+        });
+
+        // Auto-create StockItem for the excess
+        await prisma.stockItem.create({
+          data: {
+            description: poLine.description,
+            qtyOnHand: excessQty,
+            qtyOriginal: excessQty,
+            unit: poLine.ticketLine?.unit ?? "EA",
+            costPerUnit: unitCost,
+            sourceType: "MOQ_EXCESS",
+            supplierName: poLine.procurementOrder.supplier.name,
+            originTicketId: poLine.procurementOrder.ticketId,
+            originTicketTitle: poLine.procurementOrder.ticket.title,
+            originBillNo: poLine.procurementOrder.poNo,
+            notes: `Ordered ${orderedQty}, needed ${requiredQty} — ${excessQty} excess from MOQ`,
           },
         });
       }

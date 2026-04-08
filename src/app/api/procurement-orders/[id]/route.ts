@@ -57,12 +57,14 @@ export async function PATCH(
       );
     }
 
-    const { status, supplierRef, deliveryDateExpected, siteRef, totalCostExpected } = body;
+    const { poNo, status, supplierId, supplierRef, deliveryDateExpected, siteRef, totalCostExpected } = body;
 
     const updated = await prisma.procurementOrder.update({
       where: { id },
       data: {
+        ...(poNo !== undefined && { poNo }),
         ...(status !== undefined && { status }),
+        ...(supplierId !== undefined && { supplierId }),
         ...(supplierRef !== undefined && { supplierRef }),
         ...(deliveryDateExpected !== undefined && {
           deliveryDateExpected: deliveryDateExpected
@@ -91,5 +93,21 @@ export async function PATCH(
       { error: "Failed to update procurement order" },
       { status: 500 }
     );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    // Delete lines first, then the order
+    await prisma.procurementOrderLine.deleteMany({ where: { procurementOrderId: id } });
+    await prisma.procurementOrder.delete({ where: { id } });
+    return Response.json({ deleted: true });
+  } catch (error) {
+    console.error("Failed to delete procurement order:", error);
+    return Response.json({ error: "Failed to delete procurement order" }, { status: 500 });
   }
 }

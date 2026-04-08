@@ -107,6 +107,10 @@ export default async function TicketDetailPage({
     include: { lines: true, customer: true, poAllocations: true },
     orderBy: { createdAt: "desc" },
   });
+  const stockItems = await prisma.stockItem.findMany({
+    where: { isActive: true, qtyOnHand: { gt: 0 }, outcome: "HOLDING" },
+    orderBy: { description: "asc" },
+  });
 
   // Serialize to plain objects — Prisma Decimal/Date objects can't pass to client components
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
@@ -125,6 +129,7 @@ export default async function TicketDetailPage({
         customerPOs={s(customerPOs)}
         evidencePacks={s(evidencePacks)}
         salesInvoices={s(salesInvoices)}
+        stockItems={s(stockItems)}
       />
     </div>
   );

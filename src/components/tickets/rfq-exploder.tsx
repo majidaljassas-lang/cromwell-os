@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Wand2, Check, X, Merge, ChevronDown, ChevronRight, Package, Filter } from "lucide-react";
+import { Wand2, Check, X, Merge, ChevronDown, ChevronRight, Package, Filter, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -131,6 +131,25 @@ export function RfqExploder({
   const [processing, setProcessing] = useState(false);
   const [showSource, setShowSource] = useState(false);
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/rfq/upload-excel", { method: "POST", body: fd });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomText(data.text);
+      }
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
 
   // Auto-extract on mount
   useEffect(() => {
@@ -279,11 +298,20 @@ export function RfqExploder({
       {!batch && (
         <div className="space-y-2">
           <Label>RFQ Source Text</Label>
-          <Textarea value={customText} onChange={(e) => setCustomText(e.target.value)} rows={6} className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs bb-mono" placeholder="Paste the enquiry / email / RFQ text here..." />
+          <Textarea value={customText} onChange={(e) => setCustomText(e.target.value)} rows={6} className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs bb-mono" placeholder="Paste the enquiry / email / RFQ text here, or upload an Excel file..." />
+          <div className="flex gap-2">
+          <label className="cursor-pointer">
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExcelUpload} className="hidden" />
+            <span className={`inline-flex items-center gap-1 px-3 py-1.5 text-sm border border-[#333333] hover:bg-[#222222] ${uploading ? "opacity-50" : ""}`}>
+              <Upload className="size-4" />
+              {uploading ? "Parsing..." : "Upload Excel"}
+            </span>
+          </label>
           <Button onClick={handleExtract} disabled={extracting || !customText.trim()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
             <Wand2 className="size-4 mr-1" />
             {extracting ? "Extracting..." : "Explode RFQ"}
           </Button>
+          </div>
         </div>
       )}
 

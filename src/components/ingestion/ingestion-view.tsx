@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Trash2,
   CheckCircle,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,6 +140,7 @@ export function IngestionView({
   reconstructionBatches,
   sources,
   sites,
+  tickets = [],
 }: IngestionViewProps) {
   const router = useRouter();
 
@@ -440,6 +442,48 @@ export function IngestionView({
                           >
                             <Zap className="h-2.5 w-2.5 mr-0.5" />
                             {actionLoading === ev.id ? "..." : "Comm"}
+                          </Button>
+                          <Dialog>
+                            <DialogTrigger render={
+                              <Button variant="outline" className="h-5 px-1.5 text-[9px] border-[#3399FF]/30 text-[#3399FF] hover:bg-[#3399FF]/10 uppercase tracking-wider font-bold">
+                                <Link2 className="h-2.5 w-2.5 mr-0.5" />
+                                Link
+                              </Button>
+                            } />
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Link to Ticket</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                                {tickets.map((t: any) => (
+                                  <Button
+                                    key={t.id}
+                                    variant="outline"
+                                    className="w-full justify-start text-left h-auto py-2 text-xs"
+                                    onClick={async () => {
+                                      await fetch(`/api/ingestion/events/${ev.id}/link`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ ticketId: t.id }),
+                                      });
+                                      router.refresh();
+                                    }}
+                                  >
+                                    {t.title}
+                                  </Button>
+                                ))}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          <Button
+                            variant="outline"
+                            className="h-5 px-1.5 text-[9px] border-[#FF3333]/30 text-[#FF3333] hover:bg-[#FF3333]/10 uppercase tracking-wider font-bold"
+                            onClick={async () => {
+                              await fetch(`/api/ingestion/events/${ev.id}/link`, { method: "DELETE" });
+                              router.refresh();
+                            }}
+                          >
+                            <Trash2 className="h-2.5 w-2.5" />
                           </Button>
                           <Button
                             variant="outline"

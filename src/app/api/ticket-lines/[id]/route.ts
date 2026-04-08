@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { autoProgressTicket } from "@/lib/procurement/auto-progress-ticket";
 
 export async function GET(
   request: Request,
@@ -100,7 +101,13 @@ export async function PATCH(
     const line = await prisma.ticketLine.update({
       where: { id },
       data: allowed,
+      select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true },
     });
+
+    // Auto-progress ticket status when lines change
+    if (allowed.status === "ORDERED" || allowed.status === "FROM_STOCK" || allowed.status === "FULLY_COSTED" || allowed.status === "INVOICED") {
+      await autoProgressTicket(line.ticketId);
+    }
 
     return Response.json(line);
   } catch (error) {

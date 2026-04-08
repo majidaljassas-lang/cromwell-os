@@ -9,14 +9,19 @@ export default async function PORegisterPage() {
       customer: true, site: true, ticket: true, lines: true,
       labourDrawdowns: { include: { ticket: true, site: true, plumberContact: true }, orderBy: { workDate: "desc" as const } },
       materialsDrawdowns: { include: { ticket: true, ticketLine: true }, orderBy: { drawdownDate: "desc" as const } },
+      cashPayments: { orderBy: { paymentDate: "desc" as const } },
       _count: { select: { labourDrawdowns: true, materialsDrawdowns: true } },
     },
     orderBy: { createdAt: "desc" },
   });
   const customers = await prisma.customer.findMany({ orderBy: { name: "asc" } });
   const sites = await prisma.site.findMany({ orderBy: { siteName: "asc" } });
-  const tickets = await prisma.ticket.findMany({ select: { id: true, title: true }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ select: { id: true, title: true, payingCustomerId: true, siteId: true }, orderBy: { createdAt: "desc" } });
   const contacts = await prisma.contact.findMany({ where: { isActive: true }, orderBy: { fullName: "asc" } });
+  const commercialLinks = await prisma.siteCommercialLink.findMany({
+    select: { id: true, customerId: true, siteId: true, site: { select: { id: true, siteName: true } } },
+    where: { isActive: true },
+  });
 
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
@@ -28,6 +33,7 @@ export default async function PORegisterPage() {
         sites={s(sites)}
         tickets={s(tickets)}
         contacts={s(contacts)}
+        commercialLinks={s(commercialLinks)}
       />
     </div>
   );

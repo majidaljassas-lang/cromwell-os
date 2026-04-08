@@ -447,6 +447,7 @@ export function TicketDetail({
   customerPOs = [],
   evidencePacks = [],
   salesInvoices = [],
+  stockItems = [],
 }: {
   ticket: TicketData;
   salesBundles?: SalesBundleData[];
@@ -459,6 +460,7 @@ export function TicketDetail({
   customerPOs?: any[];
   evidencePacks?: EvidencePackData[];
   salesInvoices?: SalesInvoiceData[];
+  stockItems?: any[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState<{
@@ -1553,6 +1555,7 @@ export function TicketDetail({
             costAllocations={costAllocations}
             absorbedCosts={absorbedCostAllocations}
             suppliers={suppliers}
+            stockItems={stockItems}
             ticketLines={ticket.lines.map((l) => ({
               id: l.id,
               description: l.description,
@@ -1571,6 +1574,7 @@ export function TicketDetail({
           <TicketPOTab
             ticketId={ticket.id}
             customerPOs={customerPOs || []}
+            customers={customers}
             ticketLines={ticket.lines.map((l) => ({
               id: l.id,
               description: l.description,
