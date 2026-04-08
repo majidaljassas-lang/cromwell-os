@@ -99,6 +99,47 @@ export async function POST(
         data: { status: "QUOTED", quoteStatus: "DRAFT" },
       });
 
+      // Auto-generate Deal Sheet from the same data
+      const existingDealSheet = await tx.dealSheet.findFirst({
+        where: { ticketId: id },
+        orderBy: { versionNo: "desc" },
+        select: { versionNo: true },
+      });
+      const dsVersion = (existingDealSheet?.versionNo ?? 0) + 1;
+
+      let totalExpectedCost = 0;
+      let totalExpectedSell = 0;
+      const dsLineData = ticketLines.map((line) => {
+        const costUnit = Number(line.expectedCostUnit ?? 0);
+        const sellUnit = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
+        const qty = Number(line.qty);
+        totalExpectedCost += costUnit * qty;
+        totalExpectedSell += sellUnit * qty;
+        return {
+          ticketLineId: line.id,
+          versionNo: dsVersion,
+          supplierSourceSummary: line.supplierName || null,
+          benchmarkUnit: line.benchmarkUnit ?? null,
+          expectedCostUnit: costUnit,
+          suggestedSaleUnit: sellUnit,
+          actualSaleUnit: line.actualSaleUnit ?? null,
+          expectedMarginUnit: sellUnit - costUnit,
+        };
+      });
+
+      await tx.dealSheet.create({
+        data: {
+          ticketId: id,
+          versionNo: dsVersion,
+          mode: quoteType === "COMPETITIVE_BID" ? "COMPETITIVE" : "STANDARD",
+          status: "DRAFT",
+          totalExpectedCost,
+          totalExpectedSell,
+          totalExpectedMargin: totalExpectedSell - totalExpectedCost,
+          lineSnapshots: { create: dsLineData },
+        },
+      });
+
       return created;
     });
 
