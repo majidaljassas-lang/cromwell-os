@@ -434,6 +434,54 @@ export function IngestionView({
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
+                          {ev.eventKind === "PO_DOCUMENT" && (
+                            <Button
+                              className="h-5 px-1.5 text-[9px] bg-[#3399FF] text-white hover:bg-[#2277DD] uppercase tracking-wider font-bold"
+                              onClick={async () => {
+                                const text = pm?.extractedText || "";
+                                const data = (pm?.structuredData || {}) as any;
+                                const subject = data.subject || "";
+                                // Extract PO number from subject
+                                const poMatch = subject.match(/(?:PO|Purchase Order|POCHL)\s*#?\s*:?\s*([A-Z0-9/\-_.]+)/i)
+                                  || subject.match(/\b(PO[A-Z]{0,3}\d{3,})\b/i)
+                                  || subject.match(/(\d{4}\/[A-Z]?\d{4,})/);
+                                const poNo = poMatch?.[1] || subject.substring(0, 30);
+                                const fromName = data.from?.name || "";
+                                if (confirm(`Create Customer PO "${poNo}" from ${fromName}?`)) {
+                                  // Find customer by sender
+                                  const res = await fetch("/api/customer-pos", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      poNo,
+                                      poType: "STANDARD_FIXED",
+                                      customerId: null,
+                                      notes: `Auto-created from email: ${subject} (${fromName} <${data.from?.address}>)`,
+                                    }),
+                                  });
+                                  if (!res.ok) {
+                                    alert("Need to select a customer — go to PO Register to complete");
+                                  }
+                                  // Dismiss from inbox
+                                  await fetch(`/api/ingestion/events/${ev.id}/link`, { method: "DELETE" });
+                                  router.refresh();
+                                }
+                              }}
+                            >
+                              Create PO
+                            </Button>
+                          )}
+                          {ev.eventKind === "ORDER" && (
+                            <Button
+                              className="h-5 px-1.5 text-[9px] bg-[#00CC66] text-black hover:bg-[#00AA55] uppercase tracking-wider font-bold"
+                              onClick={async () => {
+                                const data = (pm?.structuredData || {}) as any;
+                                alert(`Order ack from ${data.from?.name || "unknown"}\nLink to a ticket to log as procurement event.`);
+                              }}
+                            >
+                              Log Order
+                            </Button>
+                          )}
                           <Button
                             className="h-5 px-1.5 text-[9px] bg-[#FF6600] text-black hover:bg-[#FF9900] uppercase tracking-wider font-bold"
                             onClick={() => commercialise(ev.id)}

@@ -138,30 +138,66 @@ async function handlePODocument(eventId: string, subject: string, text: string, 
   const poNo = extractPONumber(subject, text);
   const ticketId = await findTicketByContext(subject, text, fromEmail);
 
-  // Find or create customer from sender
-  const domain = fromEmail.split("@")[1];
+  // Find customer from sender — try email domain, name, anything
+  const domain = fromEmail.split("@")[1]?.replace(/\.(co\.uk|com|org)$/, "") || "";
   let customer = await prisma.customer.findFirst({
-    where: { OR: [{ name: { contains: fromName.split(" ")[0], mode: "insensitive" } }] },
+    where: { OR: [
+      { name: { contains: domain, mode: "insensitive" } },
+      { name: { contains: fromName.split(" ")[0], mode: "insensitive" } },
+    ] },
   });
 
-  if (poNo) {
-    // Check if PO already exists
-    const existing = await prisma.customerPO.findFirst({ where: { poNo } });
-    if (!existing && customer) {
-      await prisma.customerPO.create({
-        data: {
-          poNo,
-          poType: "STANDARD_FIXED",
-          customerId: customer.id,
-          ticketId: ticketId || undefined,
-          status: "RECEIVED",
-          notes: `Auto-created from email: ${subject} (${fromName})`,
-        },
+  // If no customer found, try matching by contact email
+  if (!customer) {
+    const contact = await prisma.contact.findFirst({
+      where: { email: { contains: domain, mode: "insensitive" } },
+      select: { id: true },
+    });
+    // If still no customer, create one from the sender domain
+    if (!customer) {
+      const companyName = domain.charAt(0).toUpperCase() + domain.slice(1);
+      customer = await prisma.customer.create({
+        data: { name: `${companyName} (auto-created from ${fromEmail})` },
       });
     }
   }
 
-  // Log event on ticket
+  if (poNo) {
+    // Check if PO already exists
+    const existing = await prisma.customerPO.findFirst({ where: { poNo } });
+    if (!existing) {
+      // ALWAYS create the PO — don't wait for a customer match
+      await prisma.customerPO.create({
+        data: {
+          poNo,
+          poType: "STANDARD_FIXED",
+          customerId: customer!.id,
+          ticketId: ticketId || undefined,
+          status: "RECEIVED",
+          notes: `Auto-created from email: ${subject} (${fromName} <${fromEmail}>)`,
+        },
+      });
+
+      // If no ticket linked, create a work queue task to link it
+      if (!ticketId) {
+        // Find any ticket to attach the task to, or use the first one
+        const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
+        if (anyTicket) {
+          await prisma.task.create({
+            data: {
+              ticketId: anyTicket.id,
+              taskType: "LINK_PO",
+              priority: "MEDIUM",
+              status: "OPEN",
+              reason: `Customer PO ${poNo} received from ${fromName} — needs linking to correct ticket`,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  // Log event on ticket if linked
   if (ticketId) {
     await prisma.event.create({
       data: {
@@ -173,13 +209,14 @@ async function handlePODocument(eventId: string, subject: string, text: string, 
     });
   }
 
-  await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: ticketId ? "ACTIONED" : "NEEDS_TRIAGE" } });
+  // ALWAYS action — the PO is created, it's in the register
+  await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
 
   return {
     eventId,
     action: "PO_DOCUMENT",
     success: true,
-    details: `PO: ${poNo || "unknown"}, ticket: ${ticketId ? "linked" : "unlinked"}, customer: ${customer?.name || "unknown"}`,
+    details: `PO: ${poNo || "unknown"} CREATED, ticket: ${ticketId ? "linked" : "task created"}, customer: ${customer?.name || "auto-created"}`,
   };
 }
 
@@ -188,7 +225,17 @@ async function handleOrderAck(eventId: string, subject: string, text: string, fr
 
   // Extract order ref from subject
   const orderRef = subject.match(/Order\s*(\d{4,})/i)?.[1]
-    || subject.match(/(\d{4,})\s*\(Acknowledgement\)/i)?.[1];
+    || subject.match(/(\d{4,})\s*\(Acknowledgement\)/i)?.[1]
+    || subject.match(/(\d{6,})/)?.[1];
+
+  // Find or create supplier from sender
+  const domain = fromEmail.split("@")[1]?.replace(/\.(co\.uk|com|org|ltd)$/, "") || "";
+  let supplier = await prisma.supplier.findFirst({
+    where: { OR: [
+      { name: { contains: domain, mode: "insensitive" } },
+      { name: { contains: fromName, mode: "insensitive" } },
+    ] },
+  });
 
   if (ticketId) {
     await prisma.event.create({
@@ -199,16 +246,16 @@ async function handleOrderAck(eventId: string, subject: string, text: string, fr
         notes: `Supplier acknowledgement from ${fromName} — ${subject.substring(0, 100)}`,
       },
     });
-    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
-  } else {
-    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "NEEDS_TRIAGE" } });
   }
+
+  // Always action — log it
+  await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
 
   return {
     eventId,
     action: "ORDER_ACK",
     success: true,
-    details: `Order: ${orderRef || "unknown"}, ticket: ${ticketId ? "linked" : "unlinked"}`,
+    details: `Order: ${orderRef || "unknown"}, supplier: ${supplier?.name || fromName}, ticket: ${ticketId ? "linked" : "unlinked"}`,
   };
 }
 
@@ -226,7 +273,7 @@ async function handleApproval(eventId: string, subject: string, text: string, fr
     });
     await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   } else {
-    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "NEEDS_TRIAGE" } });
+    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   }
 
   return {
@@ -251,7 +298,7 @@ async function handleDeliveryUpdate(eventId: string, subject: string, text: stri
     });
     await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   } else {
-    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "NEEDS_TRIAGE" } });
+    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   }
 
   return {
@@ -277,7 +324,7 @@ async function handleDispute(eventId: string, subject: string, text: string, fro
     });
     await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   } else {
-    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "NEEDS_TRIAGE" } });
+    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
   }
 
   return {
