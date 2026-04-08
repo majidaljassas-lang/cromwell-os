@@ -22,6 +22,7 @@ import {
   Archive,
   Scale,
   Warehouse,
+  RotateCcw,
 } from "lucide-react";
 
 const navItems = [
@@ -37,6 +38,7 @@ const navItems = [
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "PO REGISTER", href: "/po-register", icon: FileBarChart },
   { label: "INVOICES", href: "/invoices", icon: Receipt },
+  { label: "RETURNS", href: "/returns", icon: RotateCcw },
   { label: "RECOVERY", href: "/recovery", icon: AlertTriangle },
   { label: "ENQUIRIES", href: "/enquiries", icon: Inbox },
   { label: "INGESTION", href: "/ingestion", icon: Download },
