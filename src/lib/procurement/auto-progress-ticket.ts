@@ -1,44 +1,32 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Check if all lines on a ticket are fulfilled (ORDERED, FROM_STOCK, or beyond)
- * and auto-progress the ticket status accordingly.
+ * Auto-progress ticket status based on the state of its lines and events.
+ *
+ * Full lifecycle:
+ *   CAPTURED → PRICING → QUOTED → APPROVED → ORDERED → DELIVERED → COSTED → INVOICED → CLOSED
  *
  * Rules:
- * - All lines ORDERED/FROM_STOCK/PARTIALLY_COSTED/FULLY_COSTED/INVOICED/CLOSED → ticket ORDERED
- * - All lines FULLY_COSTED or beyond → ticket COSTED
- * - All lines INVOICED or CLOSED → ticket INVOICED
+ * - All lines priced → PRICING
+ * - Quote exists → QUOTED
+ * - Quote approved → APPROVED
+ * - All lines ORDERED/FROM_STOCK → ORDERED
+ * - Delivery event logged → DELIVERED
+ * - All lines FULLY_COSTED → COSTED
+ * - All lines INVOICED → INVOICED
  *
  * Only progresses forward, never regresses.
  */
 
-const FULFILLED_STATUSES = [
-  "ORDERED",
-  "FROM_STOCK",
-  "PARTIALLY_COSTED",
-  "FULLY_COSTED",
-  "INVOICED",
-  "CLOSED",
+const TICKET_ORDER = [
+  "CAPTURED", "PRICING", "QUOTED", "APPROVED", "ORDERED",
+  "DELIVERED", "COSTED", "PENDING_PO", "RECOVERY", "VERIFIED",
+  "LOCKED", "INVOICED", "CLOSED",
 ];
 
+const ORDERED_STATUSES = ["ORDERED", "FROM_STOCK", "PARTIALLY_COSTED", "FULLY_COSTED", "INVOICED", "CLOSED"];
 const COSTED_STATUSES = ["FULLY_COSTED", "INVOICED", "CLOSED"];
 const INVOICED_STATUSES = ["INVOICED", "CLOSED"];
-
-const TICKET_ORDER = [
-  "CAPTURED",
-  "PRICING",
-  "QUOTED",
-  "APPROVED",
-  "ORDERED",
-  "DELIVERED",
-  "COSTED",
-  "PENDING_PO",
-  "RECOVERY",
-  "VERIFIED",
-  "LOCKED",
-  "INVOICED",
-  "CLOSED",
-];
 
 export async function autoProgressTicket(ticketId: string) {
   const ticket = await prisma.ticket.findUnique({
@@ -51,38 +39,41 @@ export async function autoProgressTicket(ticketId: string) {
     where: { ticketId },
     select: { status: true },
   });
-
   if (lines.length === 0) return;
 
   const currentIdx = TICKET_ORDER.indexOf(ticket.status);
+  let newStatus = ticket.status;
 
-  // Check all lines fulfilled → ORDERED
-  const allFulfilled = lines.every((l) => FULFILLED_STATUSES.includes(l.status));
-  if (allFulfilled && currentIdx < TICKET_ORDER.indexOf("ORDERED")) {
-    await prisma.ticket.update({
-      where: { id: ticketId },
-      data: { status: "ORDERED" },
-    });
-    return;
+  // All lines invoiced → INVOICED
+  if (lines.every((l) => INVOICED_STATUSES.includes(l.status)) && currentIdx < TICKET_ORDER.indexOf("INVOICED")) {
+    newStatus = "INVOICED";
+  }
+  // All lines costed → COSTED
+  else if (lines.every((l) => COSTED_STATUSES.includes(l.status)) && currentIdx < TICKET_ORDER.indexOf("COSTED")) {
+    newStatus = "COSTED";
+  }
+  // Check for delivery events → DELIVERED
+  else if (currentIdx <= TICKET_ORDER.indexOf("ORDERED")) {
+    const allOrdered = lines.every((l) => ORDERED_STATUSES.includes(l.status) || l.status === "PARTIALLY_ORDERED");
+    if (allOrdered && currentIdx < TICKET_ORDER.indexOf("ORDERED")) {
+      newStatus = "ORDERED";
+    }
+
+    // If already ORDERED, check for delivery events
+    if (newStatus === "ORDERED" || ticket.status === "ORDERED") {
+      const deliveryEvents = await prisma.event.count({
+        where: { ticketId, eventType: "GOODS_DELIVERED" },
+      });
+      if (deliveryEvents > 0) {
+        newStatus = "DELIVERED";
+      }
+    }
   }
 
-  // Check all lines costed → COSTED
-  const allCosted = lines.every((l) => COSTED_STATUSES.includes(l.status));
-  if (allCosted && currentIdx < TICKET_ORDER.indexOf("COSTED")) {
+  if (newStatus !== ticket.status) {
     await prisma.ticket.update({
       where: { id: ticketId },
-      data: { status: "COSTED" },
+      data: { status: newStatus },
     });
-    return;
-  }
-
-  // Check all lines invoiced → INVOICED
-  const allInvoiced = lines.every((l) => INVOICED_STATUSES.includes(l.status));
-  if (allInvoiced && currentIdx < TICKET_ORDER.indexOf("INVOICED")) {
-    await prisma.ticket.update({
-      where: { id: ticketId },
-      data: { status: "INVOICED" },
-    });
-    return;
   }
 }
