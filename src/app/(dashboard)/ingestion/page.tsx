@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function IngestionPage() {
   // Sequential queries to avoid connection exhaustion on Prisma dev server
   const inboxEvents = await prisma.ingestionEvent.findMany({
-    where: { status: { in: ["PARSED", "NORMALISED", "CLASSIFIED", "MATCHED"] } },
+    where: { status: { in: ["PARSED", "NORMALISED", "CLASSIFIED", "MATCHED", "NEEDS_TRIAGE"] } },
     include: {
       source: { select: { sourceType: true, accountName: true } },
       parsedMessages: {
