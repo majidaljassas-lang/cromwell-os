@@ -117,10 +117,32 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
     onSaved();
   }
 
+  function evalExpr(raw: string): number {
+    // Support simple math: "500/2", "500*0.8", "100-20", "80+5"
+    const cleaned = raw.replace(/[^0-9.+\-*/()]/g, "");
+    try { return Function(`"use strict";return (${cleaned})`)() as number; } catch { return Number(raw) || 0; }
+  }
+
   function onBlurDesc() { if (desc !== line.description) saveField("description", desc); }
   function onBlurQty() { const v = Number(qtyVal); if (v !== Number(line.qty)) saveField("qty", v); }
-  function onBlurCost() { const v = Number(costVal || 0); if (v !== Number(line.expectedCostUnit || 0)) saveField("expectedCostUnit", v || undefined); }
-  function onBlurSale() { const v = Number(saleVal || 0); if (v !== Number(line.actualSaleUnit || 0)) saveField("actualSaleUnit", v || undefined); }
+  function onBlurCost() {
+    const v = evalExpr(costVal);
+    setCostVal(v ? String(v) : "");
+    if (v !== Number(line.expectedCostUnit || 0)) saveField("expectedCostUnit", v || undefined);
+  }
+  function onBlurSale() {
+    const v = evalExpr(saleVal);
+    setSaleVal(v ? String(v) : "");
+    if (v !== Number(line.actualSaleUnit || 0)) saveField("actualSaleUnit", v || undefined);
+  }
+  function onBlurMarginPct(raw: string) {
+    const pct = Number(raw);
+    if (isNaN(pct) || costUnit <= 0) return;
+    // margin% = (sale - cost) / sale * 100 → sale = cost / (1 - pct/100)
+    const newSale = pct >= 100 ? costUnit * 10 : Math.round((costUnit / (1 - pct / 100)) * 100) / 100;
+    setSaleVal(String(newSale));
+    saveField("actualSaleUnit", newSale);
+  }
 
   function kd(e: React.KeyboardEvent) { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }
 
@@ -159,30 +181,35 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
           onKeyDown={kd}
         />
       </TableCell>
-      <TableCell className="p-0">
+      <TableCell className="p-0 w-[6%]">
         <input type="number" step="0.01" value={qtyVal} onChange={(e) => setQtyVal(e.target.value)} onBlur={onBlurQty} onKeyDown={kd}
-          className={`${NUM_CLS} w-16`} />
+          className={`${INPUT_CLS} w-full text-right tabular-nums`} />
       </TableCell>
-      <TableCell className="text-[#888888] text-[10px] cursor-pointer p-1" onClick={onClickRow}>
+      <TableCell className="text-[#888888] text-[10px] p-1 w-[5%]">
         {line.unit}
       </TableCell>
-      <TableCell className="p-0">
-        <input type="number" step="0.01" value={costVal} onChange={(e) => setCostVal(e.target.value)} onBlur={onBlurCost} onKeyDown={kd}
-          className={NUM_CLS} placeholder="0.00" />
+      <TableCell className="p-0 w-[9%]">
+        <input type="text" value={costVal} onChange={(e) => setCostVal(e.target.value)} onBlur={onBlurCost} onKeyDown={kd}
+          className={`${INPUT_CLS} w-full text-right tabular-nums`} placeholder="0.00" />
       </TableCell>
-      <TableCell className="p-0">
-        <input type="number" step="0.01" value={saleVal} onChange={(e) => setSaleVal(e.target.value)} onBlur={onBlurSale} onKeyDown={kd}
-          className={NUM_CLS} placeholder="0.00" />
+      <TableCell className="p-0 w-[9%]">
+        <input type="text" value={saleVal} onChange={(e) => setSaleVal(e.target.value)} onBlur={onBlurSale} onKeyDown={kd}
+          className={`${INPUT_CLS} w-full text-right tabular-nums`} placeholder="0.00" />
       </TableCell>
-      <TableCell className="text-right tabular-nums text-xs">
+      <TableCell className="text-right tabular-nums text-xs w-[9%]">
         <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
           {fmtMoney(margin)}
         </span>
       </TableCell>
-      <TableCell className="text-right tabular-nums text-[10px]">
-        <span className={marginPct >= 20 ? "text-[#00CC66]" : marginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}>
-          {marginPct.toFixed(1)}%
-        </span>
+      <TableCell className="p-0 w-[7%]">
+        <input
+          type="text"
+          className={`${INPUT_CLS} w-full text-right tabular-nums ${marginPct >= 20 ? "text-[#00CC66]" : marginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}
+          defaultValue={costUnit > 0 && saleUnit > 0 ? marginPct.toFixed(1) : ""}
+          placeholder="%"
+          onBlur={(e) => onBlurMarginPct(e.target.value)}
+          onKeyDown={kd}
+        />
       </TableCell>
       <TableCell>
         <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
@@ -1156,16 +1183,16 @@ export function TicketDetail({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead className="text-right">Sale</TableHead>
-                  <TableHead className="text-right">Margin</TableHead>
-                  <TableHead className="text-right">Margin %</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-8"></TableHead>
+                  <TableHead className="w-[28%]">Description</TableHead>
+                  <TableHead className="w-[12%]">Supplier</TableHead>
+                  <TableHead className="text-right w-[6%]">Qty</TableHead>
+                  <TableHead className="w-[5%]">Unit</TableHead>
+                  <TableHead className="text-right w-[9%]">Cost</TableHead>
+                  <TableHead className="text-right w-[9%]">Sale</TableHead>
+                  <TableHead className="text-right w-[9%]">Margin</TableHead>
+                  <TableHead className="text-right w-[7%]">Margin %</TableHead>
+                  <TableHead className="w-[8%]">Status</TableHead>
+                  <TableHead className="w-[3%]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
