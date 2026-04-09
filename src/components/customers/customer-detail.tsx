@@ -10,6 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type CustomerAlias = {
   id: string;
@@ -45,6 +53,7 @@ type Customer = {
   }>;
   siteContactLinks: Array<{
     id: string;
+    roleOnSite: string | null;
     contact: { id: string; fullName: string; phone: string | null; email: string | null };
   }>;
   ticketsAsPayer: Array<{ id: string; title: string; status: string; ticketMode: string; createdAt: string }>;
@@ -80,6 +89,10 @@ export function CustomerDetail({
   const [addSubOpen, setAddSubOpen] = useState(false);
   const [selectedSubId, setSelectedSubId] = useState("");
   const [savingSub, setSavingSub] = useState(false);
+
+  // Add contact
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
 
   async function handleDelete() {
     if (!confirm(`Delete customer "${customer.name}"? This will remove all aliases and site links.`)) return;
@@ -178,6 +191,51 @@ export function CustomerDetail({
       body: JSON.stringify({ parentCustomerEntityId: null }),
     });
     router.refresh();
+  }
+
+  async function handleAddContact(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setAddingContact(true);
+    const fd = new FormData(e.currentTarget);
+    const contactBody = {
+      fullName: fd.get("contactName") as string,
+      phone: (fd.get("contactPhone") as string) || null,
+      email: (fd.get("contactEmail") as string) || null,
+      notes: (fd.get("contactNotes") as string) || null,
+    };
+
+    try {
+      // Create the contact
+      const contactRes = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(contactBody),
+      });
+
+      if (contactRes.ok) {
+        const newContact = await contactRes.json();
+
+        // Get the first linked site to create a SiteContactLink
+        // If customer has linked sites, use the first one; otherwise we need a site
+        const firstSiteLink = customer.siteCommercialLinks[0];
+        if (firstSiteLink) {
+          await fetch(`/api/sites/${firstSiteLink.site.id}/contact-links`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contactId: newContact.id,
+              customerId: customer.id,
+              roleOnSite: (fd.get("contactRole") as string) || null,
+            }),
+          });
+        }
+
+        setAddContactOpen(false);
+        router.refresh();
+      }
+    } finally {
+      setAddingContact(false);
+    }
   }
 
   return (
@@ -508,17 +566,72 @@ export function CustomerDetail({
         </TabsContent>
 
         {/* CONTACTS */}
-        <TabsContent value="contacts" className="mt-4">
+        <TabsContent value="contacts" className="mt-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888]">CONTACTS</div>
+            <Sheet open={addContactOpen} onOpenChange={setAddContactOpen}>
+              <SheetTrigger render={<Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900]"><Plus className="size-4 mr-1" />Add Contact</Button>} />
+              <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+                <SheetHeader><SheetTitle className="text-[#E0E0E0]">Add Contact</SheetTitle></SheetHeader>
+                <form onSubmit={handleAddContact} className="flex flex-col gap-4 px-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactName">Full Name *</Label>
+                    <Input id="contactName" name="contactName" required placeholder="e.g. John Smith" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactPhone">Phone</Label>
+                    <Input id="contactPhone" name="contactPhone" placeholder="e.g. 07700 900123" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactEmail">Email</Label>
+                    <Input id="contactEmail" name="contactEmail" type="email" placeholder="e.g. john@example.com" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactRole">Role</Label>
+                    <Input id="contactRole" name="contactRole" placeholder="e.g. Site Manager, Buyer" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactNotes">Notes</Label>
+                    <Input id="contactNotes" name="contactNotes" placeholder="Any notes..." />
+                  </div>
+                  {customer.siteCommercialLinks.length === 0 && (
+                    <p className="text-[9px] text-[#FF9900]">
+                      No sites linked to this customer yet. Link a site first to fully associate contacts.
+                    </p>
+                  )}
+                  <SheetFooter>
+                    <Button type="submit" disabled={addingContact} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                      {addingContact ? "Creating..." : "Create Contact"}
+                    </Button>
+                  </SheetFooter>
+                </form>
+              </SheetContent>
+            </Sheet>
+          </div>
           {customer.siteContactLinks.length === 0 ? (
-            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No contacts linked.</div>
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No contacts linked yet.</div>
           ) : (
             <div className="border border-[#333333] bg-[#1A1A1A]">
-              {customer.siteContactLinks.map((cl) => (
-                <div key={cl.id} className="border-b border-[#2A2A2A] px-3 py-2 flex items-center justify-between">
-                  <div className="text-xs text-[#E0E0E0]">{cl.contact.fullName}</div>
-                  <div className="text-[10px] text-[#888888]">{cl.contact.email || cl.contact.phone || "—"}</div>
-                </div>
-              ))}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {customer.siteContactLinks.map((cl) => (
+                    <TableRow key={cl.id} className="border-[#333333]">
+                      <TableCell className="text-[#E0E0E0] font-medium">{cl.contact.fullName}</TableCell>
+                      <TableCell className="text-[#888888] text-xs">{cl.contact.phone || "—"}</TableCell>
+                      <TableCell className="text-[#888888] text-xs">{cl.contact.email || "—"}</TableCell>
+                      <TableCell className="text-[#888888] text-xs">{cl.roleOnSite || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </TabsContent>

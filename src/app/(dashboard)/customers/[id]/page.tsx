@@ -15,6 +15,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       },
       siteContactLinks: {
         include: { contact: { select: { id: true, fullName: true, phone: true, email: true } } },
+        where: { isActive: true },
       },
       ticketsAsPayer: {
         select: { id: true, title: true, status: true, ticketMode: true, createdAt: true },

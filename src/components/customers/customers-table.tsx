@@ -40,7 +40,15 @@ type CustomerWithLinks = {
   notes: string | null;
   siteCommercialLinks: { id: string }[];
   subsidiaries: { id: string; name: string }[];
+  totalInvoiced: number;
+  totalPaid: number;
+  outstanding: number;
 };
+
+function formatCurrency(amount: number): string {
+  if (amount === 0) return "—";
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(amount);
+}
 
 export function CustomersTable({
   customers,
@@ -203,11 +211,12 @@ export function CustomersTable({
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Legal Name</TableHead>
               <TableHead>Payment Terms</TableHead>
               <TableHead>PO Required</TableHead>
-              <TableHead>Cash Customer</TableHead>
               <TableHead className="text-right">Sites</TableHead>
+              <TableHead className="text-right">Total Invoiced</TableHead>
+              <TableHead className="text-right">Total Paid</TableHead>
+              <TableHead className="text-right">Outstanding</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
@@ -215,7 +224,7 @@ export function CustomersTable({
             {customers.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-8 text-[#888888]"
                 >
                   No customers found. Add your first customer to get started.
@@ -264,9 +273,6 @@ export function CustomersTable({
                     )}
                   </TableCell>
                   <TableCell className="text-[#888888]">
-                    {customer.legalName || "—"}
-                  </TableCell>
-                  <TableCell className="text-[#888888]">
                     {customer.paymentTerms || "—"}
                   </TableCell>
                   <TableCell>
@@ -278,15 +284,17 @@ export function CustomersTable({
                       {customer.poRequiredDefault ? "Yes" : "No"}
                     </Badge>
                   </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={customer.isCashCustomer ? "secondary" : "outline"}
-                    >
-                      {customer.isCashCustomer ? "Yes" : "No"}
-                    </Badge>
-                  </TableCell>
                   <TableCell className="text-right tabular-nums bb-mono text-[#E0E0E0]">
                     {customer.siteCommercialLinks.length}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums bb-mono text-[#E0E0E0]">
+                    {formatCurrency(customer.totalInvoiced)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums bb-mono text-[#00CC66]">
+                    {formatCurrency(customer.totalPaid)}
+                  </TableCell>
+                  <TableCell className={`text-right tabular-nums bb-mono ${customer.outstanding > 0 ? "text-[#FF9900]" : "text-[#888888]"}`}>
+                    {formatCurrency(customer.outstanding)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">

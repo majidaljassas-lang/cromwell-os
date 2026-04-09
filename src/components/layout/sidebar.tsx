@@ -6,14 +6,12 @@ import {
   LayoutDashboard,
   Building2,
   Users,
-  Contact,
   Ticket,
   Inbox,
   Package,
   ShoppingCart,
   FileBarChart,
   Receipt,
-  AlertTriangle,
   Banknote,
   BarChart3,
   Archive,
@@ -26,14 +24,12 @@ const navItems = [
   { label: "INBOX", href: "/inbox", icon: Inbox },
   { label: "JOBS / SITES", href: "/sites", icon: Building2 },
   { label: "CUSTOMERS", href: "/customers", icon: Users },
-  { label: "CONTACTS", href: "/contacts", icon: Contact },
   { label: "TICKETS", href: "/tickets", icon: Ticket },
   { label: "SUPPLIERS", href: "/suppliers", icon: Package },
   { label: "STOCK / RETURNS", href: "/stock", icon: Package },
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "PO REGISTER", href: "/po-register", icon: FileBarChart },
   { label: "INVOICES", href: "/invoices", icon: Receipt },
-  { label: "RECOVERY", href: "/recovery", icon: AlertTriangle },
   { label: "CASH SALES", href: "/cash-sales", icon: Banknote },
   { label: "REPORTS", href: "/reports", icon: BarChart3 },
   { label: "BACKLOG", href: "/backlog", icon: Archive },
@@ -80,14 +76,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Status bar at bottom */}
-      <div className="px-4 py-2 border-t border-[#2A2A2A] text-[9px] text-[#555555] bb-mono">
-        <div className="flex justify-between">
-          <span>SYS ONLINE</span>
-          <span className="text-[#00CC66]">LIVE</span>
-        </div>
-      </div>
     </aside>
   );
 }
