@@ -84,12 +84,15 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setDesc(line.description);
-    setQtyVal(line.qty ? String(Number(line.qty)) : "1");
-    setCostVal(Number(line.expectedCostUnit || 0) ? String(Number(line.expectedCostUnit)) : "");
-    setSaleVal(Number(line.actualSaleUnit || 0) ? String(Number(line.actualSaleUnit)) : "");
-    setMounted(true);
-  }, [line.description, line.qty, line.expectedCostUnit, line.actualSaleUnit]);
+    if (!mounted) {
+      setDesc(line.description);
+      setQtyVal(line.qty ? String(Number(line.qty)) : "1");
+      setCostVal(Number(line.expectedCostUnit || 0) ? String(Number(line.expectedCostUnit)) : "");
+      setSaleVal(Number(line.actualSaleUnit || 0) ? String(Number(line.actualSaleUnit)) : "");
+      setMounted(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [saving, setSaving] = useState(false);
 
   const qty = Number(qtyVal || 1);
@@ -114,7 +117,7 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
       body: JSON.stringify({ [field]: value || undefined }),
     });
     setSaving(false);
-    onSaved();
+    // Don't refresh immediately — let user keep editing. Refresh on tab change or manual.
   }
 
   function evalExpr(raw: string): number {
@@ -128,12 +131,12 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
   function onBlurCost() {
     const v = evalExpr(costVal);
     setCostVal(v ? String(v) : "");
-    if (v !== Number(line.expectedCostUnit || 0)) saveField("expectedCostUnit", v || undefined);
+    saveField("expectedCostUnit", v || undefined);
   }
   function onBlurSale() {
     const v = evalExpr(saleVal);
     setSaleVal(v ? String(v) : "");
-    if (v !== Number(line.actualSaleUnit || 0)) saveField("actualSaleUnit", v || undefined);
+    saveField("actualSaleUnit", v || undefined);
   }
   function onBlurMarginPct(raw: string) {
     const pct = Number(raw);
