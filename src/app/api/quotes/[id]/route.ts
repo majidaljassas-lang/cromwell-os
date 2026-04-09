@@ -58,10 +58,14 @@ export async function PATCH(
     } else if (body.status === "APPROVED") {
       const fullQuote = await prisma.quote.findUnique({
         where: { id },
-        select: { ticketId: true, quoteNo: true },
+        include: {
+          lines: { include: { ticketLine: true } },
+          customer: true,
+          site: true,
+          ticket: true,
+        },
       });
       if (fullQuote) {
-        // Log event
         await prisma.event.create({
           data: {
             ticketId: fullQuote.ticketId,
@@ -71,11 +75,55 @@ export async function PATCH(
           },
         });
 
-        // Update ticket status to APPROVED
         await prisma.ticket.update({
           where: { id: fullQuote.ticketId },
           data: { status: "APPROVED" },
         });
+
+        // Auto-create CustomerPO if none exists for this ticket
+        const existingPO = await prisma.customerPO.findFirst({
+          where: { ticketId: fullQuote.ticketId },
+        });
+
+        if (!existingPO) {
+          const poNo = `PO-AUTO-${Date.now()}`;
+          const totalValue = Number(fullQuote.totalSell || 0);
+
+          const autoPO = await prisma.customerPO.create({
+            data: {
+              ticketId: fullQuote.ticketId,
+              customerId: fullQuote.customerId,
+              siteId: fullQuote.siteId || undefined,
+              siteCommercialLinkId: fullQuote.siteCommercialLinkId || undefined,
+              quoteId: fullQuote.id,
+              poNo,
+              poType: "STANDARD_FIXED",
+              poDate: new Date(),
+              status: "AWAITING_CUSTOMER_PO",
+              totalValue,
+              poRemainingValue: totalValue,
+              notes: `Auto-created from approved quote ${fullQuote.quoteNo}`,
+              lines: {
+                create: fullQuote.lines.map((ql) => ({
+                  ticketLineId: ql.ticketLineId,
+                  description: ql.description,
+                  qty: ql.qty,
+                  agreedUnitPrice: ql.unitPrice,
+                  agreedTotal: ql.lineTotal,
+                })),
+              },
+            },
+          });
+
+          await prisma.event.create({
+            data: {
+              ticketId: fullQuote.ticketId,
+              eventType: "AUTO_PO_CREATED",
+              timestamp: new Date(),
+              notes: `Customer PO ${autoPO.poNo} auto-created from approved quote ${fullQuote.quoteNo} (value: £${totalValue.toFixed(2)})`,
+            },
+          });
+        }
       }
     }
 

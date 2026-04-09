@@ -43,6 +43,68 @@ export async function PATCH(
       where: { id },
       data: body,
     });
+
+    // Auto-draft invoice when ticket reaches DELIVERED or COSTED
+    if (body.status === "DELIVERED" || body.status === "COSTED") {
+      const existingInvoice = await prisma.salesInvoice.findFirst({ where: { ticketId: id } });
+      if (!existingInvoice) {
+        const fullTicket = await prisma.ticket.findUnique({
+          where: { id },
+          include: {
+            lines: true,
+            customerPOs: { take: 1, orderBy: { createdAt: "desc" as const } },
+          },
+        });
+
+        if (fullTicket) {
+          const pricedLines = fullTicket.lines.filter(
+            (line) => line.actualSaleUnit !== null || line.actualSaleTotal !== null
+          );
+          const totalSell = pricedLines.reduce((sum, line) => sum + Number(line.actualSaleTotal || 0), 0);
+          const invoiceNo = `INV-AUTO-${Date.now()}`;
+          const poRef = fullTicket.customerPOs[0]?.poNo || null;
+
+          const invoice = await prisma.salesInvoice.create({
+            data: {
+              ticketId: id,
+              invoiceNo,
+              customerId: fullTicket.payingCustomerId,
+              siteId: fullTicket.siteId || undefined,
+              siteCommercialLinkId: fullTicket.siteCommercialLinkId || undefined,
+              poNo: poRef,
+              invoiceType: "STANDARD",
+              status: "DRAFT",
+              totalSell,
+              notes: `Auto-drafted when ticket reached ${body.status}`,
+            },
+          });
+
+          if (pricedLines.length > 0) {
+            await prisma.salesInvoiceLine.createMany({
+              data: pricedLines.map((line) => ({
+                salesInvoiceId: invoice.id,
+                ticketLineId: line.id,
+                description: line.description,
+                qty: line.qty,
+                unitPrice: line.actualSaleUnit || 0,
+                lineTotal: line.actualSaleTotal || 0,
+                displayMode: "LINE",
+              })),
+            });
+          }
+
+          await prisma.event.create({
+            data: {
+              ticketId: id,
+              eventType: "AUTO_INVOICE_DRAFTED",
+              timestamp: new Date(),
+              notes: `Draft invoice ${invoice.invoiceNo} auto-created (${pricedLines.length} lines, £${totalSell.toFixed(2)})${poRef ? ` — PO ref: ${poRef}` : ""}`,
+            },
+          });
+        }
+      }
+    }
+
     return Response.json(ticket);
   } catch (error) {
     console.error("Failed to update ticket:", error);
