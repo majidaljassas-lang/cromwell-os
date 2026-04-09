@@ -9,7 +9,6 @@ import {
   Contact,
   Ticket,
   Inbox,
-  Download,
   Package,
   ShoppingCart,
   FileBarChart,
@@ -17,7 +16,6 @@ import {
   AlertTriangle,
   Banknote,
   BarChart3,
-  FolderArchive,
   Archive,
   Scale,
 } from "lucide-react";
@@ -31,14 +29,13 @@ const navItems = [
   { label: "CONTACTS", href: "/contacts", icon: Contact },
   { label: "TICKETS", href: "/tickets", icon: Ticket },
   { label: "SUPPLIERS", href: "/suppliers", icon: Package },
+  { label: "STOCK / RETURNS", href: "/stock", icon: Package },
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "PO REGISTER", href: "/po-register", icon: FileBarChart },
   { label: "INVOICES", href: "/invoices", icon: Receipt },
   { label: "RECOVERY", href: "/recovery", icon: AlertTriangle },
-  { label: "INGESTION", href: "/ingestion", icon: Download },
   { label: "CASH SALES", href: "/cash-sales", icon: Banknote },
   { label: "REPORTS", href: "/reports", icon: BarChart3 },
-  { label: "SITE PACKS", href: "/site-packs", icon: FolderArchive },
   { label: "BACKLOG", href: "/backlog", icon: Archive },
 ];
 

@@ -177,6 +177,8 @@ export async function POST() {
                 ingestionEventId: event.id,
               },
             });
+          } catch {
+            // Inbound event creation failed — continue anyway
           }
 
           // Update event with classification

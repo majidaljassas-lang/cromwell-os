@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { classifyMessage } from "@/lib/ingestion/classifier";
 import { resolveLink } from "@/lib/ingestion/link-resolver";
+import { classifyWorkPersonal } from "@/lib/ingestion/work-classifier";
 import fs from "fs";
 import path from "path";
 
@@ -107,11 +108,8 @@ export async function POST(request: Request) {
       return Response.json({ skipped: true, reason: "filtered" });
     }
 
-    // Groups: always capture (you can filter later)
-    // 1-1: only capture if known contact or work keywords
-    if (!msg.is_group && !isWork) {
-      return Response.json({ skipped: true, reason: "personal" });
-    }
+    // Capture everything — classify as WORK/PERSONAL in the event for inbox filtering
+    // (Previously filtered personal messages — now relaxed so user can triage from inbox)
 
     // Deduplicate
     const existing = await prisma.ingestionEvent.findFirst({
@@ -172,20 +170,27 @@ export async function POST(request: Request) {
     // Classify the message
     const classification = classifyMessage(msg.message_text || "");
 
-    // Auto-link to existing tickets/enquiries via link resolver
+    // Intelligent work/personal classification
+    const workSignal = classifyWorkPersonal({
+      isKnownContact: isKnown,
+      isGroup: msg.is_group,
+      chatName: msg.chat_name || "",
+      senderName: msg.sender_name || "",
+      messageText: msg.message_text || "",
+      isSent: msg.is_sent,
+    });
+
+    // Update event with classification
+    await prisma.ingestionEvent.update({
+      where: { id: event.id },
+      data: {
+        eventKind: workSignal.isWork ? (msg.is_sent ? "WHATSAPP_SENT" : classification.classification) : "PERSONAL",
+        status: "CLASSIFIED",
+      },
+    });
+
+    // NOTE: Auto-linking DISABLED — everything lands in inbox for manual triage
     try {
-      await resolveLink({
-        eventType: "WHATSAPP_MESSAGE",
-        sourceType: "WHATSAPP",
-        sender: msg.sender_name,
-        senderPhone: cleanPhone,
-        receivedAt: msgDate,
-        rawText: msg.message_text,
-        subject: msg.chat_name || msg.sender_name,
-        ingestionEventId: event.id,
-      });
-    } catch {
-      // If link resolver fails, create basic InboundEvent
       await prisma.inboundEvent.create({
         data: {
           eventType: "WHATSAPP_MESSAGE",
@@ -200,6 +205,8 @@ export async function POST(request: Request) {
           ingestionEventId: event.id,
         },
       });
+    } catch {
+      // Inbound event creation failed — continue anyway
     }
 
     // Update event with classification

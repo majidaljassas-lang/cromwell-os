@@ -27,7 +27,7 @@ module.exports = {
     },
     {
       name: "cromwell-whatsapp",
-      script: "scripts/whatsapp-listener.js",
+      script: "scripts/whatsapp-qr-server.js",
       cwd: "/Users/majidaljassas/cromwell-os",
       autorestart: true,
       watch: false,

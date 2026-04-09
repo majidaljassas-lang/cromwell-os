@@ -241,6 +241,47 @@ export function InboxView({
   const [linkTicketId, setLinkTicketId] = useState("");
   const [linkSubmitting, setLinkSubmitting] = useState(false);
 
+  // Bulk select
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDismissing, setBulkDismissing] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((i) => i.id)));
+    }
+  }
+
+  async function bulkDismiss() {
+    if (selectedIds.size === 0) return;
+    setBulkDismissing(true);
+    try {
+      const promises = items
+        .filter((i) => selectedIds.has(i.id))
+        .map((item) =>
+          fetch(`/api/inbox/${item.id}/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "dismiss", itemType: item.itemType }),
+          })
+        );
+      await Promise.all(promises);
+      setSelectedIds(new Set());
+      fetchItems();
+    } finally {
+      setBulkDismissing(false);
+    }
+  }
+
   // ── Fetch items ────────────────────────────────────────────────────────
 
   async function fetchItems() {
@@ -401,6 +442,18 @@ export function InboxView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={bulkDismiss}
+              disabled={bulkDismissing}
+              className="text-[11px] bb-mono text-red-500 border-red-500/50 hover:bg-red-500/10"
+            >
+              <XCircle className="h-3.5 w-3.5 mr-1" />
+              {bulkDismissing ? "DISMISSING..." : `DISMISS ${selectedIds.size} SELECTED`}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -536,6 +589,15 @@ export function InboxView({
         <Table>
           <TableHeader>
             <TableRow className="border-b border-[#333333] hover:bg-transparent">
+              <TableHead className="w-8 px-2">
+                <input
+                  type="checkbox"
+                  checked={items.length > 0 && selectedIds.size === items.length}
+                  onChange={toggleSelectAll}
+                  className="accent-[#FF6600]"
+                  suppressHydrationWarning
+                />
+              </TableHead>
               <TableHead className="text-[10px] text-[#666666] bb-mono tracking-wider w-[90px]">
                 SOURCE
               </TableHead>
@@ -590,6 +652,14 @@ export function InboxView({
                   key={`${item.itemType}-${item.id}`}
                   className="border-b border-[#2A2A2A] hover:bg-[#1A1A1A]"
                 >
+                  <TableCell className="px-2 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleSelect(item.id)}
+                      className="accent-[#FF6600]"
+                    />
+                  </TableCell>
                   <TableCell className="py-2">
                     {sourceBadge(item.sourceType)}
                   </TableCell>

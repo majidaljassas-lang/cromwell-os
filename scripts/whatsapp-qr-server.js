@@ -27,23 +27,38 @@ client.on("ready", () => {
   // Now start the real listener
   client.on("message_create", async (msg) => {
     try {
-      const chat = await msg.getChat();
-      const contact = await msg.getContact();
-      const isSent = msg.fromMe;
       if (msg.from === "status@broadcast") return;
       if (!msg.body && !msg.hasMedia) return;
 
+      const isSent = msg.fromMe;
+      let chatName = "";
+      let senderName = msg.from || "Unknown";
+      let chatId = "";
+      let isGroup = false;
+
+      try {
+        const chat = await msg.getChat();
+        chatName = chat.name || "";
+        chatId = chat.id?._serialized || "";
+        isGroup = chat.isGroup || false;
+      } catch {}
+
+      try {
+        const contact = await msg.getContact();
+        senderName = contact.pushname || contact.name || msg.from || "Unknown";
+      } catch {}
+
       const payload = {
-        message_id: msg.id._serialized,
-        chat_id: chat.id._serialized,
-        chat_name: chat.name || "",
-        sender_phone: msg.from,
-        sender_name: contact.pushname || contact.name || msg.from,
-        timestamp: new Date(msg.timestamp * 1000).toISOString(),
+        message_id: msg.id?._serialized || `${Date.now()}`,
+        chat_id: chatId,
+        chat_name: chatName,
+        sender_phone: msg.from || "",
+        sender_name: senderName,
+        timestamp: new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
         message_text: msg.body || "",
         is_sent: isSent,
-        is_group: chat.isGroup,
-        has_media: msg.hasMedia,
+        is_group: isGroup,
+        has_media: msg.hasMedia || false,
         media_type: msg.type !== "chat" ? msg.type : null,
       };
 
@@ -54,13 +69,14 @@ client.on("ready", () => {
       });
       const data = await res.json();
       const dir = isSent ? "→" : "←";
-      const label = chat.isGroup ? `[${chat.name}]` : contact.pushname || msg.from;
+      const label = isGroup ? `[${chatName}]` : senderName;
       const status = data.skipped ? `(${data.reason})` : "✓";
       console.log(`${dir} ${label}: ${(msg.body || "[media]").substring(0, 60)} ${status}`);
     } catch (err) {
-      // silent
+      console.error("❌ Message handler error:", err.message);
     }
   });
+  console.log("📩 Message listener registered — waiting for messages...");
 });
 
 client.on("authenticated", () => console.log("🔐 Authenticated"));
