@@ -190,10 +190,8 @@ function lineMarginPct(line: InvoiceLine): number {
 
 function getReadinessBlockers(inv: Invoice): string[] {
   const blockers: string[] = [];
-  if (!inv.invoiceNo) blockers.push("Missing invoice number");
-  if (!inv.poNo && inv.poAllocations.length === 0) blockers.push("No PO linked");
   if (inv.lines.length === 0) blockers.push("No invoice lines");
-  if (inv.lines.some((l) => !l.poMatched)) blockers.push("Unmatched lines to PO");
+  if (inv.ticket?.poRequired && !inv.poNo) blockers.push("Customer requires PO — none linked");
   return blockers;
 }
 
