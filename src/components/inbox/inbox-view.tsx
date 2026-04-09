@@ -597,7 +597,7 @@ export function InboxView({
                     <div className="text-[12px] text-[#CCCCCC] line-clamp-1">
                       {item.subject}
                     </div>
-                    {item.rawText && (
+                    {typeof item.rawText === "string" && item.rawText && (
                       <div className="text-[10px] text-[#555555] line-clamp-1 mt-0.5">
                         {item.rawText.substring(0, 100)}
                       </div>

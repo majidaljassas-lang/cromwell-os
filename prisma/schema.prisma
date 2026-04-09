@@ -56,6 +56,20 @@ enum UnitOfMeasure {
   SET
 }
 
+enum StockSourceType {
+  RETURN
+  MOQ_EXCESS
+  TRANSFER
+  OTHER
+}
+
+enum StockOutcome {
+  HOLDING
+  ALLOCATED
+  RETURNED_TO_SUPPLIER
+  WRITTEN_OFF
+}
+
 enum TicketLineStatus {
   RAW
   MERGED
@@ -551,6 +565,7 @@ model Contact {
   evidenceFragments    EvidenceFragment[]
   labourDrawdowns      LabourDrawdownEntry[]
   logisticsEvents      LogisticsEvent[]
+  issuedPOs            CustomerPO[]         @relation("POIssuedBy")
 
   @@index([fullName])
 }
@@ -793,6 +808,7 @@ model InquiryWorkItem {
 
 model Ticket {
   id                        String       @id @default(uuid())
+  ticketNo                  Int          @unique @default(autoincrement())
   parentJobId               String?
   siteId                    String?
   siteCommercialLinkId      String?
@@ -944,6 +960,7 @@ model TicketLine {
   invoiceLines          SalesInvoiceLine[]
   materialsDrawdowns    MaterialsDrawdownEntry[]
   quoteLines            QuoteLine[]
+  stockUsages           StockUsage[]
 
   @@index([ticketId])
   @@index([status])
@@ -1273,6 +1290,8 @@ model CustomerPO {
   customerId              String
   siteId                  String?
   siteCommercialLinkId    String?
+  issuedByContactId       String?
+  issuedBy                String?
   poNo                    String
   poType                  CustomerPOType
   poDate                  DateTime?
@@ -1300,10 +1319,12 @@ model CustomerPO {
   customer           Customer             @relation(fields: [customerId], references: [id])
   site               Site?                @relation(fields: [siteId], references: [id])
   siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
+  issuedByContact    Contact?             @relation("POIssuedBy", fields: [issuedByContactId], references: [id])
   lines              CustomerPOLine[]
   allocations        CustomerPOAllocation[]
   labourDrawdowns    LabourDrawdownEntry[]
   materialsDrawdowns MaterialsDrawdownEntry[]
+  cashPayments       POCashPayment[]
 
   @@index([poNo])
 }
@@ -1390,6 +1411,63 @@ model MaterialsDrawdownEntry {
   customerPO CustomerPO  @relation(fields: [customerPOId], references: [id])
   ticket     Ticket      @relation(fields: [ticketId], references: [id])
   ticketLine TicketLine? @relation(fields: [ticketLineId], references: [id])
+}
+
+model POCashPayment {
+  id            String   @id @default(uuid())
+  customerPOId  String
+  payee         String
+  payeeType     String   @default("PLUMBER")
+  amount        Decimal  @db.Decimal(14, 2)
+  paymentDate   DateTime
+  paymentMethod String   @default("CASH")
+  reference     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  customerPO CustomerPO @relation(fields: [customerPOId], references: [id])
+}
+
+// ─── STOCK ─────────────────────────────────────────────────────────────────
+
+model StockItem {
+  id                String           @id @default(uuid())
+  description       String
+  productCode       String?
+  category          String?
+  qtyOnHand         Decimal          @db.Decimal(14, 4)
+  qtyOriginal       Decimal          @db.Decimal(14, 4)
+  unit              UnitOfMeasure    @default(EA)
+  costPerUnit       Decimal          @db.Decimal(14, 4)
+  supplierName      String?
+  sourceType        StockSourceType  @default(OTHER)
+  outcome           StockOutcome     @default(HOLDING)
+  outcomeDate       DateTime?
+  outcomeNotes      String?
+  originBillId      String?
+  originBillNo      String?
+  originTicketId    String?
+  originTicketTitle String?
+  notes             String?
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  usages StockUsage[]
+}
+
+model StockUsage {
+  id           String   @id @default(uuid())
+  stockItemId  String
+  ticketLineId String
+  qtyUsed      Decimal  @db.Decimal(14, 4)
+  costPerUnit  Decimal  @db.Decimal(14, 4)
+  totalCost    Decimal  @db.Decimal(14, 2)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  stockItem  StockItem  @relation(fields: [stockItemId], references: [id])
+  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
 }
 
 // ─── INVOICES ───────────────────────────────────────────────────────────────
