@@ -107,9 +107,15 @@ export default async function TicketDetailPage({
     include: { lines: true, customer: true, poAllocations: true },
     orderBy: { createdAt: "desc" },
   });
-  const stockItems = await prisma.stockItem.findMany({
-    where: { isActive: true, qtyOnHand: { gt: 0 }, outcome: "HOLDING" },
-    orderBy: { description: "asc" },
+
+  // Fetch sites & commercial links for PO entry
+  const allSites = await prisma.site.findMany({
+    orderBy: { siteName: "asc" },
+    select: { id: true, siteName: true },
+  });
+  const commercialLinks = await prisma.siteCommercialLink.findMany({
+    where: { isActive: true },
+    select: { id: true, siteId: true, customerId: true, site: { select: { id: true, siteName: true } } },
   });
 
   // Serialize to plain objects — Prisma Decimal/Date objects can't pass to client components
@@ -129,7 +135,8 @@ export default async function TicketDetailPage({
         customerPOs={s(customerPOs)}
         evidencePacks={s(evidencePacks)}
         salesInvoices={s(salesInvoices)}
-        stockItems={s(stockItems)}
+        sites={s(allSites)}
+        commercialLinks={s(commercialLinks)}
       />
     </div>
   );

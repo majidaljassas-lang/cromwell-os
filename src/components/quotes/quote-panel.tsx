@@ -67,11 +67,15 @@ type QuoteData = {
 };
 
 type CustomerData = { id: string; name: string };
+type SiteOption = { id: string; siteName: string };
+type CommercialLinkOption = { id: string; siteId: string; customerId: string; site: SiteOption };
 
 interface QuotePanelProps {
   ticketId: string;
   quotes: QuoteData[];
   customers: CustomerData[];
+  sites?: SiteOption[];
+  commercialLinks?: CommercialLinkOption[];
 }
 
 function statusVariant(
@@ -93,7 +97,7 @@ function statusVariant(
   }
 }
 
-export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
+export function QuotePanel({ ticketId, quotes, customers, sites = [], commercialLinks = [] }: QuotePanelProps) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -105,6 +109,84 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
   const [reviseReplacements, setReviseReplacements] = useState<Record<string, { description: string; qty: string; cost: string; sale: string }>>({});
   const [revising, setRevising] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false);
+
+  // PO entry state
+  const [poSheetOpen, setPoSheetOpen] = useState(false);
+  const [poQuoteId, setPoQuoteId] = useState<string | null>(null);
+  const [submittingPO, setSubmittingPO] = useState(false);
+  const [poNumber, setPoNumber] = useState("");
+  const [poDate, setPoDate] = useState(new Date().toISOString().split("T")[0]);
+  const [poIssuer, setPoIssuer] = useState("");
+  const [poSiteId, setPoSiteId] = useState("");
+  const [poNotes, setPoNotes] = useState("");
+
+  function openPOSheet(quoteId: string) {
+    setPoQuoteId(quoteId);
+    setPoNumber("");
+    setPoDate(new Date().toISOString().split("T")[0]);
+    setPoIssuer("");
+    setPoSiteId("");
+    setPoNotes("");
+    setPoSheetOpen(true);
+  }
+
+  // Get filtered sites for the PO quote's customer
+  function getSitesForQuote(customerId: string) {
+    const custLinks = commercialLinks.filter(cl => cl.customerId === customerId);
+    if (custLinks.length > 0) {
+      return { sites: custLinks.map(cl => cl.site), hasLinks: true, links: custLinks };
+    }
+    return { sites, hasLinks: false, links: [] as CommercialLinkOption[] };
+  }
+
+  async function handleSubmitPO() {
+    if (!poNumber.trim() || !poQuoteId) return;
+    setSubmittingPO(true);
+    const quote = quotes.find(q => q.id === poQuoteId);
+    if (!quote) { setSubmittingPO(false); return; }
+
+    const { links } = getSitesForQuote(quote.customer.id);
+
+    try {
+      const noteParts: string[] = [];
+      if (poIssuer.trim()) noteParts.push(`Issued by: ${poIssuer.trim()}`);
+      if (poNotes.trim()) noteParts.push(poNotes.trim());
+
+      const body: Record<string, unknown> = {
+        ticketId,
+        customerId: quote.customer.id,
+        poNo: poNumber.trim(),
+        poType: "STANDARD_FIXED",
+        poDate: poDate || undefined,
+        status: "RECEIVED",
+        totalValue: quote.totalSell ? Number(quote.totalSell.toString()) : undefined,
+        notes: noteParts.length > 0 ? noteParts.join("\n") : undefined,
+      };
+      if (poSiteId) {
+        body.siteId = poSiteId;
+        const cl = links.find(l => l.siteId === poSiteId);
+        if (cl) body.siteCommercialLinkId = cl.id;
+      }
+
+      const res = await fetch("/api/customer-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setPoSheetOpen(false);
+        setPoQuoteId(null);
+        setPoNumber("");
+        setPoDate(new Date().toISOString().split("T")[0]);
+        setPoIssuer("");
+        setPoSiteId("");
+        setPoNotes("");
+        router.refresh();
+      }
+    } finally {
+      setSubmittingPO(false);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -352,25 +434,11 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                         {!isSuperseded && quote.status === "APPROVED" && (
                           <Button
                             size="sm"
-                            className="bg-[#FF6600] text-black hover:bg-[#CC5500]"
-                            onClick={async () => {
-                              const poNo = prompt("Enter customer PO number:");
-                              if (!poNo?.trim()) return;
-                              await fetch("/api/customer-pos", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  poNo: poNo.trim(),
-                                  poType: "STANDARD_FIXED",
-                                  customerId: quote.customerId,
-                                  ticketId: quote.ticketId,
-                                  siteId: quote.siteId || undefined,
-                                  status: "RECEIVED",
-                                }),
-                              });
-                              router.refresh();
-                            }}
+                            variant="outline"
+                            className="text-[#00CC66] hover:text-[#00AA55] border-[#333333]"
+                            onClick={() => openPOSheet(quote.id)}
                           >
+                            <FileText className="size-3.5 mr-1" />
                             Enter PO
                           </Button>
                         )}
@@ -438,6 +506,94 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
           })}
         </div>
       )}
+
+      {/* Enter PO Sheet */}
+      <Sheet open={poSheetOpen} onOpenChange={(open) => { setPoSheetOpen(open); if (!open) setPoQuoteId(null); }}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle>Enter Purchase Order</SheetTitle>
+            <SheetDescription>
+              Enter the customer PO received for this approved quote.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-4 px-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="qpo-number">PO Number *</Label>
+              <Input
+                id="qpo-number"
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                placeholder="e.g. PO-12345"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qpo-date">PO Date</Label>
+              <Input
+                id="qpo-date"
+                type="date"
+                value={poDate}
+                onChange={(e) => setPoDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qpo-issuer">PO Issuer</Label>
+              <Input
+                id="qpo-issuer"
+                value={poIssuer}
+                onChange={(e) => setPoIssuer(e.target.value)}
+                placeholder="Who issued this PO?"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              {poQuoteId && (() => {
+                const quote = quotes.find(q => q.id === poQuoteId);
+                if (!quote) return null;
+                const { sites: siteList, hasLinks } = getSitesForQuote(quote.customer.id);
+                return (
+                  <>
+                    {!hasLinks && siteList.length > 0 && (
+                      <p className="text-[10px] text-[#FF9900]">No sites linked to this customer. Showing all sites.</p>
+                    )}
+                    <Select value={poSiteId} onValueChange={(v) => setPoSiteId(v ?? "")}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select site (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">-- None --</SelectItem>
+                        {siteList.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.siteName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </>
+                );
+              })()}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qpo-notes">Notes</Label>
+              <Textarea
+                id="qpo-notes"
+                value={poNotes}
+                onChange={(e) => setPoNotes(e.target.value)}
+                rows={3}
+                placeholder="Optional notes"
+              />
+            </div>
+            <SheetFooter>
+              <Button
+                onClick={handleSubmitPO}
+                disabled={submittingPO || !poNumber.trim()}
+              >
+                {submittingPO ? "Creating..." : "Create PO"}
+              </Button>
+            </SheetFooter>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Revise Quote Dialog */}
       <Sheet open={reviseOpen} onOpenChange={(open) => { setReviseOpen(open); if (!open) { setReviseQuoteId(null); setReviseSelectedLines(new Set()); } }}>

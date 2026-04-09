@@ -110,7 +110,7 @@ export async function POST() {
       const existingFragments =
         ticket.evidenceFragments as ExistingFragment[];
 
-      // ── 1. Create evidence from Events ────────────────────────────────
+      // -- 1. Create evidence from Events --
       for (const event of ticket.events) {
         const mapping =
           EVENT_TO_EVIDENCE[event.eventType as string];
@@ -128,19 +128,19 @@ export async function POST() {
         await prisma.evidenceFragment.create({
           data: {
             ticketId: ticket.id,
-            fragmentType: mapping.evidenceType,
-            sourceType: mapping.sourceType,
+            sourceType: mapping.sourceType as any,
             sourceRef: eventRef,
+            timestamp: event.timestamp,
+            fragmentType: mapping.evidenceType as any,
             fragmentText:
               event.notes ??
               `${event.eventType} at ${(event.timestamp as Date).toISOString()}`,
-            timestamp: event.timestamp,
           },
         });
         evidenceCreated++;
       }
 
-      // ── 2. Create evidence from IngestionLinks (emails/WhatsApp) ──────
+      // -- 2. Create evidence from IngestionLinks (emails/WhatsApp) --
       for (const link of ticket.ingestionLinks) {
         // Skip links that already have an evidence fragment attached
         if (link.evidenceFragmentId) continue;
@@ -187,12 +187,12 @@ export async function POST() {
         const fragment = await prisma.evidenceFragment.create({
           data: {
             ticketId: ticket.id,
-            fragmentType: evidenceType,
-            sourceType,
+            sourceType: sourceType as any,
             sourceRef: linkRef,
+            timestamp: new Date(),
+            fragmentType: evidenceType as any,
             fragmentText:
               text.length > 2000 ? text.substring(0, 2000) : text,
-            timestamp: new Date(),
           },
         });
         evidenceCreated++;
