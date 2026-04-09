@@ -1,15 +1,21 @@
-// Email poller — syncs emails and runs background automation every 10 minutes
-// NOTE: Auto-linking is DISABLED. Everything lands in inbox for manual triage.
+// Email poller + automation runner — runs every 10 minutes
+// Syncs emails, generates tasks, builds evidence
 const BASE = "http://localhost:3000";
 
 async function poll() {
   const now = new Date().toLocaleTimeString("en-GB");
   try {
-    // Sync emails only (no auto-link, no auto-action)
+    // Sync emails (no auto-link)
     await fetch(`${BASE}/api/automation/sync/outlook`, { method: "POST" });
 
-    // Auto-progress tickets that have clear state changes
+    // Auto-progress tickets
     await fetch(`${BASE}/api/automation/auto-progress`, { method: "POST" });
+
+    // Generate/close tasks based on ticket state
+    await fetch(`${BASE}/api/automation/generate-tasks`, { method: "POST" });
+
+    // Build evidence from events and linked items
+    await fetch(`${BASE}/api/automation/build-evidence`, { method: "POST" });
 
     console.log(`[${now}] Poll complete`);
   } catch (e) {
@@ -21,4 +27,4 @@ async function poll() {
 poll();
 setInterval(poll, 10 * 60 * 1000);
 
-console.log("Email poller started — running every 10 minutes");
+console.log("Poller started — sync + tasks + evidence every 10 minutes");

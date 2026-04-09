@@ -72,10 +72,12 @@ function fmtMoney(n: number): string {
 const INPUT_CLS = "h-7 text-xs px-1.5 bg-transparent border border-transparent hover:border-[#444] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0]";
 const NUM_CLS = `${INPUT_CLS} w-20 text-right tabular-nums`;
 
-function InlineLineRow({ line, onClickRow, onSaved }: {
+function InlineLineRow({ line, onClickRow, onSaved, selected, onToggleSelect }: {
   line: TicketLine;
   onClickRow: () => void;
   onSaved: () => void;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const [desc, setDesc] = useState("");
   const [qtyVal, setQtyVal] = useState("");
@@ -168,6 +170,11 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
 
   return (
     <TableRow className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""}`}>
+      {onToggleSelect && (
+        <TableCell className="px-1 w-8">
+          <input type="checkbox" checked={!!selected} onChange={onToggleSelect} className="accent-[#FF6600]" />
+        </TableCell>
+      )}
       <TableCell className="p-0 max-w-[250px]">
         <input value={desc} onChange={(e) => setDesc(e.target.value)} onBlur={onBlurDesc} onKeyDown={kd}
           className={`${INPUT_CLS} w-full font-medium`} />
@@ -615,7 +622,7 @@ export function TicketDetail({
     setCreatingInvoice(true);
     try {
       const lineIds = selectedLineIds.size > 0 ? [...selectedLineIds] : undefined;
-      const res = await fetch(`/api/tickets/${ticket.id}/invoices`, {
+      const res = await fetch(`/api/tickets/${ticket.id}/generate-invoice-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1288,6 +1295,8 @@ export function TicketDetail({
                         line={line}
                         onClickRow={() => { setEditingLine(line); setEditSheetOpen(true); }}
                         onSaved={() => { router.refresh(); fetch(`/api/tickets/${ticket.id}/commercial-summary`).then(r => r.ok ? r.json() : null).then(d => setSummary(d)); }}
+                        selected={selectedLineIds.has(line.id)}
+                        onToggleSelect={() => toggleLineSelect(line.id)}
                       />
                     </React.Fragment>
                   ))

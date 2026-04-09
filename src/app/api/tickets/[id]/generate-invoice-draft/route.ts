@@ -9,8 +9,10 @@ export async function POST(
     const body = await request.json();
     const {
       customerId,
+      siteId,
       invoiceType = "STANDARD",
       notes,
+      lineIds,
     } = body;
 
     const ticket = await prisma.ticket.findUnique({
@@ -81,11 +83,11 @@ export async function POST(
       }
     }
 
-    // Build invoice lines from priced ticket lines
-    const pricedLines = ticket.lines.filter(
-      (line) =>
-        line.actualSaleUnit !== null || line.actualSaleTotal !== null
-    );
+    // Build invoice lines — use selected lines if provided, otherwise all priced lines
+    const pricedLines = ticket.lines.filter((line) => {
+      if (lineIds && lineIds.length > 0) return lineIds.includes(line.id);
+      return line.actualSaleUnit !== null || line.actualSaleTotal !== null;
+    });
 
     const totalSell = pricedLines.reduce(
       (sum, line) => sum + Number(line.actualSaleTotal || 0),
