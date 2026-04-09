@@ -121,7 +121,6 @@ export async function POST(request: Request) {
           customerId,
           siteId: siteId || undefined,
           siteCommercialLinkId: siteCommercialLinkId || undefined,
-          quoteId: resolvedQuoteId,
           issuedByContactId: issuedByContactId || undefined,
           issuedBy: issuedBy || undefined,
           poNo,

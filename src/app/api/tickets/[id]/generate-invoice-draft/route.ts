@@ -97,14 +97,23 @@ export async function POST(
     const invoiceNo = `INV-${Date.now()}`;
     const resolvedCustomerId = customerId || ticket.payingCustomerId;
 
+    // Auto-pull PO reference from linked CustomerPOs
+    const linkedPO = await prisma.customerPO.findFirst({
+      where: { ticketId: id },
+      orderBy: { createdAt: "desc" },
+      select: { poNo: true },
+    });
+    const poRef = linkedPO?.poNo || null;
+
     const invoice = await prisma.$transaction(async (tx) => {
       const created = await tx.salesInvoice.create({
         data: {
           ticketId: id,
           invoiceNo,
           customerId: resolvedCustomerId,
-          siteId: ticket.siteId,
+          siteId: siteId || ticket.siteId,
           siteCommercialLinkId: ticket.siteCommercialLinkId,
+          poNo: poRef,
           invoiceType,
           status: "DRAFT",
           totalSell,
