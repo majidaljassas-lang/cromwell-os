@@ -147,8 +147,17 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
         <input value={desc} onChange={(e) => setDesc(e.target.value)} onBlur={onBlurDesc} onKeyDown={kd}
           className={`${INPUT_CLS} w-full font-medium`} />
       </TableCell>
-      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate cursor-pointer p-1" onClick={onClickRow}>
-        {line.supplierName || "—"}
+      <TableCell className="p-0 max-w-[100px]">
+        <input
+          defaultValue={line.supplierName || ""}
+          placeholder="—"
+          className={`${INPUT_CLS} w-full text-[10px] text-[#888888]`}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v !== (line.supplierName || "")) saveField("supplierName", v || undefined);
+          }}
+          onKeyDown={kd}
+        />
       </TableCell>
       <TableCell className="p-0">
         <input type="number" step="0.01" value={qtyVal} onChange={(e) => setQtyVal(e.target.value)} onBlur={onBlurQty} onKeyDown={kd}

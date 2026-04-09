@@ -98,6 +98,29 @@ export async function PATCH(
       allowed.status = body.status;
     }
 
+    // Auto-create or link supplier when supplierName is set
+    if (allowed.supplierName && !allowed.supplierId) {
+      const trimmed = allowed.supplierName.trim();
+      allowed.supplierName = trimmed;
+      // Try exact match first, then contains match for partial names
+      const existingSupplier = await prisma.supplier.findFirst({
+        where: { name: { equals: trimmed, mode: "insensitive" } },
+      }) || await prisma.supplier.findFirst({
+        where: { name: { contains: trimmed, mode: "insensitive" } },
+      }) || await prisma.supplier.findFirst({
+        where: { name: { startsWith: trimmed.split(" ")[0], mode: "insensitive" } },
+      });
+      if (existingSupplier) {
+        allowed.supplierId = existingSupplier.id;
+        allowed.supplierName = existingSupplier.name; // Use canonical name
+      } else {
+        const newSupplier = await prisma.supplier.create({
+          data: { name: trimmed },
+        });
+        allowed.supplierId = newSupplier.id;
+      }
+    }
+
     const line = await prisma.ticketLine.update({
       where: { id },
       data: allowed,

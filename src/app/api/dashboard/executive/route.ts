@@ -5,104 +5,221 @@ export async function GET() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // ── ROW 1: Action cards ──────────────────────────────────────────────────
 
     const [
-      readyToInvoiceLines,
-      openRecoveryCasesData,
-      activePOs,
-      invoicedTicketIds,
-      absorbedThisMonth,
-      openRecoveryCases,
+      inboxCount,
+      openTickets,
+      quotesAwaitingResponse,
+      posAwaitingTickets,
+      deliveriesExpected,
+      invoicesToSend,
+      overdueInvoices,
+      paymentsThisMonthData,
+
+      // ── ROW 2: Financial summary ────────────────────────────────────────────
+      revenueInvoices,
+      costBillLines,
       cashSalesData,
-      unallocatedLines,
-      recoverableRevenueLines,
+      outstandingInvoices,
+
+      // ── ROW 3: Operations alerts ────────────────────────────────────────────
+      inboxNeedsTriage,
+      ticketsNoLines,
+      linesNoCost,
+      ordersNotAcknowledged,
+      deliveriesOverdue,
+      billsUnmatched,
+      returnsAwaitingCredit,
     ] = await Promise.all([
-      prisma.ticketLine.findMany({
+      // 1. Inbox — items needing triage
+      prisma.ingestionEvent.count({
+        where: { status: { in: ["PARSED", "CLASSIFIED", "NEEDS_TRIAGE"] } },
+      }),
+
+      // 2. Open Tickets — not CLOSED or INVOICED
+      prisma.ticket.count({
+        where: { status: { notIn: ["CLOSED", "INVOICED"] as any } },
+      }),
+
+      // 3. Quotes awaiting response — status SENT
+      prisma.quote.count({
+        where: { status: "SENT" },
+      }),
+
+      // 4. POs Awaiting — tickets where poRequired = true and no CustomerPO linked
+      prisma.ticket.count({
         where: {
-          ticket: {
-            status: { in: ["VERIFIED", "LOCKED"] },
-            revenueState: { in: ["OPERATIONAL", "REALISED"] },
-          },
-          actualSaleTotal: { not: null },
+          poRequired: true,
+          customerPOs: { none: {} },
+          status: { notIn: ["CLOSED", "INVOICED"] as any },
         },
-        select: { actualSaleTotal: true },
       }),
-      prisma.recoveryCase.findMany({
-        where: { recoveryStatus: { not: "CLOSED" } },
-        select: { stuckValue: true },
+
+      // 5. Deliveries Expected — procurement orders ORDERED or ACKNOWLEDGED
+      prisma.procurementOrder.count({
+        where: { status: { in: ["ORDERED", "ACKNOWLEDGED"] } },
       }),
-      prisma.customerPO.findMany({
-        where: { status: { not: "CLOSED" } },
-        select: { poRemainingValue: true },
+
+      // 6. Invoices to Send — DRAFT invoices
+      prisma.salesInvoice.count({
+        where: { status: "DRAFT" },
       }),
+
+      // 7. Overdue Invoices — SENT and issuedAt > 30 days ago
+      prisma.salesInvoice.count({
+        where: {
+          status: "SENT",
+          issuedAt: { lt: thirtyDaysAgo },
+        },
+      }),
+
+      // 8. Payments Received This Month — invoices paid this month
+      prisma.salesInvoice.findMany({
+        where: {
+          paidAt: { gte: startOfMonth, lt: endOfMonth },
+        },
+        select: { totalSell: true },
+      }),
+
+      // ── ROW 2 queries ─────────────────────────────────────────────────────
+
+      // Revenue — total invoiced this month
       prisma.salesInvoice.findMany({
         where: {
           issuedAt: { gte: startOfMonth, lt: endOfMonth },
-          ticket: {
-            status: "INVOICED",
-            revenueState: { in: ["OPERATIONAL", "REALISED"] },
+          status: { not: "DRAFT" },
+        },
+        select: { totalSell: true },
+      }),
+
+      // Costs — supplier bill lines this month
+      prisma.supplierBillLine.findMany({
+        where: {
+          supplierBill: {
+            billDate: { gte: startOfMonth, lt: endOfMonth },
           },
         },
-        select: { ticketId: true },
+        select: { lineTotal: true },
       }),
-      prisma.absorbedCostAllocation.findMany({
-        where: { createdAt: { gte: startOfMonth, lt: endOfMonth } },
-        select: { amount: true },
-      }),
-      prisma.recoveryCase.count({ where: { recoveryStatus: { not: "CLOSED" } } }),
+
+      // Cash Sales this month
       prisma.cashSale.findMany({
         where: { receivedAt: { gte: startOfMonth, lt: endOfMonth } },
         select: { receivedAmount: true },
       }),
-      prisma.supplierBillLine.findMany({
-        where: { allocationStatus: "UNALLOCATED" },
-        select: { lineTotal: true },
+
+      // Outstanding Receivables — unpaid invoices (SENT status)
+      prisma.salesInvoice.findMany({
+        where: { status: "SENT" },
+        select: { totalSell: true },
       }),
-      // Recoverable Revenue: sale totals from RECOVERY_PIPELINE tickets (shown separately)
-      prisma.ticketLine.findMany({
+
+      // ── ROW 3 queries ─────────────────────────────────────────────────────
+
+      // Inbox items needing triage (same as row 1 inbox, reuse)
+      prisma.ingestionEvent.count({
+        where: { status: { in: ["PARSED", "CLASSIFIED", "NEEDS_TRIAGE"] } },
+      }),
+
+      // Tickets with no lines (empty tickets)
+      prisma.ticket.count({
         where: {
-          ticket: { revenueState: "RECOVERY_PIPELINE" },
-          actualSaleTotal: { not: null },
+          status: { notIn: ["CLOSED", "INVOICED"] as any },
+          lines: { none: {} },
         },
-        select: { actualSaleTotal: true },
+      }),
+
+      // Lines with no cost (unpriced) — active ticket lines with no actualCostTotal
+      prisma.ticketLine.count({
+        where: {
+          actualCostTotal: null,
+          ticket: { status: { notIn: ["CLOSED", "INVOICED", "CAPTURED"] as any } },
+        },
+      }),
+
+      // Orders not acknowledged by supplier
+      prisma.procurementOrder.count({
+        where: { status: "ORDERED" },
+      }),
+
+      // Deliveries overdue — procurement orders with deliveryDateExpected in the past and not delivered
+      prisma.procurementOrder.count({
+        where: {
+          status: { in: ["ORDERED", "ACKNOWLEDGED"] },
+          deliveryDateExpected: { lt: now },
+        },
+      }),
+
+      // Bills unmatched
+      prisma.supplierBillLine.count({
+        where: { allocationStatus: "UNALLOCATED" },
+      }),
+
+      // Returns awaiting credit
+      prisma.returnLine.count({
+        where: { status: "PENDING" },
       }),
     ]);
 
-    const readyToInvoice = readyToInvoiceLines.reduce((sum, l) => sum + Number(l.actualSaleTotal ?? 0), 0);
-    const stuckRevenue = openRecoveryCasesData.reduce((sum, r) => sum + Number(r.stuckValue), 0);
-    const activePORemaining = activePOs.reduce((sum, po) => sum + Number(po.poRemainingValue), 0);
-
-    const invoicedTicketIdSet = [...new Set(invoicedTicketIds.map((i) => i.ticketId))];
-    let grossProfitThisMonth = 0;
-    if (invoicedTicketIdSet.length > 0) {
-      const invoicedLines = await prisma.ticketLine.findMany({
-        where: { ticketId: { in: invoicedTicketIdSet } },
-        select: { actualSaleTotal: true, actualCostTotal: true },
-      });
-      grossProfitThisMonth = invoicedLines.reduce(
-        (sum, l) => sum + Number(l.actualSaleTotal ?? 0) - Number(l.actualCostTotal ?? 0),
-        0
-      );
-    }
-
-    const absorbedCostThisMonth = absorbedThisMonth.reduce((sum, a) => sum + Number(a.amount), 0);
-    const cashSalesThisMonth = cashSalesData.reduce((sum, c) => sum + Number(c.receivedAmount), 0);
-    const unallocatedCostValue = unallocatedLines.reduce((sum, l) => sum + Number(l.lineTotal), 0);
-    const recoverableRevenue = recoverableRevenueLines.reduce((sum, l) => sum + Number(l.actualSaleTotal ?? 0), 0);
+    // Compute aggregates
+    const paymentsThisMonth = paymentsThisMonthData.reduce(
+      (sum: number, i: { totalSell: unknown }) => sum + Number(i.totalSell ?? 0), 0
+    );
+    const revenue = revenueInvoices.reduce(
+      (sum: number, i: { totalSell: unknown }) => sum + Number(i.totalSell ?? 0), 0
+    );
+    const costs = costBillLines.reduce(
+      (sum: number, l: { lineTotal: unknown }) => sum + Number(l.lineTotal ?? 0), 0
+    );
+    const grossProfit = revenue - costs;
+    const marginPct = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const cashSalesThisMonth = cashSalesData.reduce(
+      (sum: number, c: { receivedAmount: unknown }) => sum + Number(c.receivedAmount ?? 0), 0
+    );
+    const outstandingReceivables = outstandingInvoices.reduce(
+      (sum: number, i: { totalSell: unknown }) => sum + Number(i.totalSell ?? 0), 0
+    );
 
     return Response.json({
-      readyToInvoice,
-      stuckRevenue,
-      activePORemaining,
-      grossProfitThisMonth,
-      absorbedCostThisMonth,
-      openRecoveryCases,
-      cashSalesThisMonth,
-      unallocatedCostValue,
-      recoverableRevenue,
+      // Row 1: Action cards
+      actionCards: {
+        inboxCount,
+        openTickets,
+        quotesAwaitingResponse,
+        posAwaiting: posAwaitingTickets,
+        deliveriesExpected,
+        invoicesToSend,
+        overdueInvoices,
+        paymentsThisMonth,
+      },
+      // Row 2: Financial summary
+      financials: {
+        revenue,
+        costs,
+        grossProfit,
+        marginPct,
+        cashSalesThisMonth,
+        outstandingReceivables,
+      },
+      // Row 3: Operations alerts
+      alerts: {
+        inboxNeedsTriage,
+        ticketsNoLines,
+        linesNoCost,
+        ordersNotAcknowledged,
+        deliveriesOverdue,
+        billsUnmatched,
+        returnsAwaitingCredit,
+      },
     });
   } catch (error) {
     console.error("Failed to compute executive dashboard:", error);
-    return Response.json({ error: "Failed to compute executive dashboard" }, { status: 500 });
+    return Response.json(
+      { error: "Failed to compute executive dashboard" },
+      { status: 500 }
+    );
   }
 }

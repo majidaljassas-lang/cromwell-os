@@ -1,218 +1,400 @@
 "use client";
 
+import Link from "next/link";
 import {
-  DollarSign,
+  Inbox,
+  Ticket,
+  MessageSquareQuote,
+  ClipboardList,
+  Truck,
+  FileText,
   AlertTriangle,
-  FileBarChart,
+  Banknote,
   TrendingUp,
   ArrowDownCircle,
-  Banknote,
-  Clock,
-  AlertCircle,
+  PieChart,
+  DollarSign,
+  Wallet,
+  Receipt,
+  Package,
+  ShieldAlert,
+  FileWarning,
+  CircleDollarSign,
+  Undo2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { type ReactNode } from "react";
 
-type Decimal = { toString(): string } | string | number | null;
+// ── Types ────────────────────────────────────────────────────────────────────
 
-function money(val: Decimal): string {
+type ActionCardsData = {
+  inboxCount: number;
+  openTickets: number;
+  quotesAwaitingResponse: number;
+  posAwaiting: number;
+  deliveriesExpected: number;
+  invoicesToSend: number;
+  overdueInvoices: number;
+  paymentsThisMonth: number;
+};
+
+type FinancialsData = {
+  revenue: number;
+  costs: number;
+  grossProfit: number;
+  marginPct: number;
+  cashSalesThisMonth: number;
+  outstandingReceivables: number;
+};
+
+type AlertsData = {
+  inboxNeedsTriage: number;
+  ticketsNoLines: number;
+  linesNoCost: number;
+  ordersNotAcknowledged: number;
+  deliveriesOverdue: number;
+  billsUnmatched: number;
+  returnsAwaitingCredit: number;
+};
+
+type DashboardData = {
+  actionCards: ActionCardsData;
+  financials: FinancialsData;
+  alerts: AlertsData;
+} | null;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function money(val: number | null | undefined): string {
   if (val === null || val === undefined) return "\u2014";
-  return `\u00A3${Number(val || 0).toLocaleString("en-GB", {
+  return `\u00A3${Number(val).toLocaleString("en-GB", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-type ExecutiveData = {
-  readyToInvoice: Decimal;
-  stuckRevenue: Decimal;
-  activePORemaining: Decimal;
-  grossProfitThisMonth: Decimal;
-  absorbedCostThisMonth: Decimal;
-  cashSalesThisMonth: Decimal;
-  openRecoveryCases: number | null;
-  unallocatedCostValue: Decimal;
-};
+function pct(val: number | null | undefined): string {
+  if (val === null || val === undefined) return "\u2014";
+  return `${Number(val).toFixed(1)}%`;
+}
 
-type OperationsData = {
-  openInquiriesNoSite: number | null;
-  openInquiriesNoCustomer: number | null;
-  ticketsAwaitingCost: number | null;
-  ticketsAwaitingPO: number | null;
-  ticketsMissingEvidence: number | null;
-  unmatchedSupplierBills: number | null;
-  returnsNotCredited: number | null;
-  absorbedCostUnresolved: number | null;
-};
+// ── Sub-components ───────────────────────────────────────────────────────────
 
-type KpiCardDef = {
+function ActionCard({
+  label,
+  value,
+  icon,
+  href,
+  isAlert,
+}: {
   label: string;
   value: string;
-  tint: string;
-  href?: string;
   icon: ReactNode;
-};
-
-type AlertCardDef = {
-  label: string;
-  count: number;
-};
-
-export function DashboardView({
-  executive,
-  operations,
-}: {
-  executive: ExecutiveData | null;
-  operations: OperationsData | null;
+  href?: string;
+  isAlert?: boolean;
 }) {
-  const kpiCards: KpiCardDef[] = executive
-    ? [
-        {
-          label: "Ready to Invoice",
-          value: money(executive.readyToInvoice),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/invoices",
-          icon: <DollarSign className="size-5 text-[#FF6600]" />,
-        },
-        {
-          label: "Stuck Revenue",
-          value: money(executive.stuckRevenue),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/recovery",
-          icon: <AlertTriangle className="size-5 text-[#FF3333]" />,
-        },
-        {
-          label: "Active PO Remaining",
-          value: money(executive.activePORemaining),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/po-register",
-          icon: <FileBarChart className="size-5 text-[#3399FF]" />,
-        },
-        {
-          label: "Gross Profit This Month",
-          value: money(executive.grossProfitThisMonth),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          icon: <TrendingUp className="size-5 text-[#00CC66]" />,
-        },
-        {
-          label: "Absorbed Cost This Month",
-          value: money(executive.absorbedCostThisMonth),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/procurement",
-          icon: <ArrowDownCircle className="size-5 text-[#FF9900]" />,
-        },
-        {
-          label: "Cash Sales This Month",
-          value: money(executive.cashSalesThisMonth),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          icon: <Banknote className="size-5 text-[#FF6600]" />,
-        },
-        {
-          label: "Open Recovery Cases",
-          value: String(executive.openRecoveryCases ?? "\u2014"),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/recovery",
-          icon: <Clock className={`size-5 ${(executive.openRecoveryCases ?? 0) > 0 ? "text-[#FF3333]" : "text-[#FF6600]"}`} />,
-        },
-        {
-          label: "Unallocated Cost Value",
-          value: money(executive.unallocatedCostValue),
-          tint: "bg-[#1A1A1A] border-[#333333]",
-          href: "/procurement",
-          icon: <AlertCircle className={`size-5 ${Number(executive.unallocatedCostValue?.toString() ?? 0) > 0 ? "text-[#FF3333]" : "text-[#FF6600]"}`} />,
-        },
-      ]
-    : [];
+  const isZero = value === "0" || value === "\u00A30.00";
+  const borderClass = isAlert
+    ? "border-l-4 border-l-[#FF3333]"
+    : isZero
+      ? "border-l-4 border-l-[#333333]"
+      : "border-l-4 border-l-[#FF6600]";
 
-  const alertCards: AlertCardDef[] = operations
-    ? [
-        { label: "Inquiries: No Site", count: operations.openInquiriesNoSite ?? 0 },
-        { label: "Inquiries: No Customer", count: operations.openInquiriesNoCustomer ?? 0 },
-        { label: "Tickets: Awaiting Cost", count: operations.ticketsAwaitingCost ?? 0 },
-        { label: "Tickets: Awaiting PO", count: operations.ticketsAwaitingPO ?? 0 },
-        { label: "Tickets: Missing Evidence", count: operations.ticketsMissingEvidence ?? 0 },
-        { label: "Costs: Unmatched Bills", count: operations.unmatchedSupplierBills ?? 0 },
-        { label: "Costs: Returns Not Credited", count: operations.returnsNotCredited ?? 0 },
-        { label: "Costs: Absorbed Unresolved", count: operations.absorbedCostUnresolved ?? 0 },
-      ]
-    : [];
+  const content = (
+    <Card
+      className={`${borderClass} rounded-none shadow-none bg-[#1A1A1A] border-[#333333]`}
+    >
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center gap-2 mb-1">
+          {icon}
+          <p className="text-[10px] font-medium uppercase tracking-widest text-[#888888]">
+            {label}
+          </p>
+        </div>
+        <p
+          className={`text-2xl font-bold bb-mono ${
+            isZero ? "text-[#555555]" : isAlert ? "text-[#FF3333]" : "text-[#E0E0E0]"
+          }`}
+        >
+          {value}
+        </p>
+      </CardContent>
+    </Card>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className="block hover:bg-[#222222] transition-colors">
+        {content}
+      </Link>
+    );
+  }
+  return content;
+}
+
+function FinancialCard({
+  label,
+  value,
+  icon,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  icon: ReactNode;
+  highlight?: "green" | "red" | "orange";
+}) {
+  const isZero = value === "\u00A30.00" || value === "0.0%";
+  const textColor = isZero
+    ? "text-[#555555]"
+    : highlight === "green"
+      ? "text-[#00CC66]"
+      : highlight === "red"
+        ? "text-[#FF3333]"
+        : highlight === "orange"
+          ? "text-[#FF9900]"
+          : "text-[#E0E0E0]";
 
   return (
-    <div className="space-y-6">
-      {/* Executive KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {kpiCards.map((card) => {
-          const inner = (
-            <Card
-              key={card.label}
-              className={`border ${card.tint} rounded-none shadow-none`}
-            >
-              <CardContent className="pt-4 pb-4">
-                <div className="flex items-center gap-2 mb-1">
-                  {card.icon}
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#888888]">
-                    {card.label}
-                  </p>
-                </div>
-                <p className="text-xl font-bold bb-mono text-[#E0E0E0]">{card.value}</p>
-              </CardContent>
-            </Card>
-          );
-          if (card.href) {
-            return (
-              <a key={card.label} href={card.href} className="block hover:bg-[#222222] transition-colors">
-                {inner}
-              </a>
-            );
-          }
-          return <div key={card.label}>{inner}</div>;
-        })}
+    <Card className="rounded-none shadow-none bg-[#1A1A1A] border-[#333333]">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center gap-2 mb-1">
+          {icon}
+          <p className="text-[10px] font-medium uppercase tracking-widest text-[#888888]">
+            {label}
+          </p>
+        </div>
+        <p className={`text-xl font-bold bb-mono ${textColor}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AlertCard({
+  label,
+  count,
+  icon,
+  severity,
+}: {
+  label: string;
+  count: number;
+  icon: ReactNode;
+  severity: "orange" | "red";
+}) {
+  const borderColor =
+    severity === "red" ? "border-l-[#FF3333]" : "border-l-[#FF9900]";
+  const textColor =
+    severity === "red" ? "text-[#FF3333]" : "text-[#FF9900]";
+
+  return (
+    <Card
+      className={`border-l-4 ${borderColor} rounded-none shadow-none bg-[#1A1A1A] border-[#333333]`}
+    >
+      <CardContent className="pt-3 pb-3">
+        <div className="flex items-center gap-2 mb-1">
+          {icon}
+          <p className="text-[10px] font-medium uppercase tracking-widest text-[#E0E0E0]">
+            {label}
+          </p>
+        </div>
+        <p className={`text-xl font-bold bb-mono ${textColor}`}>{count}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+
+export function DashboardView({ executive }: { executive: DashboardData }) {
+  if (!executive) {
+    return (
+      <Card className="rounded-none shadow-none bg-[#1A1A1A] border-[#333333]">
+        <CardContent className="py-12 text-center text-[#888888]">
+          Unable to load dashboard data. Please check the API routes are running.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const { actionCards, financials, alerts } = executive;
+
+  // Build active alerts (only show if count > 0)
+  const activeAlerts: { label: string; count: number; icon: ReactNode; severity: "orange" | "red" }[] = [];
+
+  if (alerts.inboxNeedsTriage > 0) {
+    activeAlerts.push({
+      label: "Inbox Needs Triage",
+      count: alerts.inboxNeedsTriage,
+      icon: <Inbox className="size-4 text-[#FF9900]" />,
+      severity: "orange",
+    });
+  }
+  if (alerts.ticketsNoLines > 0) {
+    activeAlerts.push({
+      label: "Tickets With No Lines",
+      count: alerts.ticketsNoLines,
+      icon: <FileWarning className="size-4 text-[#FF9900]" />,
+      severity: "orange",
+    });
+  }
+  if (alerts.linesNoCost > 0) {
+    activeAlerts.push({
+      label: "Lines With No Cost",
+      count: alerts.linesNoCost,
+      icon: <CircleDollarSign className="size-4 text-[#FF9900]" />,
+      severity: "orange",
+    });
+  }
+  if (alerts.ordersNotAcknowledged > 0) {
+    activeAlerts.push({
+      label: "Orders Not Acknowledged",
+      count: alerts.ordersNotAcknowledged,
+      icon: <Package className="size-4 text-[#FF9900]" />,
+      severity: "orange",
+    });
+  }
+  if (alerts.deliveriesOverdue > 0) {
+    activeAlerts.push({
+      label: "Deliveries Overdue",
+      count: alerts.deliveriesOverdue,
+      icon: <Truck className="size-4 text-[#FF3333]" />,
+      severity: "red",
+    });
+  }
+  if (alerts.billsUnmatched > 0) {
+    activeAlerts.push({
+      label: "Bills Unmatched",
+      count: alerts.billsUnmatched,
+      icon: <ShieldAlert className="size-4 text-[#FF9900]" />,
+      severity: "orange",
+    });
+  }
+  if (alerts.returnsAwaitingCredit > 0) {
+    activeAlerts.push({
+      label: "Returns Awaiting Credit",
+      count: alerts.returnsAwaitingCredit,
+      icon: <Undo2 className="size-4 text-[#FF3333]" />,
+      severity: "red",
+    });
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* ── ROW 1: Key Action Cards ─────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-widest text-[#888888] mb-3 bb-mono">
+          What Needs Doing
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <ActionCard
+            label="Inbox"
+            value={String(actionCards.inboxCount)}
+            icon={<Inbox className="size-5 text-[#FF6600]" />}
+            href="/inbox"
+          />
+          <ActionCard
+            label="Open Tickets"
+            value={String(actionCards.openTickets)}
+            icon={<Ticket className="size-5 text-[#3399FF]" />}
+            href="/tickets"
+          />
+          <ActionCard
+            label="Quotes Awaiting Response"
+            value={String(actionCards.quotesAwaitingResponse)}
+            icon={<MessageSquareQuote className="size-5 text-[#FF9900]" />}
+            href="/tickets?filter=quotes-sent"
+          />
+          <ActionCard
+            label="POs Awaiting"
+            value={String(actionCards.posAwaiting)}
+            icon={<ClipboardList className="size-5 text-[#FF9900]" />}
+            href="/po-register"
+          />
+          <ActionCard
+            label="Deliveries Expected"
+            value={String(actionCards.deliveriesExpected)}
+            icon={<Truck className="size-5 text-[#3399FF]" />}
+          />
+          <ActionCard
+            label="Invoices to Send"
+            value={String(actionCards.invoicesToSend)}
+            icon={<FileText className="size-5 text-[#00CC66]" />}
+            href="/invoices"
+          />
+          <ActionCard
+            label="Overdue Invoices"
+            value={String(actionCards.overdueInvoices)}
+            icon={<AlertTriangle className="size-5 text-[#FF3333]" />}
+            href="/invoices"
+            isAlert={actionCards.overdueInvoices > 0}
+          />
+          <ActionCard
+            label="Payments This Month"
+            value={money(actionCards.paymentsThisMonth)}
+            icon={<Banknote className="size-5 text-[#00CC66]" />}
+          />
+        </div>
       </div>
 
-      {/* Operations Alert Grid */}
-      {alertCards.length > 0 && (
+      {/* ── ROW 2: Financial Summary ────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-widest text-[#888888] mb-3 bb-mono">
+          Financial Summary &mdash; This Month
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          <FinancialCard
+            label="Revenue"
+            value={money(financials.revenue)}
+            icon={<TrendingUp className="size-5 text-[#00CC66]" />}
+          />
+          <FinancialCard
+            label="Costs"
+            value={money(financials.costs)}
+            icon={<ArrowDownCircle className="size-5 text-[#FF9900]" />}
+          />
+          <FinancialCard
+            label="Gross Profit"
+            value={money(financials.grossProfit)}
+            icon={<DollarSign className="size-5 text-[#00CC66]" />}
+            highlight={financials.grossProfit > 0 ? "green" : financials.grossProfit < 0 ? "red" : undefined}
+          />
+          <FinancialCard
+            label="Margin %"
+            value={pct(financials.marginPct)}
+            icon={<PieChart className="size-5 text-[#3399FF]" />}
+            highlight={financials.marginPct >= 20 ? "green" : financials.marginPct > 0 ? "orange" : undefined}
+          />
+          <FinancialCard
+            label="Cash Sales"
+            value={money(financials.cashSalesThisMonth)}
+            icon={<Wallet className="size-5 text-[#FF6600]" />}
+          />
+          <FinancialCard
+            label="Outstanding Receivables"
+            value={money(financials.outstandingReceivables)}
+            icon={<Receipt className="size-5 text-[#FF9900]" />}
+            highlight={financials.outstandingReceivables > 0 ? "orange" : undefined}
+          />
+        </div>
+      </div>
+
+      {/* ── ROW 3: Operations Alerts (only if any active) ──────────────────── */}
+      {activeAlerts.length > 0 && (
         <div>
-          <h2 className="text-xs font-bold uppercase tracking-widest text-[#888888] mb-3 bb-mono">Operations</h2>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-[#FF9900] mb-3 bb-mono">
+            Attention Required
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {alertCards.map((card) => {
-              const active = card.count > 0;
-              return (
-                <Card
-                  key={card.label}
-                  className={`border-l-4 rounded-none shadow-none bg-[#1A1A1A] border-[#333333] ${
-                    active ? "border-l-[#FF9900]" : "border-l-[#333333]"
-                  }`}
-                >
-                  <CardContent className="pt-3 pb-3">
-                    <p
-                      className={`text-[10px] font-medium uppercase tracking-widest ${
-                        active ? "text-[#E0E0E0]" : "text-[#666666]"
-                      }`}
-                    >
-                      {card.label}
-                    </p>
-                    <p
-                      className={`text-xl font-bold bb-mono ${
-                        active ? "text-[#E0E0E0]" : "text-[#666666]"
-                      }`}
-                    >
-                      {card.count}
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {activeAlerts.map((alert) => (
+              <AlertCard
+                key={alert.label}
+                label={alert.label}
+                count={alert.count}
+                icon={alert.icon}
+                severity={alert.severity}
+              />
+            ))}
           </div>
         </div>
-      )}
-
-      {!executive && !operations && (
-        <Card className="rounded-none shadow-none bg-[#1A1A1A] border-[#333333]">
-          <CardContent className="py-12 text-center text-[#888888]">
-            Unable to load dashboard data. Please check the API routes are
-            running.
-          </CardContent>
-        </Card>
       )}
     </div>
   );
