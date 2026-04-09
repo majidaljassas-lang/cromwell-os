@@ -64,7 +64,6 @@ enum TicketLineStatus {
   READY_FOR_QUOTE
   PARTIALLY_ORDERED
   ORDERED
-  FROM_STOCK
   PARTIALLY_COSTED
   FULLY_COSTED
   INVOICED
@@ -552,7 +551,6 @@ model Contact {
   evidenceFragments    EvidenceFragment[]
   labourDrawdowns      LabourDrawdownEntry[]
   logisticsEvents      LogisticsEvent[]
-  issuedPOs            CustomerPO[]         @relation("POIssuedBy")
 
   @@index([fullName])
 }
@@ -618,16 +616,10 @@ model IngestionSource {
   externalRef         String?
   connectedAccount    String?
   accountName         String?
-  displayName         String?
-  accessToken         String?
-  refreshToken        String?
-  tokenExpiresAt      DateTime?
-  status              String?
   isActive            Boolean    @default(true)
   isHistoricalCapable Boolean    @default(false)
   connectorStatus     String?
   lastSyncAt          DateTime?
-  lastSyncCursor      String?
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
@@ -776,6 +768,7 @@ model InquiryWorkItem {
   siteCommercialLinkId String?
   customerId           String?
   requestedByContactId String?
+  ticketId             String?
   mode                 TicketMode
   status               InquiryStatus
   confidenceScore      Decimal?      @db.Decimal(5, 2)
@@ -789,16 +782,17 @@ model InquiryWorkItem {
   siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
   customer           Customer?           @relation(fields: [customerId], references: [id])
   requestedByContact Contact?            @relation("WorkItemRequestedBy", fields: [requestedByContactId], references: [id])
+  ticket             Ticket?             @relation(fields: [ticketId], references: [id])
   ingestionLinks     IngestionLink[]
 
   @@index([status])
+  @@index([ticketId])
 }
 
 // ─── TICKETS ────────────────────────────────────────────────────────────────
 
 model Ticket {
   id                        String       @id @default(uuid())
-  ticketNo                  Int          @unique @default(autoincrement())
   parentJobId               String?
   siteId                    String?
   siteCommercialLinkId      String?
@@ -828,6 +822,7 @@ model Ticket {
   requestedByContact      Contact?            @relation("TicketRequestedBy", fields: [requestedByContactId], references: [id])
   actingOnBehalfOfContact Contact?            @relation("TicketActingFor", fields: [actingOnBehalfOfContactId], references: [id])
 
+  workItems               InquiryWorkItem[]
   phases                  TicketPhase[]
   lines                   TicketLine[]
   dealSheets              DealSheet[]
@@ -949,7 +944,6 @@ model TicketLine {
   invoiceLines          SalesInvoiceLine[]
   materialsDrawdowns    MaterialsDrawdownEntry[]
   quoteLines            QuoteLine[]
-  stockUsages           StockUsage[]
 
   @@index([ticketId])
   @@index([status])
@@ -1279,14 +1273,10 @@ model CustomerPO {
   customerId              String
   siteId                  String?
   siteCommercialLinkId    String?
-  issuedByContactId       String?
-  issuedBy                String?
   poNo                    String
   poType                  CustomerPOType
   poDate                  DateTime?
   status                  String
-  invoiceNo               String?
-  vatRate                 Decimal        @default(20) @db.Decimal(5, 2)
   totalValue              Decimal?       @db.Decimal(14, 2)
   poLimitValue            Decimal?       @db.Decimal(14, 2)
   poCommittedValue        Decimal        @default(0) @db.Decimal(14, 2)
@@ -1310,12 +1300,10 @@ model CustomerPO {
   customer           Customer             @relation(fields: [customerId], references: [id])
   site               Site?                @relation(fields: [siteId], references: [id])
   siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
-  issuedByContact    Contact?             @relation("POIssuedBy", fields: [issuedByContactId], references: [id])
   lines              CustomerPOLine[]
   allocations        CustomerPOAllocation[]
   labourDrawdowns    LabourDrawdownEntry[]
   materialsDrawdowns MaterialsDrawdownEntry[]
-  cashPayments       POCashPayment[]
 
   @@index([poNo])
 }
@@ -1354,7 +1342,7 @@ model LabourDrawdownEntry {
   id                String          @id @default(uuid())
   customerPOId      String
   ticketId          String?
-  siteId            String
+  siteId            String?
   weekEndingDate    DateTime?
   workDate          DateTime
   plumberContactId  String?
@@ -1369,36 +1357,14 @@ model LabourDrawdownEntry {
   overheadValue     Decimal?        @db.Decimal(14, 2)
   grossProfitValue  Decimal?        @db.Decimal(14, 2)
   invoiceLineId     String?
-  invoiceNo         String?
-  invoiceDate       DateTime?
   status            String
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
   customerPO     CustomerPO @relation(fields: [customerPOId], references: [id])
   ticket         Ticket?    @relation(fields: [ticketId], references: [id])
-  site           Site       @relation(fields: [siteId], references: [id])
+  site           Site?      @relation(fields: [siteId], references: [id])
   plumberContact Contact?   @relation(fields: [plumberContactId], references: [id])
-
-  @@index([invoiceNo])
-}
-
-model POCashPayment {
-  id             String   @id @default(uuid())
-  customerPOId   String
-  payee          String
-  payeeType      String   @default("PLUMBER")
-  amount         Decimal  @db.Decimal(14, 2)
-  paymentDate    DateTime
-  paymentMethod  String   @default("CASH")
-  reference      String?
-  notes          String?
-  createdAt      DateTime @default(now())
-
-  customerPO CustomerPO @relation(fields: [customerPOId], references: [id])
-
-  @@index([customerPOId])
-  @@index([payeeType])
 }
 
 model MaterialsDrawdownEntry {
@@ -1450,6 +1416,7 @@ model SalesInvoice {
   site               Site?                @relation(fields: [siteId], references: [id])
   siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
   lines              SalesInvoiceLine[]
+  payments           Payment[]
   poAllocations      CustomerPOAllocation[]
   sitePackItems      SitePackItem[]
 
@@ -1473,6 +1440,23 @@ model SalesInvoiceLine {
 
   salesInvoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
   ticketLine   TicketLine   @relation(fields: [ticketLineId], references: [id])
+
+  @@index([ticketLineId])
+}
+
+model Payment {
+  id              String       @id @default(uuid())
+  salesInvoiceId  String
+  amount          Decimal      @db.Decimal(14, 2)
+  paymentDate     DateTime
+  paymentMethod   String?
+  reference       String?
+  notes           String?
+  createdAt       DateTime     @default(now())
+
+  salesInvoice    SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
+
+  @@index([salesInvoiceId])
 }
 
 // ─── EVIDENCE & EVENTS ─────────────────────────────────────────────────────
@@ -2687,70 +2671,4 @@ model BacklogCompleteness {
   updatedAt           DateTime @updatedAt
 
   @@index([caseId])
-}
-
-// ─── STOCK / RETURNS ────────────────────────────────────────────────────────
-// Temporary holding for returns and MOQ excess.
-// Items sit here until allocated to another job or returned to supplier.
-
-enum StockSourceType {
-  RETURN
-  MOQ_EXCESS
-  TRANSFER
-  OTHER
-}
-
-enum StockOutcome {
-  HOLDING
-  ALLOCATED
-  RETURNED_TO_SUPPLIER
-  WRITTEN_OFF
-}
-
-model StockItem {
-  id                String          @id @default(uuid())
-  description       String
-  productCode       String?
-  category          String?
-  qtyOnHand         Decimal         @db.Decimal(14, 4)
-  qtyOriginal       Decimal         @db.Decimal(14, 4)
-  unit              UnitOfMeasure   @default(EA)
-  costPerUnit       Decimal         @db.Decimal(14, 4)
-  sourceType        StockSourceType @default(OTHER)
-  supplierName      String?
-  originTicketId    String?
-  originTicketTitle String?
-  originBillNo      String?
-  originBillId      String?
-  outcome           StockOutcome    @default(HOLDING)
-  outcomeDate       DateTime?
-  outcomeNotes      String?
-  notes             String?
-  isActive          Boolean         @default(true)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-
-  usages StockUsage[]
-
-  @@index([description])
-  @@index([isActive])
-  @@index([sourceType])
-  @@index([outcome])
-}
-
-model StockUsage {
-  id            String   @id @default(uuid())
-  stockItemId   String
-  ticketLineId  String
-  qtyUsed       Decimal  @db.Decimal(14, 4)
-  costPerUnit   Decimal  @db.Decimal(14, 4)
-  totalCost     Decimal  @db.Decimal(14, 2)
-  notes         String?
-  createdAt     DateTime @default(now())
-
-  stockItem  StockItem  @relation(fields: [stockItemId], references: [id])
-  ticketLine TicketLine @relation(fields: [ticketLineId], references: [id])
-
-  @@index([stockItemId])
-  @@index([ticketLineId])
 }

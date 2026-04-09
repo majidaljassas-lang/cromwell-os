@@ -77,6 +77,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // Auto-resolve quoteId from ticket if not explicitly provided
+    let resolvedQuoteId = body.quoteId ?? null;
+    if (!resolvedQuoteId && ticketId) {
+      const latestQuote = await prisma.quote.findFirst({
+        where: { ticketId, status: "APPROVED" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latestQuote) {
+        resolvedQuoteId = latestQuote.id;
+      }
+    }
+
     const poRemainingValue = poLimitValue ?? totalValue ?? 0;
 
     // Use transaction so ticket + PO are created atomically
@@ -108,6 +121,7 @@ export async function POST(request: Request) {
           customerId,
           siteId: siteId || undefined,
           siteCommercialLinkId: siteCommercialLinkId || undefined,
+          quoteId: resolvedQuoteId,
           issuedByContactId: issuedByContactId || undefined,
           issuedBy: issuedBy || undefined,
           poNo,
@@ -144,29 +158,6 @@ export async function POST(request: Request) {
         },
       });
     });
-
-    // Auto-populate PO lines from quote lines if ticket has a quote
-    if (po.ticketId && poType === "STANDARD_FIXED") {
-      const quotes = await prisma.quote.findMany({
-        where: { ticketId: po.ticketId },
-        include: { lines: true },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      });
-      const quote = quotes[0];
-      if (quote && quote.lines.length > 0) {
-        await prisma.customerPOLine.createMany({
-          data: quote.lines.map((ql) => ({
-            customerPOId: po.id,
-            ticketLineId: ql.ticketLineId,
-            description: ql.description,
-            qty: ql.qty,
-            agreedUnitPrice: ql.unitPrice,
-            agreedTotal: ql.lineTotal,
-          })),
-        });
-      }
-    }
 
     return Response.json(po, { status: 201 });
   } catch (error) {

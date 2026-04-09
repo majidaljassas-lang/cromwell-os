@@ -10,7 +10,6 @@ const globalForPrisma = globalThis as unknown as {
 
 function getPool() {
   if (!globalForPrisma.pool || globalForPrisma.poolDead) {
-    // Kill old pool if it exists
     if (globalForPrisma.pool) {
       globalForPrisma.pool.end().catch(() => {});
     }
@@ -24,7 +23,6 @@ function getPool() {
       allowExitOnIdle: true,
     });
 
-    // Handle pool errors gracefully — mark as dead so next request recreates
     globalForPrisma.pool.on("error", () => {
       globalForPrisma.poolDead = true;
       globalForPrisma.prisma = undefined;
@@ -39,12 +37,18 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-// Use a getter so it auto-recreates after connection loss
-export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    if (!globalForPrisma.prisma || globalForPrisma.poolDead) {
-      globalForPrisma.prisma = createPrismaClient();
-    }
-    return (globalForPrisma.prisma as any)[prop];
+function getPrisma(): PrismaClient {
+  if (!globalForPrisma.prisma || globalForPrisma.poolDead) {
+    globalForPrisma.prisma = createPrismaClient();
+  }
+  return globalForPrisma.prisma;
+}
+
+// Export a typed getter that auto-reconnects
+export const prisma = new Proxy(createPrismaClient(), {
+  get(_target, prop, receiver) {
+    const client = getPrisma();
+    const value = Reflect.get(client, prop, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
   },
 });

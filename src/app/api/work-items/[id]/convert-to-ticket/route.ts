@@ -26,8 +26,8 @@ export async function POST(
 
     const { title, description, ...overrides } = body;
 
-    const [ticket] = await prisma.$transaction([
-      prisma.ticket.create({
+    const ticket = await prisma.$transaction(async (tx) => {
+      const newTicket = await tx.ticket.create({
         data: {
           parentJobId: workItem.parentJobId,
           siteId: workItem.siteId,
@@ -41,12 +41,15 @@ export async function POST(
           ticketMode: workItem.mode,
           revenueState: "OPERATIONAL",
         },
-      }),
-      prisma.inquiryWorkItem.update({
+      });
+
+      await tx.inquiryWorkItem.update({
         where: { id },
-        data: { status: "CONVERTED" },
-      }),
-    ]);
+        data: { status: "CONVERTED", ticketId: newTicket.id },
+      });
+
+      return newTicket;
+    });
 
     return Response.json(ticket, { status: 201 });
   } catch (error) {
