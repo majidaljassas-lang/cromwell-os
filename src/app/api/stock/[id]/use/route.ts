@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { autoProgressTicket } from "@/lib/procurement/auto-progress-ticket";
 
 export async function POST(
   request: Request,
@@ -36,7 +35,7 @@ export async function POST(
       stockUpdate.outcomeDate = new Date();
     }
 
-    // Create usage record, deduct stock, and mark ticket line as FROM_STOCK
+    // Create usage record and deduct stock
     const [usage] = await prisma.$transaction([
       prisma.stockUsage.create({
         data: {
@@ -52,24 +51,7 @@ export async function POST(
         where: { id: stockItemId },
         data: stockUpdate,
       }),
-      prisma.ticketLine.update({
-        where: { id: ticketLineId },
-        data: {
-          status: "FROM_STOCK",
-          actualCostTotal: totalCost,
-          supplierName: stockItem.supplierName || "From Stock",
-        },
-      }),
     ]);
-
-    // Auto-progress ticket status
-    const ticketLine = await prisma.ticketLine.findUnique({
-      where: { id: ticketLineId },
-      select: { ticketId: true },
-    });
-    if (ticketLine) {
-      await autoProgressTicket(ticketLine.ticketId);
-    }
 
     return Response.json(usage, { status: 201 });
   } catch (error) {

@@ -17,12 +17,12 @@ export default async function StockPage() {
     },
   });
 
-  const serialized = JSON.parse(JSON.stringify(items.map((item) => ({
+  const serialized = JSON.parse(JSON.stringify(items.map((item: typeof items[number]) => ({
     ...item,
     qtyOnHand: Number(item.qtyOnHand),
     qtyOriginal: Number(item.qtyOriginal),
     costPerUnit: Number(item.costPerUnit),
-    totalUsed: item.usages.reduce((sum, u) => sum + Number(u.qtyUsed), 0),
+    totalUsed: item.usages.reduce((sum: number, u: typeof item.usages[number]) => sum + Number(u.qtyUsed), 0),
     totalValue: Number(item.qtyOnHand) * Number(item.costPerUnit),
   }))));
 

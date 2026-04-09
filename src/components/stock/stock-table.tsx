@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Package, Pencil, Trash2, RotateCcw, ArrowRightLeft } from "lucide-react";
+import Link from "next/link";
+import { Plus, Package, Pencil, Trash2, RotateCcw, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,14 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 
 type StockItem = {
   id: string;
@@ -68,28 +77,49 @@ function sourceLabel(t: string) {
     case "RETURN": return "Return";
     case "MOQ_EXCESS": return "MOQ Excess";
     case "TRANSFER": return "Transfer";
-    default: return "Other";
+    case "OTHER": return "Other";
+    default: return t.replace(/_/g, " ");
   }
 }
 
 function sourceBadgeClass(t: string) {
   switch (t) {
-    case "RETURN": return "bg-[#FF3333]/15 text-[#FF3333]";
+    case "RETURN": return "bg-[#3399FF]/15 text-[#3399FF]";
     case "MOQ_EXCESS": return "bg-[#FF9900]/15 text-[#FF9900]";
-    case "TRANSFER": return "bg-[#3399FF]/15 text-[#3399FF]";
+    case "TRANSFER": return "bg-[#9966FF]/15 text-[#9966FF]";
+    case "OTHER": return "bg-[#888888]/15 text-[#888888]";
     default: return "bg-[#888888]/15 text-[#888888]";
   }
 }
 
-function outcomeBadge(o: string) {
+function outcomeBadgeClass(o: string) {
   switch (o) {
-    case "HOLDING": return <Badge className="text-[9px] bg-[#FF9900]/15 text-[#FF9900]">Holding</Badge>;
-    case "ALLOCATED": return <Badge className="text-[9px] bg-[#00CC66]/15 text-[#00CC66]">Allocated</Badge>;
-    case "RETURNED_TO_SUPPLIER": return <Badge className="text-[9px] bg-[#3399FF]/15 text-[#3399FF]">Returned</Badge>;
-    case "WRITTEN_OFF": return <Badge className="text-[9px] bg-[#888888]/15 text-[#888888]">Written Off</Badge>;
-    default: return <Badge variant="outline" className="text-[9px]">{o}</Badge>;
+    case "HOLDING": return "bg-[#FF9900]/15 text-[#FF9900]";
+    case "ALLOCATED": return "bg-[#00CC66]/15 text-[#00CC66]";
+    case "RETURNED_TO_SUPPLIER": return "bg-[#3399FF]/15 text-[#3399FF]";
+    case "WRITTEN_OFF": return "bg-[#888888]/15 text-[#888888]";
+    default: return "";
   }
 }
+
+function outcomeLabel(o: string) {
+  switch (o) {
+    case "HOLDING": return "Holding";
+    case "ALLOCATED": return "Allocated";
+    case "RETURNED_TO_SUPPLIER": return "Returned";
+    case "WRITTEN_OFF": return "Written Off";
+    default: return o.replace(/_/g, " ");
+  }
+}
+
+/** Derive a short ticket ref: T-{first 6 chars of ID} */
+function ticketRef(ticketId: string): string {
+  return `T-${ticketId.substring(0, 6).toUpperCase()}`;
+}
+
+const OUTCOME_TRANSITIONS: Record<string, string[]> = {
+  HOLDING: ["ALLOCATED", "RETURNED_TO_SUPPLIER", "WRITTEN_OFF"],
+};
 
 export function StockTable({ items }: { items: StockItem[] }) {
   const router = useRouter();
@@ -188,13 +218,17 @@ export function StockTable({ items }: { items: StockItem[] }) {
     }
   }
 
-  async function handleOutcome(id: string, outcome: string) {
-    const notes = outcome === "RETURNED_TO_SUPPLIER"
-      ? prompt("Return reference / notes (optional):")
-      : outcome === "WRITTEN_OFF"
-        ? prompt("Write-off reason:")
-        : null;
-    if (outcome === "WRITTEN_OFF" && notes === null) return; // cancelled
+  async function handleOutcomeChange(id: string, outcome: string) {
+    let notes: string | null | undefined;
+
+    if (outcome === "RETURNED_TO_SUPPLIER") {
+      notes = prompt("Return reference / notes (optional):");
+    } else if (outcome === "WRITTEN_OFF") {
+      notes = prompt("Write-off reason:");
+      if (notes === null) return; // cancelled
+    } else if (outcome === "ALLOCATED") {
+      notes = prompt("Allocation details (optional):");
+    }
 
     await fetch(`/api/stock/${id}`, {
       method: "PATCH",
@@ -295,7 +329,7 @@ export function StockTable({ items }: { items: StockItem[] }) {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Cost/Unit (£) *</Label>
+            <Label>Cost/Unit (&pound;) *</Label>
             <Input name="costPerUnit" type="number" step="0.01" required defaultValue={defaults?.costPerUnit} placeholder="25.92" />
           </div>
         </div>
@@ -319,7 +353,7 @@ export function StockTable({ items }: { items: StockItem[] }) {
         <div>
           <h1 className="text-lg font-bold tracking-wide">Stock / Returns</h1>
           <p className="text-xs text-[#888888]">
-            {totalHolding} items holding &middot; Total value: £{dec(totalValue)}
+            {totalHolding} items holding &middot; Total value: &pound;{dec(totalValue)}
           </p>
         </div>
         <Sheet open={addOpen} onOpenChange={setAddOpen}>
@@ -381,16 +415,16 @@ export function StockTable({ items }: { items: StockItem[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Description</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Supplier / Bill</TableHead>
-              <TableHead>Origin Job</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead className="text-right">Cost/Unit</TableHead>
-              <TableHead className="text-right">Value</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-28"></TableHead>
+              <TableHead className="w-[30%]">Description</TableHead>
+              <TableHead className="w-[90px] text-center">Type</TableHead>
+              <TableHead className="w-[14%]">Supplier / Bill</TableHead>
+              <TableHead className="w-[12%]">Origin Job</TableHead>
+              <TableHead className="w-[70px] text-right">Qty</TableHead>
+              <TableHead className="w-[50px]">Unit</TableHead>
+              <TableHead className="w-[80px] text-right">Cost/Unit</TableHead>
+              <TableHead className="w-[80px] text-right">Value</TableHead>
+              <TableHead className="w-[100px]">Status</TableHead>
+              <TableHead className="w-[80px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -406,24 +440,45 @@ export function StockTable({ items }: { items: StockItem[] }) {
             ) : (
               filtered.map((item) => (
                 <TableRow key={item.id} className={item.outcome !== "HOLDING" ? "opacity-60" : ""}>
+                  {/* Description — left, takes available space */}
                   <TableCell>
                     <div className="text-sm font-medium">{item.description}</div>
                     {item.productCode && <div className="text-[10px] text-[#888888]">{item.productCode}</div>}
                   </TableCell>
-                  <TableCell>
+
+                  {/* Type — centered badge */}
+                  <TableCell className="text-center">
                     <Badge className={`text-[9px] ${sourceBadgeClass(item.sourceType)}`}>
                       {sourceLabel(item.sourceType)}
                     </Badge>
                   </TableCell>
+
+                  {/* Supplier / Bill — left */}
                   <TableCell>
-                    <div className="text-xs">{item.supplierName || "—"}</div>
+                    <div className="text-xs">{item.supplierName || "\u2014"}</div>
                     {item.originBillNo && (
                       <div className="text-[10px] text-[#FF9900]">{item.originBillNo}</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-[#888888] max-w-[120px] truncate">
-                    {item.originTicketTitle || "—"}
+
+                  {/* Origin Job — left, clickable link to ticket */}
+                  <TableCell>
+                    {item.originTicketId ? (
+                      <Link
+                        href={`/tickets/${item.originTicketId}`}
+                        className="text-xs font-medium text-[#FF6600] hover:text-[#FF8833] hover:underline"
+                        title={item.originTicketTitle || undefined}
+                      >
+                        {ticketRef(item.originTicketId)}
+                      </Link>
+                    ) : item.originTicketTitle ? (
+                      <span className="text-xs text-[#888888] max-w-[120px] truncate block">{item.originTicketTitle}</span>
+                    ) : (
+                      <span className="text-xs text-[#888888]">{"\u2014"}</span>
+                    )}
                   </TableCell>
+
+                  {/* Qty — right aligned */}
                   <TableCell className="text-right tabular-nums font-medium">
                     {item.qtyOnHand <= 0 ? (
                       <Badge variant="destructive" className="text-[10px]">USED</Badge>
@@ -433,24 +488,66 @@ export function StockTable({ items }: { items: StockItem[] }) {
                       )}</>
                     )}
                   </TableCell>
+
+                  {/* Unit — left */}
                   <TableCell className="text-xs text-[#888888]">{item.unit}</TableCell>
+
+                  {/* Cost/Unit — right aligned */}
                   <TableCell className="text-right tabular-nums text-sm">{dec(item.costPerUnit)}</TableCell>
+
+                  {/* Value — right aligned */}
                   <TableCell className="text-right tabular-nums text-sm font-medium">{dec(item.totalValue)}</TableCell>
-                  <TableCell>{outcomeBadge(item.outcome)}</TableCell>
+
+                  {/* Status — editable dropdown for HOLDING items */}
+                  <TableCell>
+                    {OUTCOME_TRANSITIONS[item.outcome] ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <button className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-medium cursor-pointer transition-colors hover:opacity-80 ${outcomeBadgeClass(item.outcome)}`}>
+                              {outcomeLabel(item.outcome)}
+                              <ChevronDown className="size-3 opacity-60" />
+                            </button>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Change status</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {OUTCOME_TRANSITIONS[item.outcome].map((target) => (
+                            <DropdownMenuItem
+                              key={target}
+                              onClick={() => handleOutcomeChange(item.id, target)}
+                            >
+                              <span className={`inline-block w-2 h-2 rounded-full mr-2 ${
+                                target === "ALLOCATED" ? "bg-[#00CC66]" :
+                                target === "RETURNED_TO_SUPPLIER" ? "bg-[#3399FF]" :
+                                target === "WRITTEN_OFF" ? "bg-[#888888]" : "bg-[#FF9900]"
+                              }`} />
+                              {outcomeLabel(target)}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
+                      <Badge className={`text-[9px] ${outcomeBadgeClass(item.outcome)}`}>
+                        {outcomeLabel(item.outcome)}
+                      </Badge>
+                    )}
+                  </TableCell>
+
+                  {/* Actions */}
                   <TableCell>
                     <div className="flex gap-1">
                       {item.outcome === "HOLDING" && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 w-6 p-0 text-[#3399FF] hover:text-[#2277DD]"
-                            title="Return to supplier"
-                            onClick={() => handleOutcome(item.id, "RETURNED_TO_SUPPLIER")}
-                          >
-                            <RotateCcw className="size-3" />
-                          </Button>
-                        </>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 w-6 p-0 text-[#3399FF] hover:text-[#2277DD]"
+                          title="Return to supplier"
+                          onClick={() => handleOutcomeChange(item.id, "RETURNED_TO_SUPPLIER")}
+                        >
+                          <RotateCcw className="size-3" />
+                        </Button>
                       )}
                       <Button
                         size="sm"

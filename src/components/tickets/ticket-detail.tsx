@@ -567,6 +567,22 @@ export function TicketDetail({
   }
   const [creatingQuote, setCreatingQuote] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
+
+  function toggleLineSelect(id: string) {
+    setSelectedLineIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleAllLines() {
+    if (selectedLineIds.size === activeLines.length) {
+      setSelectedLineIds(new Set());
+    } else {
+      setSelectedLineIds(new Set(activeLines.map(l => l.id)));
+    }
+  }
 
   // Quote readiness: all lines READY_FOR_QUOTE, at least 1 line
   const isQuoteReady = ticket.lines.length > 0 && ticket.lines.every(
@@ -598,12 +614,14 @@ export function TicketDetail({
   async function handleConvertToInvoice() {
     setCreatingInvoice(true);
     try {
+      const lineIds = selectedLineIds.size > 0 ? [...selectedLineIds] : undefined;
       const res = await fetch(`/api/tickets/${ticket.id}/invoices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: ticket.payingCustomer.id,
           siteId: ticket.site?.id,
+          lineIds,
         }),
       });
       if (res.ok) {
@@ -825,13 +843,37 @@ export function TicketDetail({
             <span className="text-xs text-[#888888] ml-2">
               ID: {ticket.id.slice(0, 8)}
             </span>
-            {customerPOs && customerPOs.length > 0 && customerPOs[0].poNo && (
-              <>
-                <span className="text-[#888888]">|</span>
-                <Link href="/po-register" className="text-xs text-[#FF6600] hover:text-[#FF9900] hover:underline">
-                  PO: {customerPOs[0].poNo}
-                </Link>
-              </>
+            <span className="text-[#888888]">|</span>
+            {customerPOs && customerPOs.length > 0 && customerPOs[0].poNo ? (
+              <Link href="/po-register" className="text-xs text-[#FF6600] hover:text-[#FF9900] hover:underline">
+                PO: {customerPOs[0].poNo}
+              </Link>
+            ) : (
+              <span className="flex items-center gap-1">
+                <span className="text-xs text-[#888888]">PO:</span>
+                <input
+                  className="h-5 text-xs bg-transparent border border-[#444] px-1.5 text-[#FF6600] w-28 focus:border-[#FF6600] outline-none"
+                  placeholder="Enter PO no."
+                  onKeyDown={async (e) => {
+                    if (e.key !== "Enter") return;
+                    const poNo = (e.target as HTMLInputElement).value.trim();
+                    if (!poNo) return;
+                    await fetch("/api/customer-pos", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        poNo,
+                        poType: "STANDARD_FIXED",
+                        customerId: ticket.payingCustomerId,
+                        ticketId: ticket.id,
+                        siteId: ticket.siteId || undefined,
+                        status: "RECEIVED",
+                      }),
+                    });
+                    router.refresh();
+                  }}
+                />
+              </span>
             )}
             {salesInvoices && salesInvoices.length > 0 && salesInvoices[0].invoiceNo && (
               <>
@@ -1186,7 +1228,10 @@ export function TicketDetail({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[28%]">Description</TableHead>
+                  <TableHead className="w-8 px-1">
+                    <input type="checkbox" checked={activeLines.length > 0 && selectedLineIds.size === activeLines.length} onChange={toggleAllLines} className="accent-[#FF6600]" />
+                  </TableHead>
+                  <TableHead className="w-[26%]">Description</TableHead>
                   <TableHead className="w-[12%]">Supplier</TableHead>
                   <TableHead className="text-right w-[6%]">Qty</TableHead>
                   <TableHead className="w-[5%]">Unit</TableHead>
