@@ -49,15 +49,24 @@ function buildHtml(
 
   const lineRows = evalLines
     .map((line, i) => {
-      const rowBg = line.cromwellBetter ? "background:#f0faf0;" : "";
+      const rowBg = line.cromwellBetter ? "background:#f0faf0;" : line.saving < 0 ? "background:#fef2f2;" : "";
+      const savingStyle = line.cromwellBetter
+        ? "color:#16803c;font-weight:700"
+        : line.saving < 0
+        ? "color:#dc2626;font-weight:700"
+        : "color:#999";
+      const savingText = line.saving > 0
+        ? `${fmt(line.saving)} (${fmtPct(line.savingPct)})`
+        : line.saving < 0
+        ? `-${fmt(Math.abs(line.saving))} (${fmtPct(Math.abs(line.savingPct))})`
+        : "—";
       return `<tr style="border-bottom:1px solid #eee;${rowBg}">
       <td style="padding:12px 10px;color:#999;font-size:12px">${i + 1}</td>
       <td style="padding:12px 10px;font-size:12px;font-weight:500">${line.description}</td>
       <td style="padding:12px 10px;text-align:center;font-size:12px">${line.qty} ${line.unit}</td>
       <td style="padding:12px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmt(line.competitorPrice)}</td>
-      <td style="padding:12px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmt(line.benchmarkPrice)}</td>
       <td style="padding:12px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:600">${fmt(line.ourPrice)}</td>
-      <td style="padding:12px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;${line.cromwellBetter ? "color:#16803c;font-weight:700" : "color:#999"}">${line.saving > 0 ? `${fmt(line.saving)} (${fmtPct(line.savingPct)})` : "—"}</td>
+      <td style="padding:12px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;${savingStyle}">${savingText}</td>
     </tr>`;
     })
     .join("");
@@ -119,7 +128,6 @@ function buildHtml(
       <th>Item</th>
       <th class="c">Qty</th>
       <th class="r">${competitorName} Price</th>
-      <th class="r">Best Online</th>
       <th class="r">Our Price</th>
       <th class="r">Savings vs ${competitorName}</th>
     </tr>

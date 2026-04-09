@@ -63,6 +63,11 @@ export async function PATCH(
       body.poDate = new Date(body.poDate);
     }
 
+    // Allow clearing issuedByContactId
+    if ("issuedByContactId" in body && !body.issuedByContactId) {
+      body.issuedByContactId = null;
+    }
+
     const po = await prisma.customerPO.update({
       where: { id },
       data: body,
@@ -85,6 +90,31 @@ export async function PATCH(
     console.error("Failed to update customer PO:", error);
     return Response.json(
       { error: "Failed to update customer PO" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // Delete related records first
+    await prisma.customerPOAllocation.deleteMany({ where: { customerPOId: id } });
+    await prisma.customerPOLine.deleteMany({ where: { customerPOId: id } });
+    await prisma.labourDrawdownEntry.deleteMany({ where: { customerPOId: id } });
+    await prisma.materialsDrawdownEntry.deleteMany({ where: { customerPOId: id } });
+    await prisma.pOCashPayment.deleteMany({ where: { customerPOId: id } });
+    await prisma.customerPO.delete({ where: { id } });
+
+    return Response.json({ deleted: true });
+  } catch (error) {
+    console.error("Failed to delete customer PO:", error);
+    return Response.json(
+      { error: "Failed to delete customer PO" },
       { status: 500 }
     );
   }

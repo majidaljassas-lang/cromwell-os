@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, Fragment } from "react";
+import { useState, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
   Pencil,
+  Trash2,
+  Upload,
   ChevronDown,
   ChevronRight,
   FileBarChart,
@@ -75,9 +77,12 @@ type CustomerPOData = {
   weekendCostRate: Decimal;
   profitToDate: Decimal;
   notes: string | null;
+  invoiceNo: string | null;
+  vatRate: Decimal;
+  issuedBy: string | null;
   customer: { id: string; name: string };
   site: { id: string; siteName: string } | null;
-  ticket: { id: string; title: string } | null;
+  ticket: { id: string; ticketNo: number; title: string; site?: { id: string; siteName: string } | null; quotes?: { id: string; quoteNo: string; status: string }[] } | null;
   lines: any[];
   labourDrawdowns: any[];
   materialsDrawdowns: any[];
@@ -87,7 +92,7 @@ type CustomerPOData = {
 
 type CustomerOption = { id: string; name: string };
 type SiteOption = { id: string; siteName: string };
-type TicketOption = { id: string; title: string; payingCustomerId?: string; siteId?: string | null };
+type TicketOption = { id: string; ticketNo: number; title: string; payingCustomerId?: string; siteId?: string | null };
 type ContactOption = { id: string; fullName: string };
 type CommercialLink = { id: string; customerId: string; siteId: string; site: { id: string; siteName: string } };
 
@@ -142,7 +147,7 @@ export function PORegisterView({
 }) {
   const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filterType, setFilterType] = useState("ALL");
+  const [activeTab, setActiveTab] = useState<"STANDARD_FIXED" | "DRAWDOWN_LABOUR" | "DRAWDOWN_MATERIALS">("STANDARD_FIXED");
   const [filterCustomer, setFilterCustomer] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
 
@@ -155,6 +160,7 @@ export function PORegisterView({
   const [customerId, setCustomerId] = useState("");
   const [siteId, setSiteId] = useState("");
   const [ticketId, setTicketId] = useState("");
+  const [addIssuedBy, setAddIssuedBy] = useState("");
 
   // Edit PO state
   const [editPO, setEditPO] = useState<CustomerPOData | null>(null);
@@ -162,7 +168,81 @@ export function PORegisterView({
   const [editStatus, setEditStatus] = useState("");
   const [editSiteId, setEditSiteId] = useState("");
   const [editTicketId, setEditTicketId] = useState("");
+  const [editIssuedBy, setEditIssuedBy] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Upload PO
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadReview, setUploadReview] = useState<{
+    parsed: { poNo: string | null; poDate: string | null; customerName: string | null; totalAmount: number | null; lines: { description: string; qty: number | null; unitPrice: number | null; lineTotal: number | null }[] };
+    poNo: string;
+    fileRef: string;
+    fileName: string;
+  } | null>(null);
+  const [uploadCustomerId, setUploadCustomerId] = useState("");
+  const [uploadSiteId, setUploadSiteId] = useState("");
+  const [uploadTicketId, setUploadTicketId] = useState("");
+  const [uploadIssuedBy, setUploadIssuedBy] = useState("");
+  const [confirmingUpload, setConfirmingUpload] = useState(false);
+
+  async function handleUploadPO(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch("/api/customer-pos/upload", { method: "POST", body: fd });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Upload failed");
+        return;
+      }
+
+      if (data.status === "REVIEW") {
+        // Open review sheet
+        setUploadReview(data);
+        setUploadCustomerId("");
+        setUploadSiteId("");
+        setUploadTicketId("");
+        setUploadIssuedBy("");
+      } else {
+        router.refresh();
+      }
+    } finally {
+      setUploading(false);
+      if (uploadRef.current) uploadRef.current.value = "";
+    }
+  }
+
+  async function confirmUpload() {
+    if (!uploadReview || !uploadCustomerId) return;
+    setConfirmingUpload(true);
+    try {
+      const res = await fetch("/api/customer-pos/upload-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: uploadCustomerId,
+          ticketId: uploadTicketId || undefined,
+          siteId: uploadSiteId || undefined,
+          issuedBy: uploadIssuedBy || undefined,
+          poNo: uploadReview.poNo,
+          poDate: uploadReview.parsed.poDate || undefined,
+          fileRef: uploadReview.fileRef,
+          fileName: uploadReview.fileName,
+          lines: uploadReview.parsed.lines,
+        }),
+      });
+      if (res.ok) {
+        setUploadReview(null);
+        router.refresh();
+      }
+    } finally {
+      setConfirmingUpload(false);
+    }
+  }
 
   async function handleEditPO(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -175,6 +255,8 @@ export function PORegisterView({
       status: editStatus,
       siteId: editSiteId || undefined,
       ticketId: editTicketId || undefined,
+      issuedBy: (fd.get("issuedBy") as string) || null,
+      poDate: (fd.get("poDate") as string) || undefined,
       poLimitValue: Number(fd.get("poLimitValue")) || undefined,
       totalValue: Number(fd.get("totalValue")) || undefined,
       weekdaySellRate: Number(fd.get("weekdaySellRate")) || undefined,
@@ -331,11 +413,27 @@ export function PORegisterView({
     setEditStatus(po.status);
     setEditSiteId(po.site?.id || "");
     setEditTicketId(po.ticket?.id || "");
+    setEditIssuedBy(po.issuedBy || "");
+  }
+
+  async function handleDeletePO(poId: string, poNo: string) {
+    if (!confirm(`Delete PO ${poNo} and all its drawdowns/allocations?`)) return;
+    await fetch(`/api/customer-pos/${poId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function handleSetInvoiceNo(poId: string, invoiceNo: string) {
+    await fetch(`/api/customer-pos/${poId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invoiceNo: invoiceNo || null }),
+    });
+    router.refresh();
   }
 
   // Filter POs
   const filtered = customerPOs.filter((po) => {
-    if (filterType !== "ALL" && po.poType !== filterType) return false;
+    if (po.poType !== activeTab) return false;
     if (filterCustomer !== "ALL" && po.customer.id !== filterCustomer)
       return false;
     if (filterStatus !== "ALL" && po.status !== filterStatus) return false;
@@ -366,6 +464,7 @@ export function PORegisterView({
       customerId,
       siteId: siteId || undefined,
       ticketId: ticketId || undefined,
+      issuedBy: addIssuedBy || undefined,
       poDate: (formData.get("poDate") as string) || undefined,
       totalValue: Number(formData.get("totalValue")) || undefined,
       poLimitValue: Number(formData.get("poLimitValue")) || undefined,
@@ -398,6 +497,7 @@ export function PORegisterView({
         setCustomerId("");
         setSiteId("");
         setTicketId("");
+        setAddIssuedBy("");
         router.refresh();
       }
     } finally {
@@ -422,6 +522,20 @@ export function PORegisterView({
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={printGlobalPlumberStatement}>
             Plumber Statement
+          </Button>
+          <input
+            ref={uploadRef}
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleUploadPO(f);
+            }}
+          />
+          <Button size="sm" variant="outline" onClick={() => uploadRef.current?.click()} disabled={uploading}>
+            <Upload className="size-4 mr-1" />
+            {uploading ? "Parsing..." : "Upload PO"}
           </Button>
           <Sheet open={addOpen} onOpenChange={setAddOpen}>
             <SheetTrigger
@@ -554,11 +668,16 @@ export function PORegisterView({
                       : tickets
                     ).map((t) => (
                       <SelectItem key={t.id} value={t.id}>
-                        {t.title}
+                        T-{t.ticketNo} {t.title}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>PO Issuer</Label>
+                <Input placeholder="e.g. John Smith" value={addIssuedBy} onChange={(e) => setAddIssuedBy(e.target.value)} />
               </div>
 
               <div className="space-y-1.5">
@@ -716,8 +835,8 @@ export function PORegisterView({
         </Card>
       </div>
 
-      {/* Global Plumber Account */}
-      {(() => {
+      {/* Global Plumber Account — only on Labour tab */}
+      {activeTab === "DRAWDOWN_LABOUR" && (() => {
         let globalEarned = 0;
         let globalOverhead = 0;
         let globalPlumberPaid = 0;
@@ -826,25 +945,29 @@ export function PORegisterView({
         );
       })()}
 
+      {/* Tabs */}
+      <div className="flex items-center gap-0 border-b border-[#333333]">
+        {([
+          { key: "STANDARD_FIXED" as const, label: "Standard / Fixed", count: customerPOs.filter(p => p.poType === "STANDARD_FIXED").length },
+          { key: "DRAWDOWN_LABOUR" as const, label: "Labour Drawdown", count: customerPOs.filter(p => p.poType === "DRAWDOWN_LABOUR").length },
+          { key: "DRAWDOWN_MATERIALS" as const, label: "Materials Drawdown", count: customerPOs.filter(p => p.poType === "DRAWDOWN_MATERIALS").length },
+        ]).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 text-xs uppercase tracking-wider font-medium border-b-2 transition-colors cursor-pointer ${
+              activeTab === tab.key
+                ? "border-[#FF6600] text-[#FF6600]"
+                : "border-transparent text-[#888888] hover:text-white"
+            }`}
+          >
+            {tab.label} <span className="text-[10px] ml-1 opacity-60">({tab.count})</span>
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex items-center gap-3">
-        <Select
-          value={filterType}
-          onValueChange={(v) => setFilterType(v ?? "ALL")}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="PO Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Types</SelectItem>
-            <SelectItem value="STANDARD_FIXED">Standard</SelectItem>
-            <SelectItem value="DRAWDOWN_LABOUR">Labour Drawdown</SelectItem>
-            <SelectItem value="DRAWDOWN_MATERIALS">
-              Materials Drawdown
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
         <Select
           value={filterCustomer}
           onValueChange={(v) => setFilterCustomer(v ?? "ALL")}
@@ -883,168 +1006,246 @@ export function PORegisterView({
         </span>
       </div>
 
-      {/* PO Table */}
-      <div className="border border-[#333333] bg-[#1A1A1A]">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>PO No</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Ticket</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">PO Limit</TableHead>
-              <TableHead className="text-right">Sell Used</TableHead>
-              <TableHead className="text-right">Cost Used</TableHead>
-              <TableHead className="text-right">Overhead</TableHead>
-              <TableHead className="text-right">Profit</TableHead>
-              <TableHead className="text-right">Remaining</TableHead>
-              <TableHead className="w-[120px]">Utilisation</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
+      {/* PO Table — Standard Fixed */}
+      {activeTab === "STANDARD_FIXED" && (
+        <div className="border border-[#333333] bg-[#1A1A1A]">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell
-                  colSpan={14}
-                  className="text-center py-8 text-[#888888]"
-                >
-                  No purchase orders found.
-                </TableCell>
+                <TableHead className="w-8" />
+                <TableHead>PO No</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Site</TableHead>
+                <TableHead>Ticket</TableHead>
+                <TableHead>Quote</TableHead>
+                <TableHead>PO Date</TableHead>
+                <TableHead>Issuer</TableHead>
+                <TableHead className="text-right">Costs</TableHead>
+                <TableHead className="text-right">Ex VAT</TableHead>
+                <TableHead className="text-right">Inc VAT</TableHead>
+                <TableHead>Invoice</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ) : (
-              filtered.map((po) => {
-                const isExpanded = expandedId === po.id;
-                const limit = n(po.poLimitValue ?? po.totalValue);
-                const consumed = n(po.poConsumedValue);
-                const committed = n(po.poCommittedValue);
-                const remaining = n(po.poRemainingValue);
-                const profit = n(po.profitToDate);
-                const utilPct = limit > 0 ? (consumed / limit) * 100 : 0;
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-center py-8 text-[#888888]">
+                    No standard POs found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((po) => {
+                  const isExpanded = expandedId === po.id;
+                  const exVat = n(po.totalValue ?? po.poLimitValue);
+                  const vat = n(po.vatRate) || 20;
+                  const incVat = exVat * (1 + vat / 100);
+                  const costs = n(po.poCommittedValue);
+                  const quoteNo = po.ticket?.quotes?.[0]?.quoteNo || null;
+                  const siteName = po.site?.siteName || po.ticket?.site?.siteName || null;
 
-                // Calculate overhead from drawdowns
-                const labourOverhead = po.labourDrawdowns.reduce(
-                  (s: number, d: any) => s + n(d.overheadValue),
-                  0
-                );
-                const materialsOverhead = po.materialsDrawdowns.reduce(
-                  (s: number, d: any) => s + n(d.overheadValue),
-                  0
-                );
-                const totalOverhead = labourOverhead + materialsOverhead;
-
-                // Cost used from drawdowns
-                const labourCost = po.labourDrawdowns.reduce(
-                  (s: number, d: any) => s + n(d.internalCostValue),
-                  0
-                );
-                const materialsCost = po.materialsDrawdowns.reduce(
-                  (s: number, d: any) => s + n(d.costValueActual),
-                  0
-                );
-                const totalCostUsed = labourCost + materialsCost;
-
-                const sellUsed =
-                  po.poType === "STANDARD_FIXED" ? committed : consumed;
-
-                return (
-                  <Fragment key={po.id}>
-                    <TableRow
-                      className="cursor-pointer hover:bg-[#222222]"
-                      onClick={() => toggleExpand(po.id)}
-                    >
-                      <TableCell className="px-2">
-                        <div className="flex items-center gap-1">
-                          {isExpanded ? (
-                            <ChevronDown className="size-4 text-[#888888]" />
-                          ) : (
-                            <ChevronRight className="size-4 text-[#888888]" />
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-5 w-5 p-0"
-                            onClick={(e) => { e.stopPropagation(); openEditPO(po); }}
-                          >
-                            <Pencil className="size-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium">{po.poNo}</TableCell>
-                      <TableCell>{poTypeBadge(po.poType)}</TableCell>
-                      <TableCell className="max-w-[120px] truncate">
-                        {po.customer.name}
-                      </TableCell>
-                      <TableCell className="max-w-[100px] truncate text-[#888888]">
-                        {po.site?.siteName || "\u2014"}
-                      </TableCell>
-                      <TableCell className="max-w-[120px] truncate text-[#888888]">
-                        {po.ticket?.title || "\u2014"}
-                      </TableCell>
-                      <TableCell>{statusBadge(po.status)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(limit)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(sellUsed)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(totalCostUsed)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(totalOverhead)}
-                      </TableCell>
-                      <TableCell
-                        className={`text-right tabular-nums font-medium ${
-                          profit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"
-                        }`}
+                  return (
+                    <Fragment key={po.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-[#222222]"
+                        onClick={() => toggleExpand(po.id)}
                       >
-                        {fmt(profit)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {fmt(remaining)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-full bg-[#333333]">
-                            <div
-                              className={`h-full transition-all ${utilisationColor(
-                                utilPct
-                              )}`}
-                              style={{
-                                width: `${Math.min(utilPct, 100)}%`,
-                              }}
-                            />
+                        <TableCell className="px-2">
+                          <div className="flex items-center gap-1">
+                            {isExpanded ? (
+                              <ChevronDown className="size-4 text-[#888888]" />
+                            ) : (
+                              <ChevronRight className="size-4 text-[#888888]" />
+                            )}
+                            <Button size="sm" variant="outline" className="h-5 w-5 p-0"
+                              onClick={(e) => { e.stopPropagation(); openEditPO(po); }}>
+                              <Pencil className="size-3" />
+                            </Button>
+                            <Button size="sm" variant="outline"
+                              className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
+                              onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
+                              <Trash2 className="size-3" />
+                            </Button>
                           </div>
-                          <span className="text-xs tabular-nums text-[#888888] w-10 text-right">
-                            {utilPct.toFixed(0)}%
-                          </span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-
-                    {isExpanded && (
-                      <TableRow>
-                        <TableCell colSpan={14} className="p-4 bg-[#1A1A1A]">
-                          <ExpandedPODetail
-                            po={po}
-                            contacts={contacts}
-                            tickets={tickets}
-                            sites={sites}
-                            commercialLinks={commercialLinks}
+                        </TableCell>
+                        <TableCell className="font-medium">{po.poNo}</TableCell>
+                        <TableCell className="max-w-[120px] truncate">{po.customer.name}</TableCell>
+                        <TableCell className="max-w-[120px] truncate text-[#888888]">
+                          {siteName || "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
+                          {po.ticket ? `T-${po.ticket.ticketNo}` : "\u2014"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-[#888888]">
+                          {quoteNo || "\u2014"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-[#888888]">
+                          {po.poDate ? new Date(po.poDate).toLocaleDateString("en-GB") : "\u2014"}
+                        </TableCell>
+                        <TableCell className="max-w-[100px] truncate text-[#888888]">
+                          {po.issuedBy || "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(costs)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{fmt(exVat)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(incVat)}</TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-6 w-[100px] text-xs bg-transparent border-[#333333]"
+                            placeholder="INV-..."
+                            defaultValue={po.invoiceNo || ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={(e) => {
+                              const val = e.target.value.trim();
+                              if (val !== (po.invoiceNo || "")) handleSetInvoiceNo(po.id, val);
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                           />
                         </TableCell>
+                        <TableCell>{statusBadge(po.status)}</TableCell>
                       </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+
+                      {isExpanded && (
+                        <TableRow>
+                          <TableCell colSpan={13} className="p-4 bg-[#1A1A1A]">
+                            <ExpandedPODetail po={po} contacts={contacts} tickets={tickets} sites={sites} commercialLinks={commercialLinks} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* PO Table — Drawdown (Labour & Materials) */}
+      {activeTab !== "STANDARD_FIXED" && (
+        <div className="border border-[#333333] bg-[#1A1A1A]">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead>PO No</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Site</TableHead>
+                <TableHead>Ticket</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Invoice</TableHead>
+                <TableHead className="text-right">PO Limit</TableHead>
+                <TableHead className="text-right">Sell Used</TableHead>
+                <TableHead className="text-right">Cost Used</TableHead>
+                <TableHead className="text-right">Overhead</TableHead>
+                <TableHead className="text-right text-[#00CC66]">Profit</TableHead>
+                <TableHead className="text-right">Remaining</TableHead>
+                <TableHead className="w-[120px]">Utilisation</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={14} className="text-center py-8 text-[#888888]">
+                    No {activeTab === "DRAWDOWN_LABOUR" ? "labour drawdown" : "materials drawdown"} POs found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((po) => {
+                  const isExpanded = expandedId === po.id;
+                  const limit = n(po.poLimitValue ?? po.totalValue);
+                  const consumed = n(po.poConsumedValue);
+                  const remaining = n(po.poRemainingValue);
+                  const profit = n(po.profitToDate);
+                  const utilPct = limit > 0 ? (consumed / limit) * 100 : 0;
+
+                  const labourOverhead = po.labourDrawdowns.reduce((s: number, d: any) => s + n(d.overheadValue), 0);
+                  const materialsOverhead = po.materialsDrawdowns.reduce((s: number, d: any) => s + n(d.overheadValue), 0);
+                  const totalOverhead = labourOverhead + materialsOverhead;
+
+                  const labourCost = po.labourDrawdowns.reduce((s: number, d: any) => s + n(d.internalCostValue), 0);
+                  const materialsCost = po.materialsDrawdowns.reduce((s: number, d: any) => s + n(d.costValueActual), 0);
+                  const totalCostUsed = labourCost + materialsCost;
+
+                  return (
+                    <Fragment key={po.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-[#222222]"
+                        onClick={() => toggleExpand(po.id)}
+                      >
+                        <TableCell className="px-2">
+                          <div className="flex items-center gap-1">
+                            {isExpanded ? (
+                              <ChevronDown className="size-4 text-[#888888]" />
+                            ) : (
+                              <ChevronRight className="size-4 text-[#888888]" />
+                            )}
+                            <Button size="sm" variant="outline" className="h-5 w-5 p-0"
+                              onClick={(e) => { e.stopPropagation(); openEditPO(po); }}>
+                              <Pencil className="size-3" />
+                            </Button>
+                            <Button size="sm" variant="outline"
+                              className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
+                              onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{po.poNo}</TableCell>
+                        <TableCell className="max-w-[120px] truncate">{po.customer.name}</TableCell>
+                        <TableCell className="max-w-[100px] truncate text-[#888888]">
+                          {po.site?.siteName || po.ticket?.site?.siteName || "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
+                          {po.ticket ? `T-${po.ticket.ticketNo}` : "\u2014"}
+                        </TableCell>
+                        <TableCell>{statusBadge(po.status)}</TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-6 w-[100px] text-xs bg-transparent border-[#333333]"
+                            placeholder="INV-..."
+                            defaultValue={po.invoiceNo || ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={(e) => {
+                              const val = e.target.value.trim();
+                              if (val !== (po.invoiceNo || "")) handleSetInvoiceNo(po.id, val);
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(limit)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(consumed)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(totalCostUsed)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(totalOverhead)}</TableCell>
+                        <TableCell className={`text-right tabular-nums font-medium ${profit >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>
+                          {fmt(profit)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(remaining)}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-full bg-[#333333]">
+                              <div className={`h-full transition-all ${utilisationColor(utilPct)}`}
+                                style={{ width: `${Math.min(utilPct, 100)}%` }} />
+                            </div>
+                            <span className="text-xs tabular-nums text-[#888888] w-10 text-right">{utilPct.toFixed(0)}%</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+
+                      {isExpanded && (
+                        <TableRow>
+                          <TableCell colSpan={14} className="p-4 bg-[#1A1A1A]">
+                            <ExpandedPODetail po={po} contacts={contacts} tickets={tickets} sites={sites} commercialLinks={commercialLinks} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {/* Edit PO Sheet */}
       <Sheet open={!!editPO} onOpenChange={(open) => { if (!open) setEditPO(null); }}>
@@ -1101,10 +1302,20 @@ export function PORegisterView({
                   <SelectTrigger><SelectValue placeholder="Select ticket" /></SelectTrigger>
                   <SelectContent>
                     {tickets.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                      <SelectItem key={t.id} value={t.id} label={`T-${t.ticketNo} ${t.title}`}>T-{t.ticketNo} {t.title}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>PO Date</Label>
+                  <Input name="poDate" type="date" defaultValue={editPO.poDate ? new Date(editPO.poDate).toISOString().slice(0, 10) : ""} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>PO Issuer</Label>
+                  <Input name="issuedBy" placeholder="e.g. John Smith" defaultValue={editIssuedBy} />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -1158,6 +1369,133 @@ export function PORegisterView({
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Upload Review Sheet */}
+      <Sheet open={!!uploadReview} onOpenChange={(open) => { if (!open) setUploadReview(null); }}>
+        <SheetContent side="right" className="w-[500px] sm:w-[540px]">
+          <SheetHeader>
+            <SheetTitle>Review Uploaded PO</SheetTitle>
+            <SheetDescription>Parsed from {uploadReview?.fileName}. Fill in the details below.</SheetDescription>
+          </SheetHeader>
+          {uploadReview && (
+            <div className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>PO Number</Label>
+                  <Input value={uploadReview.poNo} readOnly className="bg-[#111]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>PO Date</Label>
+                  <Input value={uploadReview.parsed.poDate || "Not detected"} readOnly className="bg-[#111]" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Customer *</Label>
+                <Select value={uploadCustomerId} onValueChange={(v) => {
+                  const newId = v ?? "";
+                  setUploadCustomerId(newId);
+                  setUploadSiteId("");
+                  setUploadTicketId("");
+                  const linked = commercialLinks.filter((cl) => cl.customerId === newId);
+                  if (linked.length === 1) setUploadSiteId(linked[0].siteId);
+                  const custTickets = tickets.filter((t) => t.payingCustomerId === newId);
+                  if (custTickets.length === 1) setUploadTicketId(custTickets[0].id);
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Site</Label>
+                  <Select value={uploadSiteId} onValueChange={(v) => setUploadSiteId(v ?? "")}>
+                    <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
+                    <SelectContent>
+                      {(uploadCustomerId
+                        ? commercialLinks.filter((cl) => cl.customerId === uploadCustomerId).map((cl) => cl.site)
+                        : sites
+                      ).map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.siteName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Ticket</Label>
+                  <Select value={uploadTicketId} onValueChange={(v) => setUploadTicketId(v ?? "")}>
+                    <SelectTrigger><SelectValue placeholder="Select ticket" /></SelectTrigger>
+                    <SelectContent>
+                      {(uploadCustomerId
+                        ? tickets.filter((t) => t.payingCustomerId === uploadCustomerId)
+                        : tickets
+                      ).map((t) => (
+                        <SelectItem key={t.id} value={t.id} label={`T-${t.ticketNo} ${t.title}`}>T-{t.ticketNo} {t.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>PO Issuer</Label>
+                <Input placeholder="e.g. John Smith" value={uploadIssuedBy} onChange={(e) => setUploadIssuedBy(e.target.value)} />
+              </div>
+
+              {/* Parsed lines preview */}
+              {uploadReview.parsed.lines.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-wide text-[#888888] font-bold">
+                    Parsed Lines ({uploadReview.parsed.lines.length})
+                  </p>
+                  <div className="border border-[#333333] max-h-[200px] overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Description</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Unit</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {uploadReview.parsed.lines.map((l, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs max-w-[200px] truncate">{l.description}</TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">{l.qty ?? "\u2014"}</TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">{l.unitPrice != null ? fmt(l.unitPrice) : "\u2014"}</TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">{l.lineTotal != null ? fmt(l.lineTotal) : "\u2014"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <p className="text-xs text-[#888888] text-right">
+                    Total: {fmt(uploadReview.parsed.lines.reduce((s, l) => s + (l.lineTotal || 0), 0))}
+                  </p>
+                </div>
+              )}
+
+              {uploadReview.parsed.lines.length === 0 && (
+                <div className="border border-[#333333] p-3 text-sm text-[#888888]">
+                  No line items parsed from PDF. If you select a ticket, lines will be pulled from its quote.
+                </div>
+              )}
+
+              <SheetFooter>
+                <Button onClick={confirmUpload} disabled={confirmingUpload || !uploadCustomerId} className="bg-[#FF6600] text-black hover:bg-[#CC5500]">
+                  {confirmingUpload ? "Creating..." : "Create PO"}
+                </Button>
+              </SheetFooter>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -1190,39 +1528,23 @@ function ExpandedPODetail({
                 <TableRow>
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Agreed Unit</TableHead>
-                  <TableHead className="text-right">Agreed Total</TableHead>
-                  <TableHead className="text-right">Consumed Qty</TableHead>
-                  <TableHead className="text-right">Consumed Value</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Line Total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {po.lines.map((line: any) => (
                   <TableRow key={line.id}>
-                    <TableCell className="max-w-[200px] truncate">
-                      {line.description}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.qty)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.agreedUnitPrice)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.agreedTotal)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.consumedQty)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.consumedValue)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(line.remainingValue)}
-                    </TableCell>
+                    <TableCell>{line.description}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(line.qty)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(line.agreedUnitPrice)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(line.agreedTotal)}</TableCell>
                   </TableRow>
                 ))}
+                <TableRow className="border-t-2 border-[#444444] font-medium">
+                  <TableCell colSpan={3} className="text-right">Total Ex VAT</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(po.lines.reduce((s: number, l: any) => s + n(l.agreedTotal), 0))}</TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </div>

@@ -1079,19 +1079,19 @@ export function TicketDetail({
             </div>
           </div>
 
-          <div className="border border-[#333333] bg-[#1A1A1A]">
-            <Table>
+          <div className="border border-[#333333] bg-[#1A1A1A] overflow-x-auto">
+            <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead className="text-right">Sale</TableHead>
-                  <TableHead className="text-right">Margin</TableHead>
-                  <TableHead className="text-right">Margin %</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="min-w-[200px]">Description</TableHead>
+                  <TableHead className="min-w-[80px]">Supplier</TableHead>
+                  <TableHead className="text-right w-16">Qty</TableHead>
+                  <TableHead className="w-12">Unit</TableHead>
+                  <TableHead className="text-right w-24">Cost</TableHead>
+                  <TableHead className="text-right w-24">Sale</TableHead>
+                  <TableHead className="text-right w-24">Margin</TableHead>
+                  <TableHead className="text-right w-16">Margin %</TableHead>
+                  <TableHead className="w-20">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

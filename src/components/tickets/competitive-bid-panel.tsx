@@ -461,77 +461,40 @@ export function CompetitiveBidPanel({
             };
           });
 
+          // Extract competitor name from sheet name
+          const competitorDisplay = bid.name.replace("Competitive Bid vs ", "");
+
+          // Check if any line has utopia/bestOnline data
+          const hasUtopia = lines.some(l => l.utopiaUnit > 0);
+          const hasBestOnline = lines.some(l => l.bestOnlineUnit > 0);
+
+          // Totals
+          const totCompetitor = lines.reduce((s, l) => s + l.competitorUnit * l.qty, 0);
+          const totOurCost = lines.reduce((s, l) => s + l.ourCostUnit * l.qty, 0);
+          const totOurSale = lines.reduce((s, l) => s + l.ourSaleUnit * l.qty, 0);
+          const totMargin = totOurSale - totOurCost;
+          const totMarginPct = totOurSale > 0 ? (totMargin / totOurSale) * 100 : 0;
+          const totSaving = totCompetitor - totOurSale;
+
           return (
-            <Card key={bid.id}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-bold">{bid.name}</CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">v{bid.versionNo}</Badge>
-                    <Badge variant="outline">{bid.status}</Badge>
-                    <Button
-                      size="sm"
-                      className="bg-[#3399FF] text-white hover:bg-[#2277DD] h-7 text-xs"
-                      onClick={() => handleGenerateEvaluation(bid.id)}
-                      disabled={generatingPdf}
-                    >
-                      <FileDown className="w-3 h-3 mr-1" />
-                      {generatingPdf ? "Generating..." : "Download Evaluation PDF"}
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-[#333333]">
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888]">Item</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Qty</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Competitor</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Utopia</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Best Online</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Our Cost</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Our Price</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Margin</TableHead>
-                        <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] text-right">Undercut</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {lines.map((line) => (
-                        <TableRow key={line.id} className="border-[#333333] hover:bg-[#1E1E1E]">
-                          <TableCell className="text-xs font-medium max-w-[200px] truncate">
-                            {line.ticketLine.description}
-                          </TableCell>
-                          <TableCell className="text-xs text-right tabular-nums">{line.qty}</TableCell>
-                          <TableCell className="text-xs text-right tabular-nums text-[#FF9900]">
-                            {line.competitorUnit > 0 ? `\u00A3${fmtMoney(line.competitorUnit)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className="text-xs text-right tabular-nums text-[#888888]">
-                            {line.utopiaUnit > 0 ? `\u00A3${fmtMoney(line.utopiaUnit)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className="text-xs text-right tabular-nums text-[#888888]">
-                            {line.bestOnlineUnit > 0 ? `\u00A3${fmtMoney(line.bestOnlineUnit)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className="text-xs text-right tabular-nums">
-                            {line.ourCostUnit > 0 ? `\u00A3${fmtMoney(line.ourCostUnit)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className="text-xs text-right tabular-nums font-medium">
-                            {line.ourSaleUnit > 0 ? `\u00A3${fmtMoney(line.ourSaleUnit)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className={`text-xs text-right tabular-nums ${line.margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>
-                            {line.margin !== 0 ? `\u00A3${fmtMoney(line.margin)}` : "\u2014"}
-                          </TableCell>
-                          <TableCell className={`text-xs text-right tabular-nums ${line.undercut > 0 ? "text-[#00CC66]" : line.undercut < 0 ? "text-[#FF3333]" : ""}`}>
-                            {line.undercut !== 0 ? `\u00A3${fmtMoney(line.undercut)}` : "\u2014"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
+            <ExistingBidCard
+              key={bid.id}
+              bid={bid}
+              lines={lines}
+              competitorDisplay={competitorDisplay}
+              hasUtopia={hasUtopia}
+              hasBestOnline={hasBestOnline}
+              totCompetitor={totCompetitor}
+              totOurCost={totOurCost}
+              totOurSale={totOurSale}
+              totMargin={totMargin}
+              totMarginPct={totMarginPct}
+              totSaving={totSaving}
+              generatingPdf={generatingPdf}
+              handleGenerateEvaluation={handleGenerateEvaluation}
+              onSaved={() => router.refresh()}
+              ticketId={ticketId}
+            />
           );
         })}
 
@@ -998,6 +961,204 @@ function NewBidForm({
           >
             {submitting ? "Creating..." : "Accept & Create Lines"}
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Existing Bid Card — inline editable ────────────────────────────────────
+
+function ExistingBidCard({
+  bid, lines, competitorDisplay, hasUtopia, hasBestOnline,
+  totCompetitor, totOurCost, totOurSale, totMargin, totMarginPct, totSaving,
+  generatingPdf, handleGenerateEvaluation, onSaved, ticketId,
+}: {
+  bid: ExistingCompSheet;
+  lines: Array<any>;
+  competitorDisplay: string;
+  hasUtopia: boolean;
+  hasBestOnline: boolean;
+  totCompetitor: number;
+  totOurCost: number;
+  totOurSale: number;
+  totMargin: number;
+  totMarginPct: number;
+  totSaving: number;
+  generatingPdf: boolean;
+  handleGenerateEvaluation: (id: string) => void;
+  onSaved: () => void;
+  ticketId: string;
+}) {
+  const thCls = "text-[10px] uppercase tracking-wider text-[#888888] text-right";
+
+  // Local state for live editing — initialize from server data
+  const [localCosts, setLocalCosts] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const l of lines) m[l.ticketLine.id] = l.ourCostUnit;
+    return m;
+  });
+  const [localPrices, setLocalPrices] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const l of lines) m[l.ticketLine.id] = l.ourSaleUnit;
+    return m;
+  });
+
+  function getCost(id: string) { return localCosts[id] || 0; }
+  function getPrice(id: string) { return localPrices[id] || 0; }
+
+  async function saveCost(lineId: string, value: number) {
+    setLocalCosts(prev => ({ ...prev, [lineId]: value }));
+    await fetch(`/api/ticket-lines/${lineId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedCostUnit: value || undefined }),
+    });
+  }
+
+  async function savePrice(lineId: string, value: number) {
+    setLocalPrices(prev => ({ ...prev, [lineId]: value }));
+    await fetch(`/api/ticket-lines/${lineId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actualSaleUnit: value || undefined }),
+    });
+  }
+
+  // Live totals from local state
+  const liveTotCost = lines.reduce((s, l) => s + getCost(l.ticketLine.id) * l.qty, 0);
+  const liveTotSale = lines.reduce((s, l) => s + getPrice(l.ticketLine.id) * l.qty, 0);
+  const liveTotMargin = liveTotSale - liveTotCost;
+  const liveTotMarginPct = liveTotSale > 0 ? (liveTotMargin / liveTotSale) * 100 : 0;
+  const liveTotSaving = totCompetitor - liveTotSale;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-bold">{bid.name}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">v{bid.versionNo}</Badge>
+            <Badge variant="outline">{bid.status}</Badge>
+            <Button size="sm" className="bg-[#3399FF] text-white hover:bg-[#2277DD] h-7 text-xs"
+              onClick={() => handleGenerateEvaluation(bid.id)} disabled={generatingPdf}>
+              <FileDown className="w-3 h-3 mr-1" />
+              {generatingPdf ? "Generating..." : "Download Evaluation PDF"}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Summary cards — live updating */}
+        <div className="grid grid-cols-5 gap-3">
+          <div className="border border-[#333333] bg-[#111] p-2 text-center">
+            <p className="text-[9px] text-[#888888] uppercase">{competitorDisplay} Total</p>
+            <p className="text-sm font-semibold tabular-nums text-[#FF9900]">£{fmtMoney(totCompetitor)}</p>
+          </div>
+          <div className="border border-[#333333] bg-[#111] p-2 text-center">
+            <p className="text-[9px] text-[#888888] uppercase">Our Cost</p>
+            <p className="text-sm font-semibold tabular-nums">£{fmtMoney(liveTotCost)}</p>
+          </div>
+          <div className="border border-[#333333] bg-[#111] p-2 text-center">
+            <p className="text-[9px] text-[#888888] uppercase">Our Price</p>
+            <p className="text-sm font-semibold tabular-nums">£{fmtMoney(liveTotSale)}</p>
+          </div>
+          <div className="border border-[#333333] bg-[#111] p-2 text-center">
+            <p className="text-[9px] text-[#888888] uppercase">Margin ({liveTotMarginPct.toFixed(1)}%)</p>
+            <p className={`text-sm font-semibold tabular-nums ${liveTotMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>£{fmtMoney(liveTotMargin)}</p>
+          </div>
+          <div className="border border-[#333333] bg-[#111] p-2 text-center">
+            <p className="text-[9px] text-[#888888] uppercase">Saving vs {competitorDisplay}</p>
+            <p className={`text-sm font-semibold tabular-nums ${liveTotSaving > 0 ? "text-[#00CC66]" : liveTotSaving < 0 ? "text-[#FF3333]" : ""}`}>£{fmtMoney(liveTotSaving)}</p>
+          </div>
+        </div>
+
+        {/* Lines table */}
+        <div>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-[#333333]">
+                <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] w-[25%]">Item</TableHead>
+                <TableHead className={`${thCls} w-10`}>Qty</TableHead>
+                <TableHead className={`${thCls} w-20`}>{competitorDisplay}</TableHead>
+                {hasUtopia && <TableHead className={`${thCls} w-20`}>Competitor 2</TableHead>}
+                {hasBestOnline && <TableHead className={`${thCls} w-20`}>Competitor 3</TableHead>}
+                <TableHead className={`${thCls} w-24`}>Our Cost</TableHead>
+                <TableHead className={`${thCls} w-24`}>Our Price</TableHead>
+                <TableHead className={`${thCls} w-20`}>Margin</TableHead>
+                <TableHead className={`${thCls} w-16`}>Margin %</TableHead>
+                <TableHead className={`${thCls} w-20`}>Saving</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.map((line) => {
+                const cost = getCost(line.ticketLine.id);
+                const price = getPrice(line.ticketLine.id);
+                const margin = price > 0 && cost > 0 ? (price - cost) * line.qty : 0;
+                const marginPct = price > 0 && cost > 0 ? ((price - cost) / price) * 100 : 0;
+                const saving = line.competitorUnit > 0 && price > 0 ? line.competitorUnit - price : 0;
+
+                return (
+                  <TableRow key={line.id} className="border-[#333333] hover:bg-[#1E1E1E]">
+                    <TableCell className="text-xs font-medium max-w-[200px] truncate">
+                      {line.ticketLine.description}
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums">{line.qty}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums text-[#FF9900] font-medium">
+                      {line.competitorUnit > 0 ? `£${fmtMoney(line.competitorUnit)}` : "—"}
+                    </TableCell>
+                    {hasUtopia && (
+                      <TableCell className="text-xs text-right tabular-nums text-[#888888]">
+                        {line.utopiaUnit > 0 ? `£${fmtMoney(line.utopiaUnit)}` : "—"}
+                      </TableCell>
+                    )}
+                    {hasBestOnline && (
+                      <TableCell className="text-xs text-right tabular-nums text-[#888888]">
+                        {line.bestOnlineUnit > 0 ? `£${fmtMoney(line.bestOnlineUnit)}` : "—"}
+                      </TableCell>
+                    )}
+                    <TableCell className="p-0">
+                      <input
+                        type="number" step="0.01"
+                        className="w-full bg-transparent text-right text-xs tabular-nums px-2 py-1.5 border-0 focus:outline-none focus:bg-[#222]"
+                        defaultValue={cost > 0 ? cost : ""}
+                        placeholder="—"
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = Number(e.target.value || 0);
+                          saveCost(line.ticketLine.id, v);
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      />
+                    </TableCell>
+                    <TableCell className="p-0">
+                      <input
+                        type="number" step="0.01"
+                        className="w-full bg-transparent text-right text-xs tabular-nums px-2 py-1.5 border-0 focus:outline-none focus:bg-[#222] font-medium"
+                        defaultValue={price > 0 ? price : ""}
+                        placeholder="—"
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = Number(e.target.value || 0);
+                          savePrice(line.ticketLine.id, v);
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      />
+                    </TableCell>
+                    <TableCell className={`text-xs text-right tabular-nums ${margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>
+                      {price > 0 && cost > 0 ? `£${fmtMoney(margin)}` : "—"}
+                    </TableCell>
+                    <TableCell className={`text-xs text-right tabular-nums ${marginPct >= 20 ? "text-[#00CC66]" : marginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>
+                      {price > 0 && cost > 0 ? `${marginPct.toFixed(1)}%` : "—"}
+                    </TableCell>
+                    <TableCell className={`text-xs text-right tabular-nums font-medium ${saving > 0 ? "text-[#00CC66]" : saving < 0 ? "text-[#FF3333]" : ""}`}>
+                      {price > 0 && line.competitorUnit > 0 ? `£${fmtMoney(saving)}` : "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       </CardContent>
     </Card>

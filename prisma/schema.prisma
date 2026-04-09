@@ -552,6 +552,7 @@ model Contact {
   evidenceFragments    EvidenceFragment[]
   labourDrawdowns      LabourDrawdownEntry[]
   logisticsEvents      LogisticsEvent[]
+  issuedPOs            CustomerPO[]         @relation("POIssuedBy")
 
   @@index([fullName])
 }
@@ -797,6 +798,7 @@ model InquiryWorkItem {
 
 model Ticket {
   id                        String       @id @default(uuid())
+  ticketNo                  Int          @unique @default(autoincrement())
   parentJobId               String?
   siteId                    String?
   siteCommercialLinkId      String?
@@ -1277,10 +1279,14 @@ model CustomerPO {
   customerId              String
   siteId                  String?
   siteCommercialLinkId    String?
+  issuedByContactId       String?
+  issuedBy                String?
   poNo                    String
   poType                  CustomerPOType
   poDate                  DateTime?
   status                  String
+  invoiceNo               String?
+  vatRate                 Decimal        @default(20) @db.Decimal(5, 2)
   totalValue              Decimal?       @db.Decimal(14, 2)
   poLimitValue            Decimal?       @db.Decimal(14, 2)
   poCommittedValue        Decimal        @default(0) @db.Decimal(14, 2)
@@ -1304,6 +1310,7 @@ model CustomerPO {
   customer           Customer             @relation(fields: [customerId], references: [id])
   site               Site?                @relation(fields: [siteId], references: [id])
   siteCommercialLink SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
+  issuedByContact    Contact?             @relation("POIssuedBy", fields: [issuedByContactId], references: [id])
   lines              CustomerPOLine[]
   allocations        CustomerPOAllocation[]
   labourDrawdowns    LabourDrawdownEntry[]

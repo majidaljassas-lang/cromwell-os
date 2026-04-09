@@ -52,3 +52,22 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  try {
+    // Delete related records first
+    await prisma.customerPO.deleteMany({ where: { ticketId: id } });
+    await prisma.quote.deleteMany({ where: { ticketId: id } });
+    await prisma.ticketLine.deleteMany({ where: { ticketId: id } });
+    await prisma.event.deleteMany({ where: { ticketId: id } });
+    await prisma.ticket.delete({ where: { id } });
+    return Response.json({ deleted: true });
+  } catch (error) {
+    console.error("Failed to delete ticket:", error);
+    return Response.json({ error: "Failed to delete ticket" }, { status: 500 });
+  }
+}

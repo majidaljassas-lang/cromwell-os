@@ -6,7 +6,9 @@ export const dynamic = "force-dynamic";
 export default async function PORegisterPage() {
   const customerPOs = await prisma.customerPO.findMany({
     include: {
-      customer: true, site: true, ticket: true, lines: true,
+      customer: true, site: true,
+      ticket: { include: { site: true, quotes: { select: { id: true, quoteNo: true, status: true }, orderBy: { createdAt: "desc" as const } } } },
+      lines: true,
       labourDrawdowns: { include: { ticket: true, site: true, plumberContact: true }, orderBy: { workDate: "desc" as const } },
       materialsDrawdowns: { include: { ticket: true, ticketLine: true }, orderBy: { drawdownDate: "desc" as const } },
       cashPayments: { orderBy: { paymentDate: "desc" as const } },
@@ -16,7 +18,7 @@ export default async function PORegisterPage() {
   });
   const customers = await prisma.customer.findMany({ orderBy: { name: "asc" } });
   const sites = await prisma.site.findMany({ orderBy: { siteName: "asc" } });
-  const tickets = await prisma.ticket.findMany({ select: { id: true, title: true, payingCustomerId: true, siteId: true }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ select: { id: true, ticketNo: true, title: true, payingCustomerId: true, siteId: true }, orderBy: { createdAt: "desc" } });
   const contacts = await prisma.contact.findMany({ where: { isActive: true }, orderBy: { fullName: "asc" } });
   const commercialLinks = await prisma.siteCommercialLink.findMany({
     select: { id: true, customerId: true, siteId: true, site: { select: { id: true, siteName: true } } },

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,7 @@ const TICKET_STATUSES = [
 
 type TicketRow = {
   id: string;
+  ticketNo: number;
   title: string;
   description: string | null;
   ticketMode: string;
@@ -283,6 +284,8 @@ export function TicketsTable({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
+              <TableHead>No</TableHead>
               <TableHead>Title</TableHead>
               <TableHead>Mode</TableHead>
               <TableHead>Status</TableHead>
@@ -296,7 +299,7 @@ export function TicketsTable({
             {tickets.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={9}
                   className="text-center py-8 text-[#888888]"
                 >
                   No tickets found. Create your first ticket to get started.
@@ -309,6 +312,24 @@ export function TicketsTable({
                   className="cursor-pointer hover:bg-[#222222]"
                   onClick={() => router.push(`/tickets/${ticket.id}`)}
                 >
+                  <TableCell className="px-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete ticket T-${ticket.ticketNo} "${ticket.title}"?`)) return;
+                        await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
+                        router.refresh();
+                      }}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </TableCell>
+                  <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
+                    T-{ticket.ticketNo}
+                  </TableCell>
                   <TableCell className="font-medium max-w-[250px] truncate">
                     {ticket.title}
                   </TableCell>
