@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Tabs,
   TabsList,
@@ -39,15 +39,11 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import Link from "next/link";
-import { SalesBundlesPanel } from "@/components/sales-bundles/sales-bundles-panel";
 import { QuotePanel } from "@/components/quotes/quote-panel";
 import { TicketProcurementTab } from "@/components/procurement/ticket-procurement-tab";
 import { RfqExploder } from "@/components/tickets/rfq-exploder";
-import { TicketPOTab } from "@/components/po-register/ticket-po-tab";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
-import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
 
 const LINE_TYPES = [
   "MATERIAL",
@@ -183,6 +179,20 @@ function InlineLineRow({ line, onClickRow, onSaved }: {
         <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
           {line.status.replace(/_/g, " ")}
         </Badge>
+      </TableCell>
+      <TableCell className="p-0 w-8">
+        <button
+          className="text-[#666] hover:text-red-500 p-1 cursor-pointer"
+          title="Delete line"
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (!confirm("Delete this line?")) return;
+            await fetch(`/api/ticket-lines/${line.id}`, { method: "DELETE" });
+            onSaved();
+          }}
+        >
+          ✕
+        </button>
       </TableCell>
     </TableRow>
   );
@@ -447,7 +457,6 @@ export function TicketDetail({
   customerPOs = [],
   evidencePacks = [],
   salesInvoices = [],
-  stockItems = [],
 }: {
   ticket: TicketData;
   salesBundles?: SalesBundleData[];
@@ -460,7 +469,6 @@ export function TicketDetail({
   customerPOs?: any[];
   evidencePacks?: EvidencePackData[];
   salesInvoices?: SalesInvoiceData[];
-  stockItems?: any[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState<{
@@ -519,6 +527,7 @@ export function TicketDetail({
     }
   }
   const [creatingQuote, setCreatingQuote] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   // Quote readiness: all lines READY_FOR_QUOTE, at least 1 line
   const isQuoteReady = ticket.lines.length > 0 && ticket.lines.every(
@@ -544,6 +553,26 @@ export function TicketDetail({
       }
     } finally {
       setCreatingQuote(false);
+    }
+  }
+
+  async function handleConvertToInvoice() {
+    setCreatingInvoice(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: ticket.payingCustomer.id,
+          siteId: ticket.site?.id,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        router.push(`/invoices/${data.id}`);
+      }
+    } finally {
+      setCreatingInvoice(false);
     }
   }
 
@@ -757,6 +786,22 @@ export function TicketDetail({
             <span className="text-xs text-[#888888] ml-2">
               ID: {ticket.id.slice(0, 8)}
             </span>
+            {customerPOs && customerPOs.length > 0 && customerPOs[0].poNo && (
+              <>
+                <span className="text-[#888888]">|</span>
+                <Link href="/po-register" className="text-xs text-[#FF6600] hover:text-[#FF9900] hover:underline">
+                  PO: {customerPOs[0].poNo}
+                </Link>
+              </>
+            )}
+            {salesInvoices && salesInvoices.length > 0 && salesInvoices[0].invoiceNo && (
+              <>
+                <span className="text-[#888888]">|</span>
+                <Link href="/invoices" className="text-xs text-[#FF6600] hover:text-[#FF9900] hover:underline">
+                  INV: {salesInvoices[0].invoiceNo}
+                </Link>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -861,7 +906,6 @@ export function TicketDetail({
           <TabsTrigger value="lines">
             Lines ({activeLines.length})
           </TabsTrigger>
-          <TabsTrigger value="rfq">RFQ Extract</TabsTrigger>
           <TabsTrigger value="evidence">
             Evidence ({ticket.evidenceFragments.length})
           </TabsTrigger>
@@ -871,33 +915,53 @@ export function TicketDetail({
           <TabsTrigger value="events">
             Events ({ticket.events.length})
           </TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="deal-sheet">Deal Sheet</TabsTrigger>
-          <TabsTrigger value="bundles">
-            Bundles ({salesBundles.length})
-          </TabsTrigger>
           <TabsTrigger value="quotes">
             Quotes ({quotes.length})
           </TabsTrigger>
           <TabsTrigger value="procurement">
             Procurement ({procurementOrders.length})
           </TabsTrigger>
-          <TabsTrigger value="po-register">
-            PO Register ({customerPOs?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="invoices">
-            Invoices ({salesInvoices.length})
-          </TabsTrigger>
-          <TabsTrigger value="recovery">
-            Recovery ({ticket.recoveryCases.length})
-          </TabsTrigger>
         </TabsList>
 
         {/* ── LINES TAB ────────────────────────────────────────────── */}
         <TabsContent value="lines" className="mt-4">
+          {/* ── RFQ EXTRACT (merged into Lines) ──────────────────── */}
+          <div className="mb-6">
+            <RfqExploder
+              ticketId={ticket.id}
+              payingCustomerId={ticket.payingCustomer.id}
+              sourceText={[
+                ticket.description,
+                ...ticket.events
+                  .filter((ev) => ev.notes)
+                  .map((ev) => (ev.notes || "").replace(/^Section added:\s*/i, "")),
+              ].filter(Boolean).join("\n\n")}
+            />
+          </div>
+
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Ticket Lines</h2>
             <div className="flex gap-2">
+            {isQuoteReady && ticket.status !== "QUOTED" && ticket.status !== "INVOICED" && ticket.status !== "CLOSED" && (
+              <Button
+                onClick={handleCreateQuote}
+                disabled={creatingQuote}
+                size="sm"
+                className="bg-[#FF6600] text-black hover:bg-[#FF9900] font-bold"
+              >
+                {creatingQuote ? "Creating..." : "Generate Quote"}
+              </Button>
+            )}
+            {(ticket.status === "QUOTED" || ticket.status === "APPROVED" || ticket.status === "ORDERED" || ticket.status === "DELIVERED" || ticket.status === "COSTED" || ticket.status === "VERIFIED" || ticket.status === "LOCKED") && (
+              <Button
+                onClick={handleConvertToInvoice}
+                disabled={creatingInvoice}
+                size="sm"
+                className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
+              >
+                {creatingInvoice ? "Creating..." : "Convert to Invoice"}
+              </Button>
+            )}
             <Sheet open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
               <SheetTrigger
                 render={
@@ -1079,19 +1143,20 @@ export function TicketDetail({
             </div>
           </div>
 
-          <div className="border border-[#333333] bg-[#1A1A1A] overflow-x-auto">
-            <Table className="table-fixed w-full">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
+            <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[200px]">Description</TableHead>
-                  <TableHead className="min-w-[80px]">Supplier</TableHead>
-                  <TableHead className="text-right w-16">Qty</TableHead>
-                  <TableHead className="w-12">Unit</TableHead>
-                  <TableHead className="text-right w-24">Cost</TableHead>
-                  <TableHead className="text-right w-24">Sale</TableHead>
-                  <TableHead className="text-right w-24">Margin</TableHead>
-                  <TableHead className="text-right w-16">Margin %</TableHead>
-                  <TableHead className="w-20">Status</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Sale</TableHead>
+                  <TableHead className="text-right">Margin</TableHead>
+                  <TableHead className="text-right">Margin %</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-8"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1113,6 +1178,25 @@ export function TicketDetail({
                             <span className="text-[11px] uppercase tracking-widest font-bold text-[#FF9900]">
                               {line.sectionLabel}
                             </span>
+                          </TableCell>
+                          <TableCell className="p-0 w-8">
+                            <button
+                              className="text-[#666] hover:text-red-500 p-1 cursor-pointer text-xs"
+                              title="Delete section and its lines"
+                              onClick={async () => {
+                                if (!confirm(`Delete section "${line.sectionLabel}" and all its lines?`)) return;
+                                const idx = activeLines.findIndex(l => l.id === line.id);
+                                const toDelete = [line.id];
+                                for (let i = idx + 1; i < activeLines.length; i++) {
+                                  if (activeLines[i].sectionLabel) break;
+                                  toDelete.push(activeLines[i].id);
+                                }
+                                await Promise.all(toDelete.map(id => fetch(`/api/ticket-lines/${id}`, { method: "DELETE" })));
+                                router.refresh();
+                              }}
+                            >
+                              ✕
+                            </button>
                           </TableCell>
                         </TableRow>
                       )}
@@ -1224,20 +1308,6 @@ export function TicketDetail({
               )}
             </SheetContent>
           </Sheet>
-        </TabsContent>
-
-        {/* ── RFQ EXTRACTION TAB ────────────────────────────────────── */}
-        <TabsContent value="rfq" className="mt-4">
-          <RfqExploder
-            ticketId={ticket.id}
-            payingCustomerId={ticket.payingCustomer.id}
-            sourceText={[
-              ticket.description,
-              ...ticket.events
-                .filter((ev) => ev.notes)
-                .map((ev) => (ev.notes || "").replace(/^Section added:\s*/i, "")),
-            ].filter(Boolean).join("\n\n")}
-          />
         </TabsContent>
 
         {/* ── EVIDENCE TAB ─────────────────────────────────────────── */}
@@ -1381,160 +1451,6 @@ export function TicketDetail({
           )}
         </TabsContent>
 
-        {/* ── TIMELINE TAB ─────────────────────────────────────────── */}
-        <TabsContent value="timeline" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Timeline</h2>
-          {(() => {
-            const items = [
-              ...ticket.events.map((ev) => ({
-                id: ev.id,
-                type: "event" as const,
-                label: ev.eventType.replace(/_/g, " "),
-                notes: ev.notes,
-                timestamp: new Date(ev.timestamp),
-              })),
-              ...ticket.evidenceFragments.map((ef) => ({
-                id: ef.id,
-                type: "evidence" as const,
-                label: ef.fragmentType.replace(/_/g, " "),
-                notes: ef.fragmentText,
-                timestamp: new Date(ef.timestamp),
-              })),
-              ...ticket.tasks.map((t) => ({
-                id: t.id,
-                type: "task" as const,
-                label: `${t.taskType.replace(/_/g, " ")} [${t.status}]`,
-                notes: t.generatedReason,
-                timestamp: new Date(t.dueAt || t.id), // fallback
-              })),
-            ].sort(
-              (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
-            );
-
-            if (items.length === 0) {
-              return (
-                <Card>
-                  <CardContent className="py-8 text-center text-[#888888]">
-                    No timeline entries yet.
-                  </CardContent>
-                </Card>
-              );
-            }
-
-            return (
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            item.type === "event"
-                              ? "outline"
-                              : item.type === "evidence"
-                              ? "secondary"
-                              : "default"
-                          }
-                        >
-                          {item.type}
-                        </Badge>
-                        <span className="text-sm font-medium">
-                          {item.label}
-                        </span>
-                        <span className="text-xs text-[#888888]">
-                          {item.timestamp.toLocaleString()}
-                        </span>
-                      </div>
-                      {item.notes && (
-                        <p className="text-sm text-[#888888] mt-1">
-                          {item.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </TabsContent>
-
-        {/* ── DEAL SHEET TAB ──────────────────────────────────────── */}
-        <TabsContent value="deal-sheet" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Deal Sheet</h2>
-            <Link href={`/tickets/${ticket.id}/deal-sheet`}>
-              <Button size="sm" variant="outline">
-                Open Full Deal Sheet
-              </Button>
-            </Link>
-          </div>
-          {ticket.dealSheets.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No deal sheet versions yet.{" "}
-                <Link
-                  href={`/tickets/${ticket.id}/deal-sheet`}
-                  className="text-[#FF6600] underline"
-                >
-                  Create one
-                </Link>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {ticket.dealSheets.slice(0, 3).map((ds) => (
-                <Card key={ds.id}>
-                  <CardContent className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">v{ds.versionNo}</Badge>
-                        <Badge variant="outline">{ds.status}</Badge>
-                        <span className="text-sm text-[#888888]">
-                          {ds.mode}
-                        </span>
-                      </div>
-                      <div className="flex gap-4 text-sm tabular-nums">
-                        <span>Cost: {dec(ds.totalExpectedCost)}</span>
-                        <span>Sell: {dec(ds.totalExpectedSell)}</span>
-                        <span
-                          className={
-                            Number(ds.totalExpectedMargin?.toString() || 0) >= 0
-                              ? "text-[#00CC66]"
-                              : "text-[#FF3333]"
-                          }
-                        >
-                          Margin: {dec(ds.totalExpectedMargin)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* ── COMPETITIVE BID PANEL ── */}
-          <div className="mt-6">
-            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-3">Competitive Bids</h2>
-            <CompetitiveBidPanel ticketId={ticket.id} />
-          </div>
-        </TabsContent>
-
-        {/* ── BUNDLES TAB ─────────────────────────────────────────── */}
-        <TabsContent value="bundles" className="mt-4">
-          <SalesBundlesPanel
-            ticketId={ticket.id}
-            bundles={salesBundles}
-            ticketLines={ticket.lines.map((l) => ({
-              id: l.id,
-              description: l.description,
-            }))}
-          />
-        </TabsContent>
-
         {/* ── QUOTES TAB ──────────────────────────────────────────── */}
         <TabsContent value="quotes" className="mt-4">
           <QuotePanel
@@ -1555,7 +1471,6 @@ export function TicketDetail({
             costAllocations={costAllocations}
             absorbedCosts={absorbedCostAllocations}
             suppliers={suppliers}
-            stockItems={stockItems}
             ticketLines={ticket.lines.map((l) => ({
               id: l.id,
               description: l.description,
@@ -1569,197 +1484,7 @@ export function TicketDetail({
           />
         </TabsContent>
 
-        {/* ── PO REGISTER TAB ───────────────────────────────────── */}
-        <TabsContent value="po-register" className="mt-4">
-          <TicketPOTab
-            ticketId={ticket.id}
-            customerPOs={customerPOs || []}
-            customers={customers}
-            ticketLines={ticket.lines.map((l) => ({
-              id: l.id,
-              description: l.description,
-            }))}
-          />
-        </TabsContent>
-
-        {/* ── INVOICES TAB ──────────────────────────────────────── */}
-        <TabsContent value="invoices" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Sales Invoices</h2>
-          {salesInvoices.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No invoices for this ticket yet.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {salesInvoices.map((inv) => (
-                <Card key={inv.id}>
-                  <CardContent className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium text-sm">
-                          {inv.invoiceNo || "Draft"}
-                        </span>
-                        <Badge
-                          variant={
-                            inv.status === "PAID"
-                              ? "default"
-                              : inv.status === "SENT"
-                              ? "secondary"
-                              : inv.status === "OVERDUE"
-                              ? "destructive"
-                              : "outline"
-                          }
-                        >
-                          {inv.status}
-                        </Badge>
-                        <span className="text-sm text-[#888888]">
-                          {inv.customer.name}
-                        </span>
-                        {inv.poNo && (
-                          <span className="text-xs text-[#888888]">
-                            PO: {inv.poNo}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium tabular-nums">
-                          {dec(inv.totalSell)}
-                        </span>
-                        {inv.status === "DRAFT" && (
-                          <TicketInvoiceSendButton invoiceId={inv.id} />
-                        )}
-                        {inv.status === "SENT" && (
-                          <TicketInvoiceMarkPaidButton invoiceId={inv.id} />
-                        )}
-                      </div>
-                    </div>
-                    {inv.lines.length > 0 && (
-                      <div className="mt-2 text-xs text-[#888888]">
-                        {inv.lines.length} line{inv.lines.length !== 1 ? "s" : ""} |{" "}
-                        {inv.lines.filter((l) => l.poMatched).length} PO matched
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* ── RECOVERY TAB ─────────────────────────────────────── */}
-        <TabsContent value="recovery" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Recovery Cases</h2>
-          {ticket.recoveryCases.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No recovery cases for this ticket.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {ticket.recoveryCases.map((rc) => {
-                const daysInStage = rc.currentStageStartedAt
-                  ? Math.floor(
-                      (Date.now() - new Date(rc.currentStageStartedAt).getTime()) /
-                        (1000 * 60 * 60 * 24)
-                    )
-                  : 0;
-
-                return (
-                  <Card key={rc.id}>
-                    <CardContent className="py-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">
-                            {rc.reasonType.replace(/_/g, " ")}
-                          </Badge>
-                          <Badge
-                            variant={
-                              rc.recoveryStatus === "CLOSED"
-                                ? "default"
-                                : "destructive"
-                            }
-                          >
-                            {rc.recoveryStatus.replace(/_/g, " ")}
-                          </Badge>
-                          <span className="text-sm text-[#888888]">
-                            {daysInStage}d in stage
-                          </span>
-                        </div>
-                        <span className="text-sm font-medium tabular-nums text-[#FF3333]">
-                          {dec(rc.stuckValue)}
-                        </span>
-                      </div>
-                      {rc.nextAction && (
-                        <p className="text-sm text-[#888888]">
-                          Next: {rc.nextAction}
-                        </p>
-                      )}
-                      <div className="flex gap-2">
-                        <Link href="/recovery">
-                          <Button size="sm" variant="outline">
-                            Open in Recovery
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
       </Tabs>
     </div>
-  );
-}
-
-function TicketInvoiceSendButton({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const [sending, setSending] = useState(false);
-
-  async function handleSend() {
-    setSending(true);
-    try {
-      const res = await fetch(`/api/sales-invoices/${invoiceId}/send`, {
-        method: "POST",
-      });
-      if (res.ok) router.refresh();
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <Button size="sm" variant="outline" onClick={handleSend} disabled={sending}>
-      {sending ? "Sending..." : "Send"}
-    </Button>
-  );
-}
-
-function TicketInvoiceMarkPaidButton({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const [marking, setMarking] = useState(false);
-
-  async function handleMarkPaid() {
-    setMarking(true);
-    try {
-      const res = await fetch(`/api/sales-invoices/${invoiceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PAID", paidAt: new Date().toISOString() }),
-      });
-      if (res.ok) router.refresh();
-    } finally {
-      setMarking(false);
-    }
-  }
-
-  return (
-    <Button size="sm" variant="outline" onClick={handleMarkPaid} disabled={marking}>
-      {marking ? "Updating..." : "Mark Paid"}
-    </Button>
   );
 }
