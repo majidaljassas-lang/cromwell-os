@@ -13,7 +13,7 @@ export default async function InboxPage() {
     orderBy: { siteName: "asc" },
   });
   const tickets = await prisma.ticket.findMany({
-    where: { status: { notIn: ["CLOSED", "INVOICED"] } },
+    where: { status: { notIn: ["CLOSED", "INVOICED"] as any } },
     select: { id: true, ticketNo: true, title: true, payingCustomerId: true, siteId: true },
     orderBy: { createdAt: "desc" },
   });

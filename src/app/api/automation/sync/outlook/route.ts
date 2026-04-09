@@ -160,20 +160,9 @@ export async function POST() {
           const classText = `${email.subject || ""} ${fullText.substring(0, 1000)}`;
           const classification = classifyMessage(classText);
 
-          // Auto-link to existing tickets/enquiries via link resolver
+          // NOTE: Auto-linking DISABLED — everything lands in inbox for manual triage
           try {
-            await resolveLink({
-              eventType: "EMAIL",
-              sourceType: "OUTLOOK",
-              sender: isSent ? email.toRecipients?.[0]?.emailAddress?.name : email.from?.emailAddress?.name,
-              senderEmail: isSent ? email.toRecipients?.[0]?.emailAddress?.address : email.from?.emailAddress?.address,
-              receivedAt: new Date(email.receivedDateTime),
-              rawText: bodyText.substring(0, 2000),
-              subject: `${isSent ? "[SENT] " : ""}${email.subject}`,
-              ingestionEventId: event.id,
-            });
-          } catch {
-            // If link resolver fails, create a basic InboundEvent
+            // Just create a basic InboundEvent, no auto-linking
             await prisma.inboundEvent.create({
               data: {
                 eventType: "EMAIL",

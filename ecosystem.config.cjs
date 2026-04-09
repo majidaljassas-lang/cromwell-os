@@ -1,0 +1,47 @@
+module.exports = {
+  apps: [
+    {
+      name: "cromwell-db",
+      script: "npx",
+      args: "prisma dev",
+      cwd: "/Users/majidaljassas/cromwell-os",
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      restart_delay: 5000,
+    },
+    {
+      name: "cromwell-web",
+      script: "npx",
+      args: "next dev --port 3000",
+      cwd: "/Users/majidaljassas/cromwell-os",
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      restart_delay: 3000,
+      wait_ready: true,
+      listen_timeout: 10000,
+      env: {
+        NODE_ENV: "development",
+      },
+    },
+    {
+      name: "cromwell-whatsapp",
+      script: "scripts/whatsapp-listener.js",
+      cwd: "/Users/majidaljassas/cromwell-os",
+      autorestart: true,
+      watch: false,
+      max_restarts: 5,
+      restart_delay: 10000,
+    },
+    {
+      name: "cromwell-poller",
+      script: "scripts/email-poller.js",
+      cwd: "/Users/majidaljassas/cromwell-os",
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      restart_delay: 5000,
+    },
+  ],
+};
