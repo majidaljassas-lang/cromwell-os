@@ -349,6 +349,31 @@ export function QuotePanel({ ticketId, quotes, customers }: QuotePanelProps) {
                             Approved
                           </Button>
                         )}
+                        {!isSuperseded && quote.status === "APPROVED" && (
+                          <Button
+                            size="sm"
+                            className="bg-[#FF6600] text-black hover:bg-[#CC5500]"
+                            onClick={async () => {
+                              const poNo = prompt("Enter customer PO number:");
+                              if (!poNo?.trim()) return;
+                              await fetch("/api/customer-pos", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  poNo: poNo.trim(),
+                                  poType: "STANDARD_FIXED",
+                                  customerId: quote.customerId,
+                                  ticketId: quote.ticketId,
+                                  siteId: quote.siteId || undefined,
+                                  status: "RECEIVED",
+                                }),
+                              });
+                              router.refresh();
+                            }}
+                          >
+                            Enter PO
+                          </Button>
+                        )}
                         {!isSuperseded && (quote.status === "SENT" || quote.status === "APPROVED") && (
                           <Button
                             size="sm"
