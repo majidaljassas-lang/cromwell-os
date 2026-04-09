@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  ListTodo,
   Building2,
   Users,
   Contact,
@@ -21,26 +20,21 @@ import {
   FolderArchive,
   Archive,
   Scale,
-  Warehouse,
-  RotateCcw,
 } from "lucide-react";
 
 const navItems = [
   { label: "DASHBOARD", href: "/", icon: LayoutDashboard },
   { label: "COMMERCIAL", href: "/commercial", icon: Scale },
-  { label: "WORK QUEUE", href: "/work-queue", icon: ListTodo },
+  { label: "INBOX", href: "/inbox", icon: Inbox },
   { label: "JOBS / SITES", href: "/sites", icon: Building2 },
   { label: "CUSTOMERS", href: "/customers", icon: Users },
   { label: "CONTACTS", href: "/contacts", icon: Contact },
   { label: "TICKETS", href: "/tickets", icon: Ticket },
   { label: "SUPPLIERS", href: "/suppliers", icon: Package },
-  { label: "STOCK / RETURNS", href: "/stock", icon: Warehouse },
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "PO REGISTER", href: "/po-register", icon: FileBarChart },
   { label: "INVOICES", href: "/invoices", icon: Receipt },
-  { label: "RETURNS", href: "/returns", icon: RotateCcw },
   { label: "RECOVERY", href: "/recovery", icon: AlertTriangle },
-  { label: "ENQUIRIES", href: "/enquiries", icon: Inbox },
   { label: "INGESTION", href: "/ingestion", icon: Download },
   { label: "CASH SALES", href: "/cash-sales", icon: Banknote },
   { label: "REPORTS", href: "/reports", icon: BarChart3 },

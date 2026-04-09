@@ -101,14 +101,18 @@ function statusVariant(
   }
 }
 
+type CommercialLink = { id: string; customerId: string; siteId: string; site: { id: string; siteName: string } };
+
 export function TicketsTable({
   tickets,
   customers,
   sites,
+  commercialLinks = [],
 }: {
   tickets: TicketRow[];
   customers: SelectOption[];
   sites: SelectOption[];
+  commercialLinks?: CommercialLink[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -221,7 +225,13 @@ export function TicketsTable({
                 <Label>Paying Customer *</Label>
                 <Select
                   value={payingCustomerId}
-                  onValueChange={(v) => setPayingCustomerId(v ?? "")}
+                  onValueChange={(v) => {
+                    setPayingCustomerId(v ?? "");
+                    setSiteId("");
+                    // Auto-select if customer has exactly one linked site
+                    const linked = commercialLinks.filter((cl) => cl.customerId === (v ?? ""));
+                    if (linked.length === 1) setSiteId(linked[0].siteId);
+                  }}
                   required
                 >
                   <SelectTrigger className="w-full">
@@ -238,18 +248,25 @@ export function TicketsTable({
               </div>
               <div className="space-y-1.5">
                 <Label>Site (optional)</Label>
-                <Select value={siteId} onValueChange={(v) => setSiteId(v ?? "")}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sites.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.siteName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {(() => {
+                  const linkedSites = payingCustomerId
+                    ? commercialLinks.filter((cl) => cl.customerId === payingCustomerId).map((cl) => cl.site)
+                    : sites;
+                  return (
+                    <Select value={siteId} onValueChange={(v) => setSiteId(v ?? "")}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={payingCustomerId && linkedSites.length === 0 ? "No linked sites" : "Select site"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {linkedSites.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.siteName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  );
+                })()}
               </div>
               <div className="space-y-1.5">
                 <Label>Status</Label>
