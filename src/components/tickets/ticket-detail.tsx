@@ -53,6 +53,7 @@ import Link from "next/link";
 import { QuotePanel } from "@/components/quotes/quote-panel";
 import { TicketProcurementTab } from "@/components/procurement/ticket-procurement-tab";
 import { RfqExploder } from "@/components/tickets/rfq-exploder";
+import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -728,6 +729,7 @@ export function TicketDetail({
 
   // ── RFQ Extract collapsible state ──
   const [rfqOpen, setRfqOpen] = useState(false);
+  const [compSheetOpen, setCompSheetOpen] = useState(false);
 
   // ── Quote button state ──
   const [creatingQuote, setCreatingQuote] = useState(false);
@@ -1283,6 +1285,28 @@ export function TicketDetail({
             )}
           </div>
 
+          {/* Competitive Bid / Comp Sheet — collapsible */}
+          <div className="border border-[#333333] bg-[#0F0F0F]">
+            <button
+              onClick={() => setCompSheetOpen(!compSheetOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#1A1A1A] cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-[#FF6600]">
+                  {compSheetOpen ? "▼" : "▶"} COMP SHEET
+                </span>
+                <span className="text-[10px] text-[#888888]">
+                  Competitor pricing comparison — feeds back to lines
+                </span>
+              </div>
+            </button>
+            {compSheetOpen && (
+              <div className="border-t border-[#333333] p-3">
+                <CompetitiveBidPanel ticketId={ticket.id} />
+              </div>
+            )}
+          </div>
+
           {/* Lines header with actions */}
           <div className="flex items-center justify-between">
             <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">
@@ -1643,15 +1667,18 @@ export function TicketDetail({
                   const totalMargin = totalSale - totalCost;
                   const totalMarginPct = totalSale > 0 ? (totalMargin / totalSale) * 100 : 0;
                   return (
-                    <TableRow className="border-t-2 border-[#444444] bg-[#1A1A1A] font-bold">
-                      <TableCell colSpan={2}></TableCell>
-                      <TableCell colSpan={3} className="text-right text-[10px] text-[#888888] uppercase tracking-wider">TOTALS</TableCell>
-                      <TableCell className="text-right tabular-nums text-xs">£{totalCost.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                      <TableCell className="text-right tabular-nums text-xs">£{totalSale.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                      <TableCell className={`text-right tabular-nums text-xs ${totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>£{totalMargin.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                      <TableCell className={`text-right tabular-nums text-[10px] ${totalMarginPct >= 20 ? "text-[#00CC66]" : totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>{totalMarginPct.toFixed(1)}%</TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
+                    <TableRow className="border-t-2 border-[#FF6600] bg-[#1A1A1A] font-bold">
+                      {/* checkbox col */}<TableCell className="w-8"></TableCell>
+                      {/* description */}<TableCell></TableCell>
+                      {/* supplier */}<TableCell></TableCell>
+                      {/* qty */}<TableCell></TableCell>
+                      {/* unit */}<TableCell className="text-right text-[10px] text-[#FF6600] uppercase tracking-wider">TOTALS</TableCell>
+                      {/* cost */}<TableCell className="text-right tabular-nums text-xs font-bold">£{totalCost.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      {/* sale */}<TableCell className="text-right tabular-nums text-xs font-bold">£{totalSale.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      {/* margin */}<TableCell className={`text-right tabular-nums text-xs font-bold ${totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>£{totalMargin.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      {/* margin% */}<TableCell className={`text-right tabular-nums text-[10px] font-bold ${totalMarginPct >= 20 ? "text-[#00CC66]" : totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>{totalMarginPct.toFixed(1)}%</TableCell>
+                      {/* status */}<TableCell></TableCell>
+                      {/* delete */}<TableCell></TableCell>
                     </TableRow>
                   );
                 })()}
