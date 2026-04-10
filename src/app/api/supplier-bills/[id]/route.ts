@@ -33,7 +33,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to fetch supplier bill:", error);
     return Response.json(
-      { error: "Failed to fetch supplier bill" },
+      { error: error instanceof Error ? error.message : "Failed to fetch supplier bill" },
       { status: 500 }
     );
   }
@@ -86,7 +86,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update supplier bill:", error);
     return Response.json(
-      { error: "Failed to update supplier bill" },
+      { error: error instanceof Error ? error.message : "Failed to update supplier bill" },
       { status: 500 }
     );
   }

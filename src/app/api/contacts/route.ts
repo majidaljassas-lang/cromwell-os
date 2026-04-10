@@ -9,7 +9,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list contacts:", error);
     return Response.json(
-      { error: "Failed to list contacts" },
+      { error: error instanceof Error ? error.message : "Failed to list contacts" },
       { status: 500 }
     );
   }
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create contact:", error);
     return Response.json(
-      { error: "Failed to create contact" },
+      { error: error instanceof Error ? error.message : "Failed to create contact" },
       { status: 500 }
     );
   }

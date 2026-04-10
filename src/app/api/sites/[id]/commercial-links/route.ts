@@ -22,7 +22,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create commercial link:", error);
     return Response.json(
-      { error: "Failed to create commercial link" },
+      { error: error instanceof Error ? error.message : "Failed to create commercial link" },
       { status: 500 }
     );
   }

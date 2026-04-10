@@ -33,6 +33,6 @@ export async function PATCH(
     return Response.json(snapshot);
   } catch (error) {
     console.error("Failed to update deal sheet line snapshot:", error);
-    return Response.json({ error: "Failed to update deal sheet line snapshot" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update deal sheet line snapshot" }, { status: 500 });
   }
 }

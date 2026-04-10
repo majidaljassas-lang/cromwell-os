@@ -20,7 +20,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list site packs:", error);
     return Response.json(
-      { error: "Failed to list site packs" },
+      { error: error instanceof Error ? error.message : "Failed to list site packs" },
       { status: 500 }
     );
   }
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create site pack:", error);
     return Response.json(
-      { error: "Failed to create site pack" },
+      { error: error instanceof Error ? error.message : "Failed to create site pack" },
       { status: 500 }
     );
   }

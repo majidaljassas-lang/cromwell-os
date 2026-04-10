@@ -94,6 +94,6 @@ export async function POST(request: Request) {
     }, { status: 201 });
   } catch (error) {
     console.error("Failed to accept candidates:", error);
-    return Response.json({ error: "Failed to accept" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to accept" }, { status: 500 });
   }
 }

@@ -138,7 +138,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to suggest price:", error);
     return Response.json(
-      { error: "Failed to suggest price" },
+      { error: error instanceof Error ? error.message : "Failed to suggest price" },
       { status: 500 }
     );
   }

@@ -132,6 +132,6 @@ export async function POST(
     }, { status: 201 });
   } catch (error) {
     console.error("Failed to add section:", error);
-    return Response.json({ error: "Failed to add section" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to add section" }, { status: 500 });
   }
 }

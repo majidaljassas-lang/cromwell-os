@@ -256,6 +256,43 @@ export async function POST() {
             data: { allocationStatus: finalStatus as any },
           });
 
+          // ── Writeback: cost from CostAllocations -> TicketLine.expectedCostUnit
+          // Sum all allocations on this ticket line so partial bills aggregate.
+          const allocs = await tx.costAllocation.findMany({
+            where: { ticketLineId: matchedTicketLineId! },
+            select: { qtyAllocated: true, totalCost: true },
+          });
+          const totalAllocCost = allocs.reduce(
+            (s, a) => s + Number(a.totalCost || 0),
+            0
+          );
+          const totalAllocQty = allocs.reduce(
+            (s, a) => s + Number(a.qtyAllocated || 0),
+            0
+          );
+
+          const ticketLine = await tx.ticketLine.findUnique({
+            where: { id: matchedTicketLineId! },
+            select: { id: true, qty: true },
+          });
+
+          if (ticketLine) {
+            const lineQty = Number(ticketLine.qty || 0);
+            const newExpectedCostUnit =
+              totalAllocQty > 0 ? totalAllocCost / totalAllocQty : 0;
+            const newExpectedCostTotal =
+              lineQty > 0 ? newExpectedCostUnit * lineQty : totalAllocCost;
+
+            await tx.ticketLine.update({
+              where: { id: matchedTicketLineId! },
+              data: {
+                expectedCostUnit: newExpectedCostUnit,
+                expectedCostTotal: newExpectedCostTotal,
+                actualCostTotal: totalAllocCost,
+              },
+            });
+          }
+
           await tx.event.create({
             data: {
               ticketId: matchedTicketId!,

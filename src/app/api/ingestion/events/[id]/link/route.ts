@@ -93,7 +93,7 @@ export async function PATCH(
     return Response.json({ ok: true, linkedTo: ticketId || enquiryId });
   } catch (error) {
     console.error("Manual link failed:", error);
-    return Response.json({ error: "Failed to link" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to link" }, { status: 500 });
   }
 }
 
@@ -113,6 +113,6 @@ export async function DELETE(
     });
     return Response.json({ ok: true, dismissed: true });
   } catch (error) {
-    return Response.json({ error: "Failed to dismiss" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to dismiss" }, { status: 500 });
   }
 }

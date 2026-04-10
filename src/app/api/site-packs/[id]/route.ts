@@ -28,7 +28,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get site pack:", error);
     return Response.json(
-      { error: "Failed to get site pack" },
+      { error: error instanceof Error ? error.message : "Failed to get site pack" },
       { status: 500 }
     );
   }
@@ -66,7 +66,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update site pack:", error);
     return Response.json(
-      { error: "Failed to update site pack" },
+      { error: error instanceof Error ? error.message : "Failed to update site pack" },
       { status: 500 }
     );
   }
@@ -121,7 +121,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to add item to site pack:", error);
     return Response.json(
-      { error: "Failed to add item to site pack" },
+      { error: error instanceof Error ? error.message : "Failed to add item to site pack" },
       { status: 500 }
     );
   }

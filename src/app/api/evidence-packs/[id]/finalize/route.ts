@@ -29,7 +29,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to finalize evidence pack:", error);
     return Response.json(
-      { error: "Failed to finalize evidence pack" },
+      { error: error instanceof Error ? error.message : "Failed to finalize evidence pack" },
       { status: 500 }
     );
   }

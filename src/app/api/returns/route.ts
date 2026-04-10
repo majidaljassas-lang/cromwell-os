@@ -20,7 +20,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list returns:", error);
     return Response.json(
-      { error: "Failed to list returns" },
+      { error: error instanceof Error ? error.message : "Failed to list returns" },
       { status: 500 }
     );
   }
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create return:", error);
     return Response.json(
-      { error: "Failed to create return" },
+      { error: error instanceof Error ? error.message : "Failed to create return" },
       { status: 500 }
     );
   }

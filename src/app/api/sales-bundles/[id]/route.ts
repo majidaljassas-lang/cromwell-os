@@ -23,7 +23,7 @@ export async function GET(
     return Response.json(bundle);
   } catch (error) {
     console.error("Failed to fetch sales bundle:", error);
-    return Response.json({ error: "Failed to fetch sales bundle" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch sales bundle" }, { status: 500 });
   }
 }
 
@@ -43,7 +43,7 @@ export async function PATCH(
     return Response.json(bundle);
   } catch (error) {
     console.error("Failed to update sales bundle:", error);
-    return Response.json({ error: "Failed to update sales bundle" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update sales bundle" }, { status: 500 });
   }
 }
 
@@ -126,6 +126,6 @@ export async function POST(
     return Response.json(costLink, { status: 201 });
   } catch (error) {
     console.error("Failed to add cost link:", error);
-    return Response.json({ error: "Failed to add cost link" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to add cost link" }, { status: 500 });
   }
 }

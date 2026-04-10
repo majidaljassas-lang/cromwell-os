@@ -10,6 +10,6 @@ export async function DELETE(
     await prisma.return.delete({ where: { id } });
     return Response.json({ deleted: true });
   } catch (error) {
-    return Response.json({ error: "Failed to delete" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
   }
 }

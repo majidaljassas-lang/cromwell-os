@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Failed to upload PO:", error);
-    return Response.json({ error: "Failed to upload PO" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to upload PO" }, { status: 500 });
   }
 }
 

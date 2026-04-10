@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, MoreHorizontal, Search } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +45,15 @@ type SiteWithLinks = {
 };
 
 type CustomerOption = { id: string; name: string };
+
+type AddressMatch = {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  postcode: string;
+  country: string;
+  sourceLabel: string;
+};
 
 /** Auto-generate site code from site name.
  *  "83 Addison Road" -> "83-ADD"
@@ -108,6 +117,77 @@ export function SitesTable({
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
 
+  // Address fields (controlled so smart-find can populate them)
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [postcode, setPostcode] = useState("");
+  const [country, setCountry] = useState("UK");
+
+  // Smart address lookup state
+  const [addressMatches, setAddressMatches] = useState<AddressMatch[]>([]);
+  const [searchingAddress, setSearchingAddress] = useState(false);
+  const [addressDirty, setAddressDirty] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const addressReqRef = useRef(0);
+
+  // Debounced smart address lookup. The endpoint searches the internal DB
+  // first (Site / Customer / PO / IngestionEvent) and falls through to
+  // Nominatim if nothing matches internally.
+  useEffect(() => {
+    if (!open) return;
+    if (addressDirty) return;
+    const query = siteName.trim();
+    if (query.length < 3) {
+      setAddressMatches([]);
+      return;
+    }
+
+    const reqId = ++addressReqRef.current;
+    setSearchingAddress(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/sites/lookup-address?q=${encodeURIComponent(query)}`,
+        );
+        if (reqId !== addressReqRef.current) return;
+        const json = res.ok
+          ? ((await res.json()) as { matches?: AddressMatch[] })
+          : { matches: [] };
+        const matches = json.matches ?? [];
+        if (reqId !== addressReqRef.current) return;
+        setAddressMatches(matches);
+        setSuggestionsOpen(matches.length > 0);
+      } catch {
+        if (reqId !== addressReqRef.current) return;
+        setAddressMatches([]);
+      } finally {
+        if (reqId === addressReqRef.current) setSearchingAddress(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [siteName, open, addressDirty]);
+
+  function applyAddressMatch(m: AddressMatch) {
+    setAddressLine1(m.addressLine1 || "");
+    setAddressLine2(m.addressLine2 || "");
+    setCity(m.city || "");
+    setPostcode(m.postcode || "");
+    setCountry(m.country || "UK");
+    setSuggestionsOpen(false);
+    setAddressDirty(true); // don't keep overriding after they pick one
+  }
+
+  function handleAddressEdit(setter: (v: string) => void) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => {
+      setter(e.target.value);
+      setAddressDirty(true);
+      setSuggestionsOpen(false);
+    };
+  }
+
   // Auto-generate site code when name changes (unless manually edited)
   function handleSiteNameChange(value: string) {
     setSiteName(value);
@@ -149,11 +229,11 @@ export function SitesTable({
     const body = {
       siteName: siteName,
       siteCode: siteCode || undefined,
-      addressLine1: (formData.get("addressLine1") as string) || undefined,
-      addressLine2: (formData.get("addressLine2") as string) || undefined,
-      city: (formData.get("city") as string) || undefined,
-      postcode: (formData.get("postcode") as string) || undefined,
-      country: (formData.get("country") as string) || undefined,
+      addressLine1: addressLine1 || undefined,
+      addressLine2: addressLine2 || undefined,
+      city: city || undefined,
+      postcode: postcode || undefined,
+      country: country || undefined,
       notes: (formData.get("notes") as string) || undefined,
     };
 
@@ -187,6 +267,14 @@ export function SitesTable({
         setSiteCodeManual(false);
         setSelectedCustomerId("");
         setCustomerSearch("");
+        setAddressLine1("");
+        setAddressLine2("");
+        setCity("");
+        setPostcode("");
+        setCountry("UK");
+        setAddressMatches([]);
+        setAddressDirty(false);
+        setSuggestionsOpen(false);
         setOpen(false);
         router.refresh();
       }
@@ -199,6 +287,27 @@ export function SitesTable({
   function getPrimaryCustomer(site: SiteWithLinks): string | null {
     if (site.siteCommercialLinks.length === 0) return null;
     return site.siteCommercialLinks[0].customer.name;
+  }
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDeleteSite(site: SiteWithLinks, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (deletingId) return;
+    if (!confirm(`Delete site ${site.siteName}? This cannot be undone if no related records exist.`)) return;
+    setDeletingId(site.id);
+    try {
+      const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to delete site");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -315,27 +424,88 @@ export function SitesTable({
                 </p>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="addressLine1">Address Line 1</Label>
-                <Input id="addressLine1" name="addressLine1" />
+              <div className="space-y-1.5 relative">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="addressLine1">Address Line 1</Label>
+                  {searchingAddress && (
+                    <span className="text-[9px] text-[#666666] uppercase tracking-wider">
+                      Looking up…
+                    </span>
+                  )}
+                </div>
+                <Input
+                  id="addressLine1"
+                  name="addressLine1"
+                  value={addressLine1}
+                  onChange={handleAddressEdit(setAddressLine1)}
+                  onFocus={() => {
+                    if (addressMatches.length > 0 && !addressDirty) {
+                      setSuggestionsOpen(true);
+                    }
+                  }}
+                />
+                {suggestionsOpen && addressMatches.length > 0 && (
+                  <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-56 overflow-y-auto bg-[#222222] border border-[#333333] shadow-lg">
+                    <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-[#666666] border-b border-[#2A2A2A]">
+                      Suggestions from site name
+                    </div>
+                    {addressMatches.map((m, i) => (
+                      <button
+                        key={`${m.addressLine1}-${m.postcode}-${i}`}
+                        type="button"
+                        onClick={() => applyAddressMatch(m)}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[#E0E0E0] hover:bg-[#333333] border-b border-[#2A2A2A] last:border-0"
+                      >
+                        <div className="text-[#E0E0E0]">
+                          {[m.addressLine1, m.addressLine2, m.city, m.postcode]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </div>
+                        <div className="text-[9px] text-[#666666] mt-0.5">
+                          {m.sourceLabel}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="addressLine2">Address Line 2</Label>
-                <Input id="addressLine2" name="addressLine2" />
+                <Input
+                  id="addressLine2"
+                  name="addressLine2"
+                  value={addressLine2}
+                  onChange={handleAddressEdit(setAddressLine2)}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="city">City</Label>
-                  <Input id="city" name="city" />
+                  <Input
+                    id="city"
+                    name="city"
+                    value={city}
+                    onChange={handleAddressEdit(setCity)}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="postcode">Postcode</Label>
-                  <Input id="postcode" name="postcode" />
+                  <Input
+                    id="postcode"
+                    name="postcode"
+                    value={postcode}
+                    onChange={handleAddressEdit(setPostcode)}
+                  />
                 </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="country">Country</Label>
-                <Input id="country" name="country" defaultValue="UK" />
+                <Input
+                  id="country"
+                  name="country"
+                  value={country}
+                  onChange={handleAddressEdit(setCountry)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="notes">Notes</Label>
@@ -362,7 +532,7 @@ export function SitesTable({
               <TableHead>Status</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead className="text-right">Commercial Links</TableHead>
-              <TableHead className="w-10" />
+              <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -404,11 +574,22 @@ export function SitesTable({
                     {site.siteCommercialLinks.length}
                   </TableCell>
                   <TableCell>
-                    <Link href={`/sites/${site.id}`}>
-                      <Button variant="ghost" size="icon-xs">
-                        <MoreHorizontal className="size-4" />
+                    <div className="flex items-center justify-end gap-1">
+                      <Link href={`/sites/${site.id}`}>
+                        <Button variant="ghost" size="icon-xs">
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </Link>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={deletingId === site.id}
+                        className="h-5 w-5 p-0 text-[#888888] hover:text-[#FF3333]"
+                        onClick={(e) => handleDeleteSite(site, e)}
+                      >
+                        <Trash2 className="size-3" />
                       </Button>
-                    </Link>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

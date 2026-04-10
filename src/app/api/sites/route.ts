@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     return Response.json(sites);
   } catch (error) {
     console.error("Failed to list sites:", error);
-    return Response.json({ error: "Failed to list sites" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list sites" }, { status: 500 });
   }
 }
 
@@ -34,6 +34,6 @@ export async function POST(request: Request) {
     return Response.json(site, { status: 201 });
   } catch (error) {
     console.error("Failed to create site:", error);
-    return Response.json({ error: "Failed to create site" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create site" }, { status: 500 });
   }
 }

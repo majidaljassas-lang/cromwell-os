@@ -22,7 +22,7 @@ export async function GET(
     return Response.json(line);
   } catch (error) {
     console.error("Failed to get ticket line:", error);
-    return Response.json({ error: "Failed to get ticket line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to get ticket line" }, { status: 500 });
   }
 }
 
@@ -135,7 +135,7 @@ export async function PATCH(
     return Response.json(line);
   } catch (error) {
     console.error("Failed to update ticket line:", error);
-    return Response.json({ error: "Failed to update ticket line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update ticket line" }, { status: 500 });
   }
 }
 
@@ -161,6 +161,6 @@ export async function DELETE(
     return Response.json({ deleted: true, id });
   } catch (error) {
     console.error("Failed to delete ticket line:", error);
-    return Response.json({ error: "Failed to delete ticket line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete ticket line" }, { status: 500 });
   }
 }

@@ -263,20 +263,26 @@ export function InboxView({
 
   async function bulkDismiss() {
     if (selectedIds.size === 0) return;
+    if (!confirm(`Dismiss ${selectedIds.size} selected inbox item(s)?`)) return;
     setBulkDismissing(true);
     try {
-      const promises = items
-        .filter((i) => selectedIds.has(i.id))
-        .map((item) =>
-          fetch(`/api/inbox/${item.id}/action`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "dismiss", itemType: item.itemType }),
-          })
-        );
-      await Promise.all(promises);
+      const selected = items.filter((i) => selectedIds.has(i.id));
+      const res = await fetch(`/api/inbox/bulk`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selected.map((i) => i.id),
+          itemTypes: selected.map((i) => i.itemType),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to bulk dismiss");
+        return;
+      }
       setSelectedIds(new Set());
       fetchItems();
+      router.refresh();
     } finally {
       setBulkDismissing(false);
     }

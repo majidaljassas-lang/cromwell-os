@@ -15,6 +15,6 @@ export async function PATCH(
     const updated = await prisma.extractedLineCandidate.update({ where: { id }, data: allowed });
     return Response.json(updated);
   } catch (error) {
-    return Response.json({ error: "Failed to update candidate" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update candidate" }, { status: 500 });
   }
 }

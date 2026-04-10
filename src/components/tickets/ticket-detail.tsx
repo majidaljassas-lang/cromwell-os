@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  FileDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -484,7 +485,7 @@ function InlineLineRow({
           onBlur={onBlurSupplier}
           onKeyDown={kd}
           className={`${INPUT_CLS} w-full text-[10px] text-[#888888]`}
-          placeholder="\u2014"
+          placeholder="—"
         />
       </TableCell>
       <TableCell className="p-0">
@@ -507,7 +508,7 @@ function InlineLineRow({
           onChange={(e) => setCostVal(e.target.value)}
           onBlur={onBlurCost}
           onKeyDown={kd}
-          className={NUM_CLS}
+          className={`${INPUT_CLS} w-full text-right tabular-nums`}
           placeholder="0.00"
         />
       </TableCell>
@@ -517,7 +518,7 @@ function InlineLineRow({
           onChange={(e) => setSaleVal(e.target.value)}
           onBlur={onBlurSale}
           onKeyDown={kd}
-          className={NUM_CLS}
+          className={`${INPUT_CLS} w-full text-right tabular-nums`}
           placeholder="0.00"
         />
       </TableCell>
@@ -771,11 +772,182 @@ export function TicketDetail({
     }
   }
 
+  // ── Print Procurement List ──
+  function handlePrintProcurementList() {
+    // Group lines by section, with sourced (has supplier or PO) marked separately
+    const supplierLineIds = new Set<string>();
+    if (procurementOrders) {
+      for (const po of procurementOrders) {
+        if (po.lines) {
+          for (const pl of po.lines) {
+            if (pl.ticketLineId) supplierLineIds.add(pl.ticketLineId);
+          }
+        }
+      }
+    }
+
+    type RowData = {
+      description: string;
+      qty: string | number;
+      unit: string;
+      supplier: string;
+      cost: string;
+      notes: string;
+      sourced: boolean;
+    };
+    const sections = new Map<string, RowData[]>();
+    for (const line of ticket.lines) {
+      const sec = line.sectionLabel || "MAIN";
+      const arr = sections.get(sec) || [];
+      const supplier =
+        line.supplierName ||
+        supplierLookup[line.id] ||
+        "";
+      const sourced = !!supplier || supplierLineIds.has(line.id);
+      arr.push({
+        description: line.description,
+        qty: dec(line.qty),
+        unit: line.unit,
+        supplier: supplier || "—",
+        cost: line.expectedCostUnit ? `£${dec(line.expectedCostUnit)}` : "—",
+        notes: (line.internalNotes || "")
+          .replace(/^From .*?— /, "")
+          .replace(/ \| /g, " · ")
+          .slice(0, 120),
+        sourced,
+      });
+      sections.set(sec, arr);
+    }
+
+    const totalLines = ticket.lines.length;
+    const sourcedCount = ticket.lines.filter(
+      (l) => l.supplierName || supplierLineIds.has(l.id)
+    ).length;
+    const unsourcedCount = totalLines - sourcedCount;
+
+    const customerName = ticket.payingCustomer?.name || "—";
+    const siteName = ticket.site?.siteName || "—";
+    const today = new Date().toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Procurement List — Ticket ${ticket.ticketNo}</title><style>
+      *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,'Helvetica Neue',Arial,sans-serif}
+      body{padding:25px 30px;font-size:11px;color:#000}
+      h1{font-size:18px;font-weight:800}
+      .sub{font-size:11px;color:#555;margin-top:2px}
+      hr{border:none;border-top:2px solid #000;margin:10px 0}
+      .meta{display:flex;gap:25px;margin:10px 0 14px;font-size:11px;flex-wrap:wrap}
+      .meta b{font-weight:700}
+      .stats{display:flex;gap:18px;margin:10px 0 14px;padding:8px 12px;border:1px solid #000;background:#f5f5f5}
+      .stats div{font-size:11px}
+      .stats .num{font-size:16px;font-weight:800;display:block}
+      table{width:100%;border-collapse:collapse;margin-top:10px}
+      th{text-align:left;padding:5px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #000;font-weight:700;background:#fff}
+      td{padding:5px 6px;border-bottom:1px solid #ccc;font-size:10px;vertical-align:top}
+      .r{text-align:right}
+      .c{text-align:center}
+      .section{background:#000;color:#fff;font-weight:700;text-transform:uppercase;padding:6px 8px;font-size:10px;letter-spacing:1px;margin-top:14px}
+      .sourced{color:#666;text-decoration:line-through}
+      .sourced td{color:#666}
+      .checkbox{width:14px;height:14px;border:1px solid #000;display:inline-block;vertical-align:middle}
+      .notes{font-size:9px;color:#666;font-style:italic}
+      .sig{margin-top:30px;display:flex;gap:50px}
+      .sig-box{border-top:1px solid #000;padding-top:4px;width:200px;font-size:9px;color:#555}
+      @page{margin:14mm}
+      @media print{.no-print{display:none}}
+    </style></head><body>
+      <h1>Cromwell Plumbing Ltd</h1>
+      <div class="sub">Procurement / Shopping List</div>
+      <hr/>
+      <div class="meta">
+        <div><b>Ticket:</b> #${ticket.ticketNo}</div>
+        <div><b>Job:</b> ${ticket.title}</div>
+      </div>
+      <div class="meta">
+        <div><b>Customer:</b> ${customerName}</div>
+        <div><b>Site:</b> ${siteName}</div>
+        <div><b>Status:</b> ${ticket.status}</div>
+        <div><b>Printed:</b> ${today}</div>
+      </div>
+      <div class="stats">
+        <div><span class="num">${totalLines}</span>Total lines</div>
+        <div><span class="num" style="color:#cc0">${unsourcedCount}</span>To order</div>
+        <div><span class="num" style="color:#080">${sourcedCount}</span>Sourced</div>
+      </div>`;
+
+    for (const [sectionName, rows] of sections.entries()) {
+      html += `<div class="section">${sectionName}</div>`;
+      html += `<table><thead><tr>
+        <th style="width:18px"></th>
+        <th>Description</th>
+        <th class="r" style="width:50px">Qty</th>
+        <th style="width:45px">Unit</th>
+        <th style="width:120px">Supplier</th>
+        <th class="r" style="width:60px">Est £/u</th>
+        <th>Notes / Spec</th>
+      </tr></thead><tbody>`;
+      for (const row of rows) {
+        const cls = row.sourced ? "sourced" : "";
+        html += `<tr class="${cls}">
+          <td class="c"><span class="checkbox"></span></td>
+          <td><b>${escapeHtml(row.description)}</b></td>
+          <td class="r">${row.qty}</td>
+          <td>${row.unit}</td>
+          <td>${escapeHtml(row.supplier)}</td>
+          <td class="r">${row.cost}</td>
+          <td class="notes">${escapeHtml(row.notes)}</td>
+        </tr>`;
+      }
+      html += `</tbody></table>`;
+    }
+
+    html += `<div class="sig">
+        <div class="sig-box">Ordered by</div>
+        <div class="sig-box">Date</div>
+      </div>
+    </body></html>`;
+
+    function escapeHtml(s: string) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 500);
+    }
+  }
+
   // ── Convert to Invoice ──
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   async function handleConvertToInvoice() {
     if (selectedLineIds.size === 0) return;
+
+    // Refuse to invoice unpriced lines — would create a £0 draft
+    const unpriced = ticket.lines.filter(
+      (l) =>
+        selectedLineIds.has(l.id) &&
+        (l.actualSaleUnit == null || Number(l.actualSaleUnit) <= 0)
+    );
+    if (unpriced.length > 0) {
+      alert(
+        `Cannot invoice ${unpriced.length} line(s) with no sale price:\n\n` +
+          unpriced.map((l) => `• ${l.description}`).join("\n") +
+          `\n\nSet a sale price (or wait for the supplier bill to land — the system will auto-fill cost and apply the customer's default margin).`
+      );
+      return;
+    }
+
     setCreatingInvoice(true);
     try {
       const res = await fetch(
@@ -790,7 +962,17 @@ export function TicketDetail({
         }
       );
       if (res.ok) {
+        const data = await res.json();
+        if (data.readinessWarnings && data.readinessWarnings.length > 0) {
+          alert(
+            "Invoice draft created with warnings:\n\n" +
+              data.readinessWarnings.map((w: string) => `• ${w}`).join("\n")
+          );
+        }
         router.push("/invoices");
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to create invoice");
       }
     } finally {
       setCreatingInvoice(false);
@@ -1313,6 +1495,21 @@ export function TicketDetail({
               Ticket Lines
             </h2>
             <div className="flex gap-2">
+              {/* Print Procurement List button — for direct ordering */}
+              {ticket.lines.length > 0 &&
+                ticket.status !== "INVOICED" &&
+                ticket.status !== "CLOSED" && (
+                  <Button
+                    onClick={handlePrintProcurementList}
+                    variant="outline"
+                    className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]"
+                    size="sm"
+                  >
+                    <FileDown className="size-4 mr-1" />
+                    Print Procurement List
+                  </Button>
+                )}
+
               {/* Generate Quote button — always available when there are lines */}
               {ticket.lines.length > 0 &&
                 ticket.status !== "INVOICED" &&
@@ -1622,9 +1819,14 @@ export function TicketDetail({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeLines.map((line) => (
+                  activeLines.map((line, idx) => {
+                    const prevLine = idx > 0 ? activeLines[idx - 1] : null;
+                    const showSectionHeader =
+                      !!line.sectionLabel &&
+                      line.sectionLabel !== prevLine?.sectionLabel;
+                    return (
                     <React.Fragment key={line.id}>
-                      {line.sectionLabel && (
+                      {showSectionHeader && (
                         <TableRow className="bg-[#252525] border-t-2 border-[#555555]">
                           <TableCell colSpan={10} className="py-2 px-3">
                             <span className="text-[11px] uppercase tracking-widest font-bold text-[#FF9900]">
@@ -1658,7 +1860,8 @@ export function TicketDetail({
                         supplierLookup={supplierLookup}
                       />
                     </React.Fragment>
-                  ))
+                    );
+                  })
                 )}
                 {/* TOTALS ROW */}
                 {activeLines.length > 0 && (() => {

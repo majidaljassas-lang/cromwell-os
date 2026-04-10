@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     return Response.json(enriched);
   } catch (error) {
     console.error("Failed to fetch site resolution queue:", error);
-    return Response.json({ error: "Failed to fetch" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch" }, { status: 500 });
   }
 }
 

@@ -22,7 +22,7 @@ export async function PATCH(
     return Response.json(event);
   } catch (error) {
     console.error("Failed to update event:", error);
-    return Response.json({ error: "Failed to update event" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update event" }, { status: 500 });
   }
 }
 
@@ -36,6 +36,6 @@ export async function DELETE(
     return Response.json({ ok: true });
   } catch (error) {
     console.error("Failed to delete event:", error);
-    return Response.json({ error: "Failed to delete event" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete event" }, { status: 500 });
   }
 }

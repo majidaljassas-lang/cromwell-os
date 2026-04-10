@@ -24,7 +24,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to list procurement orders:", error);
     return Response.json(
-      { error: "Failed to list procurement orders" },
+      { error: error instanceof Error ? error.message : "Failed to list procurement orders" },
       { status: 500 }
     );
   }
@@ -122,7 +122,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create procurement order:", error);
     return Response.json(
-      { error: "Failed to create procurement order" },
+      { error: error instanceof Error ? error.message : "Failed to create procurement order" },
       { status: 500 }
     );
   }

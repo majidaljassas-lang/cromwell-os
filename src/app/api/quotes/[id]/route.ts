@@ -26,7 +26,7 @@ export async function GET(
     return Response.json(quote);
   } catch (error) {
     console.error("Failed to fetch quote:", error);
-    return Response.json({ error: "Failed to fetch quote" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch quote" }, { status: 500 });
   }
 }
 
@@ -130,7 +130,7 @@ export async function PATCH(
     return Response.json(quote);
   } catch (error) {
     console.error("Failed to update quote:", error);
-    return Response.json({ error: "Failed to update quote" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update quote" }, { status: 500 });
   }
 }
 
@@ -163,6 +163,6 @@ export async function DELETE(
     return Response.json({ ok: true });
   } catch (error) {
     console.error("Failed to delete quote:", error);
-    return Response.json({ error: "Failed to delete quote" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete quote" }, { status: 500 });
   }
 }

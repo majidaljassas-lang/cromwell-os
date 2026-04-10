@@ -175,7 +175,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to process inbox action:", error);
     return Response.json(
-      { error: "Failed to process action" },
+      { error: error instanceof Error ? error.message : "Failed to process action" },
       { status: 500 }
     );
   }

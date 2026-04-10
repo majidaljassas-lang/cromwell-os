@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     return Response.json(items);
   } catch (error) {
     console.error("Failed to list stock:", error);
-    return Response.json({ error: "Failed to list stock" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list stock" }, { status: 500 });
   }
 }
 
@@ -56,6 +56,6 @@ export async function POST(request: Request) {
     return Response.json(item, { status: 201 });
   } catch (error) {
     console.error("Failed to create stock item:", error);
-    return Response.json({ error: "Failed to create stock item" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create stock item" }, { status: 500 });
   }
 }

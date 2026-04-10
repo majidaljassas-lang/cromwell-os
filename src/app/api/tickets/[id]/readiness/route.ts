@@ -70,6 +70,6 @@ export async function GET(
     });
   } catch (error) {
     console.error("Failed to check readiness:", error);
-    return Response.json({ error: "Failed to check readiness" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to check readiness" }, { status: 500 });
   }
 }

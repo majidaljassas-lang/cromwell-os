@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list payments:", error);
     return Response.json(
-      { error: "Failed to list payments" },
+      { error: error instanceof Error ? error.message : "Failed to list payments" },
       { status: 500 }
     );
   }
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create payment:", error);
     return Response.json(
-      { error: "Failed to create payment" },
+      { error: error instanceof Error ? error.message : "Failed to create payment" },
       { status: 500 }
     );
   }

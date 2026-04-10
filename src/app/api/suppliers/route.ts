@@ -8,7 +8,7 @@ export async function GET() {
     return Response.json(suppliers);
   } catch (error) {
     console.error("Failed to fetch suppliers:", error);
-    return Response.json({ error: "Failed to fetch suppliers" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch suppliers" }, { status: 500 });
   }
 }
 
@@ -28,6 +28,6 @@ export async function POST(request: Request) {
     return Response.json(supplier, { status: 201 });
   } catch (error) {
     console.error("Failed to create supplier:", error);
-    return Response.json({ error: "Failed to create supplier" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create supplier" }, { status: 500 });
   }
 }

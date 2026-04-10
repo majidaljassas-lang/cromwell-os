@@ -57,7 +57,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to link PO to invoice:", error);
     return Response.json(
-      { error: "Failed to link PO to invoice" },
+      { error: error instanceof Error ? error.message : "Failed to link PO to invoice" },
       { status: 500 }
     );
   }

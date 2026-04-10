@@ -42,6 +42,6 @@ export async function GET() {
     return Response.json(result);
   } catch (error) {
     console.error("Failed to compute site profitability:", error);
-    return Response.json({ error: "Failed to compute site profitability" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to compute site profitability" }, { status: 500 });
   }
 }

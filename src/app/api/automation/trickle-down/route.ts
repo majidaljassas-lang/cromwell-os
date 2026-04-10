@@ -17,6 +17,10 @@ const BASE =
   "http://localhost:3000";
 
 type StepKey =
+  | "backfillAttachments"
+  | "ackMatcher"
+  | "monitorThreads"
+  | "aiShadow"
   | "autoProgress"
   | "buildEvidence"
   | "generateTasks"
@@ -84,6 +88,31 @@ export async function POST() {
   const started = Date.now();
 
   // Run each step sequentially so later steps see the effects of earlier ones.
+  // backfillAttachments runs first so any new PDF text is in ParsedMessage
+  // before the monitor scans threads for items.
+  const backfillAttachments = await runStep(
+    "backfillAttachments",
+    "/api/automation/sync/outlook/backfill-attachments?limit=10"
+  );
+  // ackMatcher runs after backfill (so PDFs are parsed) and before
+  // monitorThreads. It takes unactioned supplier docs, anchors them to
+  // tickets and creates ProcurementOrders deterministically.
+  const ackMatcher = await runStep(
+    "ackMatcher",
+    "/api/automation/ack-matcher"
+  );
+  // monitorThreads runs next so any newly-extracted lines feed into the rest
+  // of the chain (auto-progress, evidence, tasks).
+  const monitorThreads = await runStep(
+    "monitorThreads",
+    "/api/automation/monitor-threads"
+  );
+  // aiShadow reads newly-ingested events and logs Claude's reasoning as
+  // audit Event rows. Gracefully inert when ANTHROPIC_API_KEY is missing.
+  const aiShadow = await runStep(
+    "aiShadow",
+    "/api/automation/ai-shadow"
+  );
   const autoProgress = await runStep(
     "autoProgress",
     "/api/automation/auto-progress"
@@ -101,7 +130,7 @@ export async function POST() {
     "/api/automation/match-bills"
   );
 
-  const steps = [autoProgress, buildEvidence, generateTasks, matchBills];
+  const steps = [backfillAttachments, ackMatcher, monitorThreads, aiShadow, autoProgress, buildEvidence, generateTasks, matchBills];
   const allOk = steps.every((s) => s.ok);
 
   return Response.json(
@@ -111,6 +140,10 @@ export async function POST() {
       runAt: new Date().toISOString(),
       steps,
       summary: {
+        backfillAttachments: backfillAttachments.result,
+        ackMatcher: ackMatcher.result,
+        monitorThreads: monitorThreads.result,
+        aiShadow: aiShadow.result,
         autoProgress: autoProgress.result,
         buildEvidence: buildEvidence.result,
         generateTasks: generateTasks.result,

@@ -101,7 +101,12 @@ export function MaterialsDrawdownTable({
     const drawdownDate = formData.get("drawdownDate") as string;
     const description = formData.get("description") as string;
 
-    if (!ticketId || !drawdownDate || !description) {
+    const missing: string[] = [];
+    if (!ticketId) missing.push("Ticket");
+    if (!drawdownDate) missing.push("Drawdown Date");
+    if (!description) missing.push("Description");
+    if (missing.length > 0) {
+      alert(`Cannot save materials drawdown — missing: ${missing.join(", ")}`);
       setSubmitting(false);
       return;
     }

@@ -23,7 +23,7 @@ export async function GET(
     return Response.json(supplier);
   } catch (error) {
     console.error("Failed to fetch supplier:", error);
-    return Response.json({ error: "Failed to fetch supplier" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch supplier" }, { status: 500 });
   }
 }
 
@@ -43,6 +43,6 @@ export async function PATCH(
     return Response.json(supplier);
   } catch (error) {
     console.error("Failed to update supplier:", error);
-    return Response.json({ error: "Failed to update supplier" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update supplier" }, { status: 500 });
   }
 }

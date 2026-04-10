@@ -32,7 +32,7 @@ export async function PATCH(
     return Response.json(item);
   } catch (error) {
     console.error("Failed to update stock item:", error);
-    return Response.json({ error: "Failed to update stock item" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update stock item" }, { status: 500 });
   }
 }
 
@@ -49,6 +49,6 @@ export async function DELETE(
     return Response.json(item);
   } catch (error) {
     console.error("Failed to delete stock item:", error);
-    return Response.json({ error: "Failed to delete stock item" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete stock item" }, { status: 500 });
   }
 }

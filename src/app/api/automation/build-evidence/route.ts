@@ -213,7 +213,7 @@ export async function POST() {
   } catch (error) {
     console.error("build-evidence failed:", error);
     return Response.json(
-      { error: "Failed to build evidence" },
+      { error: error instanceof Error ? error.message : "Failed to build evidence" },
       { status: 500 }
     );
   }

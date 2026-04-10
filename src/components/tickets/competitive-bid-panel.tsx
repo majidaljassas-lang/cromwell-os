@@ -462,7 +462,7 @@ export function CompetitiveBidPanel({
           });
 
           // Extract competitor name from sheet name
-          const competitorDisplay = bid.name.replace("Competitive Bid vs ", "");
+          const competitorName = bid.name.replace("Competitive Bid vs ", "");
 
           // Check if any line has utopia/bestOnline data
           const hasUtopia = lines.some(l => l.utopiaUnit > 0);
@@ -481,7 +481,7 @@ export function CompetitiveBidPanel({
               key={bid.id}
               bid={bid}
               lines={lines}
-              competitorDisplay={competitorDisplay}
+              competitorName={competitorName}
               hasUtopia={hasUtopia}
               hasBestOnline={hasBestOnline}
               totCompetitor={totCompetitor}
@@ -970,13 +970,13 @@ function NewBidForm({
 // ─── Existing Bid Card — inline editable ────────────────────────────────────
 
 function ExistingBidCard({
-  bid, lines, competitorDisplay, hasUtopia, hasBestOnline,
+  bid, lines, competitorName, hasUtopia, hasBestOnline,
   totCompetitor, totOurCost, totOurSale, totMargin, totMarginPct, totSaving,
   generatingPdf, handleGenerateEvaluation, onSaved, ticketId,
 }: {
   bid: ExistingCompSheet;
   lines: Array<any>;
-  competitorDisplay: string;
+  competitorName: string;
   hasUtopia: boolean;
   hasBestOnline: boolean;
   totCompetitor: number;
@@ -1008,7 +1008,7 @@ function ExistingBidCard({
     for (const l of lines) m[l.id] = l.competitorUnit;
     return m;
   });
-  const [competitorName, setCompetitorName] = useState(competitorDisplay);
+  const [editedName, setEditedName] = useState(competitorName);
   const [savingName, setSavingName] = useState(false);
 
   function getCost(id: string) { return localCosts[id] || 0; }
@@ -1058,9 +1058,10 @@ function ExistingBidCard({
   // Live totals from local state
   const liveTotCost = lines.reduce((s, l) => s + getCost(l.ticketLine.id) * l.qty, 0);
   const liveTotSale = lines.reduce((s, l) => s + getPrice(l.ticketLine.id) * l.qty, 0);
+  const liveTotCompetitor = lines.reduce((s, l) => s + getCompetitorUnit(l.id) * l.qty, 0);
   const liveTotMargin = liveTotSale - liveTotCost;
   const liveTotMarginPct = liveTotSale > 0 ? (liveTotMargin / liveTotSale) * 100 : 0;
-  const liveTotSaving = totCompetitor - liveTotSale;
+  const liveTotSaving = liveTotCompetitor - liveTotSale;
 
   return (
     <Card>
@@ -1069,9 +1070,9 @@ function ExistingBidCard({
           <CardTitle className="text-sm font-bold flex items-center gap-2">
             <span className="text-[#888]">Competitive Bid vs</span>
             <input
-              value={competitorName}
-              onChange={(e) => setCompetitorName(e.target.value)}
-              onBlur={() => saveCompetitorName(competitorName)}
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onBlur={() => saveCompetitorName(editedName)}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
               className="bg-transparent border-b border-[#444] px-1 focus:border-[#FF6600] focus:outline-none text-[#FF6600] min-w-[120px]"
               placeholder="Competitor name"
@@ -1093,8 +1094,8 @@ function ExistingBidCard({
         {/* Summary cards — live updating */}
         <div className="grid grid-cols-5 gap-3">
           <div className="border border-[#333333] bg-[#111] p-2 text-center">
-            <p className="text-[9px] text-[#888888] uppercase">{competitorDisplay} Total</p>
-            <p className="text-sm font-semibold tabular-nums text-[#FF9900]">£{fmtMoney(totCompetitor)}</p>
+            <p className="text-[9px] text-[#888888] uppercase">{editedName} Total</p>
+            <p className="text-sm font-semibold tabular-nums text-[#FF9900]">£{fmtMoney(liveTotCompetitor)}</p>
           </div>
           <div className="border border-[#333333] bg-[#111] p-2 text-center">
             <p className="text-[9px] text-[#888888] uppercase">Our Cost</p>
@@ -1109,7 +1110,7 @@ function ExistingBidCard({
             <p className={`text-sm font-semibold tabular-nums ${liveTotMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>£{fmtMoney(liveTotMargin)}</p>
           </div>
           <div className="border border-[#333333] bg-[#111] p-2 text-center">
-            <p className="text-[9px] text-[#888888] uppercase">Saving vs {competitorDisplay}</p>
+            <p className="text-[9px] text-[#888888] uppercase">Saving vs {editedName}</p>
             <p className={`text-sm font-semibold tabular-nums ${liveTotSaving > 0 ? "text-[#00CC66]" : liveTotSaving < 0 ? "text-[#FF3333]" : ""}`}>£{fmtMoney(liveTotSaving)}</p>
           </div>
         </div>
@@ -1121,7 +1122,7 @@ function ExistingBidCard({
               <TableRow className="border-[#333333]">
                 <TableHead className="text-[10px] uppercase tracking-wider text-[#888888] w-[25%]">Item</TableHead>
                 <TableHead className={`${thCls} w-10`}>Qty</TableHead>
-                <TableHead className={`${thCls} w-20`}>{competitorDisplay}</TableHead>
+                <TableHead className={`${thCls} w-20`}>{editedName}</TableHead>
                 {hasUtopia && <TableHead className={`${thCls} w-20`}>Competitor 2</TableHead>}
                 {hasBestOnline && <TableHead className={`${thCls} w-20`}>Competitor 3</TableHead>}
                 <TableHead className={`${thCls} w-24`}>Our Cost</TableHead>

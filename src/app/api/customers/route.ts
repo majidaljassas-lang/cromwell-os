@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list customers:", error);
     return Response.json(
-      { error: "Failed to list customers" },
+      { error: error instanceof Error ? error.message : "Failed to list customers" },
       { status: 500 }
     );
   }
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create customer:", error);
     return Response.json(
-      { error: "Failed to create customer" },
+      { error: error instanceof Error ? error.message : "Failed to create customer" },
       { status: 500 }
     );
   }

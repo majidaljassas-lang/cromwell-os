@@ -20,7 +20,7 @@ export async function GET(
     return Response.json(bundles);
   } catch (error) {
     console.error("Failed to fetch sales bundles:", error);
-    return Response.json({ error: "Failed to fetch sales bundles" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch sales bundles" }, { status: 500 });
   }
 }
 
@@ -55,6 +55,6 @@ export async function POST(
     return Response.json(bundle, { status: 201 });
   } catch (error) {
     console.error("Failed to create sales bundle:", error);
-    return Response.json({ error: "Failed to create sales bundle" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create sales bundle" }, { status: 500 });
   }
 }

@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     return Response.json(bills);
   } catch (error) {
     console.error("Failed to list commercial bills:", error);
-    return Response.json({ error: "Failed to list commercial bills" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list commercial bills" }, { status: 500 });
   }
 }
 
@@ -125,6 +125,6 @@ export async function POST(request: Request) {
     return Response.json(fullBill, { status: 201 });
   } catch (error) {
     console.error("Failed to create commercial bill:", error);
-    return Response.json({ error: "Failed to create commercial bill" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create commercial bill" }, { status: 500 });
   }
 }

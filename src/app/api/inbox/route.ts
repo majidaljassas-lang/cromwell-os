@@ -195,7 +195,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to fetch inbox:", error);
     return Response.json(
-      { error: "Failed to fetch inbox" },
+      { error: error instanceof Error ? error.message : "Failed to fetch inbox" },
       { status: 500 }
     );
   }
@@ -247,7 +247,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create manual inbox item:", error);
     return Response.json(
-      { error: "Failed to create inbox item" },
+      { error: error instanceof Error ? error.message : "Failed to create inbox item" },
       { status: 500 }
     );
   }

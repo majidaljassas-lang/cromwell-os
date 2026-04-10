@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     return Response.json(aliases);
   } catch (error) {
     console.error("Failed to fetch customer aliases:", error);
-    return Response.json({ error: "Failed to fetch" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch" }, { status: 500 });
   }
 }
 
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     return Response.json(alias, { status: 201 });
   } catch (error) {
     console.error("Failed to create customer alias:", error);
-    return Response.json({ error: "Failed to create" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create" }, { status: 500 });
   }
 }
 
@@ -61,6 +61,6 @@ export async function DELETE(request: Request) {
     return Response.json({ deleted: true });
   } catch (error) {
     console.error("Failed to delete customer alias:", error);
-    return Response.json({ error: "Failed to delete" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
   }
 }

@@ -32,7 +32,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get evidence pack:", error);
     return Response.json(
-      { error: "Failed to get evidence pack" },
+      { error: error instanceof Error ? error.message : "Failed to get evidence pack" },
       { status: 500 }
     );
   }
@@ -71,7 +71,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update evidence pack:", error);
     return Response.json(
-      { error: "Failed to update evidence pack" },
+      { error: error instanceof Error ? error.message : "Failed to update evidence pack" },
       { status: 500 }
     );
   }

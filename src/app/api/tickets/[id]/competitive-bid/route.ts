@@ -189,7 +189,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to fetch competitive bids:", error);
     return Response.json(
-      { error: "Failed to fetch competitive bids" },
+      { error: error instanceof Error ? error.message : "Failed to fetch competitive bids" },
       { status: 500 }
     );
   }

@@ -56,6 +56,6 @@ export async function POST(
     return Response.json(usage, { status: 201 });
   } catch (error) {
     console.error("Failed to use stock:", error);
-    return Response.json({ error: "Failed to use stock" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to use stock" }, { status: 500 });
   }
 }

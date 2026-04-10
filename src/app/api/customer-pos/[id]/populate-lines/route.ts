@@ -58,6 +58,6 @@ export async function POST(
     return Response.json({ populated: created.count, fromQuote: quote.quoteNo });
   } catch (error) {
     console.error("Failed to populate PO lines:", error);
-    return Response.json({ error: "Failed to populate PO lines" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to populate PO lines" }, { status: 500 });
   }
 }

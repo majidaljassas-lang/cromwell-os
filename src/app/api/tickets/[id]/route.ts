@@ -26,7 +26,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get ticket:", error);
     return Response.json(
-      { error: "Failed to get ticket" },
+      { error: error instanceof Error ? error.message : "Failed to get ticket" },
       { status: 500 }
     );
   }
@@ -109,7 +109,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update ticket:", error);
     return Response.json(
-      { error: "Failed to update ticket" },
+      { error: error instanceof Error ? error.message : "Failed to update ticket" },
       { status: 500 }
     );
   }
@@ -130,6 +130,6 @@ export async function DELETE(
     return Response.json({ deleted: true });
   } catch (error) {
     console.error("Failed to delete ticket:", error);
-    return Response.json({ error: "Failed to delete ticket" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete ticket" }, { status: 500 });
   }
 }

@@ -391,7 +391,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                           {s.paymentTerms}
                         </span>
                       ) : (
-                        <span className="text-[#555555]">\u2014</span>
+                        <span className="text-[#555555]">—</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-[#E0E0E0]">

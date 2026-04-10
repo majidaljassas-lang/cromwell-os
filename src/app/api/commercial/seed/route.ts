@@ -231,6 +231,6 @@ export async function POST() {
     const msg = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : "";
     console.error("Failed to seed commercial data:", msg, stack);
-    return Response.json({ error: "Failed to seed commercial data", detail: msg }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to seed commercial data", detail: msg }, { status: 500 });
   }
 }

@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list customer POs:", error);
     return Response.json(
-      { error: "Failed to list customer POs" },
+      { error: error instanceof Error ? error.message : "Failed to list customer POs" },
       { status: 500 }
     );
   }
@@ -192,7 +192,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create customer PO:", error);
     return Response.json(
-      { error: "Failed to create customer PO" },
+      { error: error instanceof Error ? error.message : "Failed to create customer PO" },
       { status: 500 }
     );
   }

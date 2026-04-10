@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     return Response.json(events);
   } catch (error) {
     console.error("Failed to list supply events:", error);
-    return Response.json({ error: "Failed to list supply events" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list supply events" }, { status: 500 });
   }
 }
 
@@ -117,6 +117,6 @@ export async function POST(request: Request) {
     return Response.json(event, { status: 201 });
   } catch (error) {
     console.error("Failed to create supply event:", error);
-    return Response.json({ error: "Failed to create supply event" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create supply event" }, { status: 500 });
   }
 }

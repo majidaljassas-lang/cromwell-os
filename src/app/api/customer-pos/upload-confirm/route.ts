@@ -89,6 +89,6 @@ export async function POST(request: Request) {
     return Response.json({ id: po.id, poNo }, { status: 201 });
   } catch (error) {
     console.error("Failed to confirm PO upload:", error);
-    return Response.json({ error: "Failed to create PO" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create PO" }, { status: 500 });
   }
 }

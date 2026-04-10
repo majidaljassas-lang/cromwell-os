@@ -25,7 +25,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to send sales invoice:", error);
     return Response.json(
-      { error: "Failed to send sales invoice" },
+      { error: error instanceof Error ? error.message : "Failed to send sales invoice" },
       { status: 500 }
     );
   }

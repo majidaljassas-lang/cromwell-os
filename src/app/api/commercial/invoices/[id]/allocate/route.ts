@@ -95,6 +95,6 @@ export async function POST(
     return Response.json(allocation, { status: 201 });
   } catch (error) {
     console.error("Failed to allocate invoice line:", error);
-    return Response.json({ error: "Failed to allocate invoice line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to allocate invoice line" }, { status: 500 });
   }
 }

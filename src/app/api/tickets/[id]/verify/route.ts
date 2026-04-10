@@ -67,7 +67,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to verify ticket:", error);
     return Response.json(
-      { error: "Failed to verify ticket" },
+      { error: error instanceof Error ? error.message : "Failed to verify ticket" },
       { status: 500 }
     );
   }

@@ -14,7 +14,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list stock excess records:", error);
     return Response.json(
-      { error: "Failed to list stock excess records" },
+      { error: error instanceof Error ? error.message : "Failed to list stock excess records" },
       { status: 500 }
     );
   }
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create stock excess record:", error);
     return Response.json(
-      { error: "Failed to create stock excess record" },
+      { error: error instanceof Error ? error.message : "Failed to create stock excess record" },
       { status: 500 }
     );
   }

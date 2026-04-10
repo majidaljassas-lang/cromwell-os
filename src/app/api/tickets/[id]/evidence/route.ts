@@ -20,7 +20,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to list evidence fragments:", error);
     return Response.json(
-      { error: "Failed to list evidence fragments" },
+      { error: error instanceof Error ? error.message : "Failed to list evidence fragments" },
       { status: 500 }
     );
   }
@@ -77,7 +77,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create evidence fragment:", error);
     return Response.json(
-      { error: "Failed to create evidence fragment" },
+      { error: error instanceof Error ? error.message : "Failed to create evidence fragment" },
       { status: 500 }
     );
   }

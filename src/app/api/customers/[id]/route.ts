@@ -17,7 +17,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get customer:", error);
     return Response.json(
-      { error: "Failed to get customer" },
+      { error: error instanceof Error ? error.message : "Failed to get customer" },
       { status: 500 }
     );
   }
@@ -38,7 +38,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update customer:", error);
     return Response.json(
-      { error: "Failed to update customer" },
+      { error: error instanceof Error ? error.message : "Failed to update customer" },
       { status: 500 }
     );
   }
@@ -60,7 +60,7 @@ export async function DELETE(
   } catch (error) {
     console.error("Failed to delete customer:", error);
     return Response.json(
-      { error: "Failed to delete customer" },
+      { error: error instanceof Error ? error.message : "Failed to delete customer" },
       { status: 500 }
     );
   }

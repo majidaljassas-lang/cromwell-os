@@ -16,7 +16,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get contact:", error);
     return Response.json(
-      { error: "Failed to get contact" },
+      { error: error instanceof Error ? error.message : "Failed to get contact" },
       { status: 500 }
     );
   }
@@ -37,7 +37,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update contact:", error);
     return Response.json(
-      { error: "Failed to update contact" },
+      { error: error instanceof Error ? error.message : "Failed to update contact" },
       { status: 500 }
     );
   }

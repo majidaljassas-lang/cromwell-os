@@ -22,7 +22,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list reallocations:", error);
     return Response.json(
-      { error: "Failed to list reallocations" },
+      { error: error instanceof Error ? error.message : "Failed to list reallocations" },
       { status: 500 }
     );
   }
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create reallocation:", error);
     return Response.json(
-      { error: "Failed to create reallocation" },
+      { error: error instanceof Error ? error.message : "Failed to create reallocation" },
       { status: 500 }
     );
   }

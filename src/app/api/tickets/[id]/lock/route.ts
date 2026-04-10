@@ -49,7 +49,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to lock ticket:", error);
     return Response.json(
-      { error: "Failed to lock ticket" },
+      { error: error instanceof Error ? error.message : "Failed to lock ticket" },
       { status: 500 }
     );
   }

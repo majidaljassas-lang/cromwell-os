@@ -19,7 +19,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list credit notes:", error);
     return Response.json(
-      { error: "Failed to list credit notes" },
+      { error: error instanceof Error ? error.message : "Failed to list credit notes" },
       { status: 500 }
     );
   }
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create credit note:", error);
     return Response.json(
-      { error: "Failed to create credit note" },
+      { error: error instanceof Error ? error.message : "Failed to create credit note" },
       { status: 500 }
     );
   }

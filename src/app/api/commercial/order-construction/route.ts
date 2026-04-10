@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Failed to get order construction:", error);
-    return Response.json({ error: "Failed to get order construction" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to get order construction" }, { status: 500 });
   }
 }
 

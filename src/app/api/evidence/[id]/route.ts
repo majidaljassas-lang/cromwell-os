@@ -27,7 +27,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get evidence fragment:", error);
     return Response.json(
-      { error: "Failed to get evidence fragment" },
+      { error: error instanceof Error ? error.message : "Failed to get evidence fragment" },
       { status: 500 }
     );
   }
@@ -65,7 +65,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update evidence fragment:", error);
     return Response.json(
-      { error: "Failed to update evidence fragment" },
+      { error: error instanceof Error ? error.message : "Failed to update evidence fragment" },
       { status: 500 }
     );
   }

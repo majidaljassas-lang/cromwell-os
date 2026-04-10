@@ -22,7 +22,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to list labour drawdowns:", error);
     return Response.json(
-      { error: "Failed to list labour drawdowns" },
+      { error: error instanceof Error ? error.message : "Failed to list labour drawdowns" },
       { status: 500 }
     );
   }
@@ -99,7 +99,7 @@ export async function POST(
           siteId,
           weekEndingDate: weekEndingDate ? new Date(weekEndingDate) : undefined,
           workDate: new Date(workDate),
-          plumberContactId,
+          plumberContactId: plumberContactId || undefined,
           dayType: dayType as "WEEKDAY" | "WEEKEND" | "CUSTOM",
           plumberCount,
           daysWorked,
@@ -162,7 +162,12 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create labour drawdown:", error);
     return Response.json(
-      { error: "Failed to create labour drawdown" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create labour drawdown",
+      },
       { status: 500 }
     );
   }
@@ -215,6 +220,6 @@ export async function DELETE(
     return Response.json({ deleted: true });
   } catch (error) {
     console.error("Failed to delete labour entry:", error);
-    return Response.json({ error: "Failed to delete" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
   }
 }

@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list sales invoices:", error);
     return Response.json(
-      { error: "Failed to list sales invoices" },
+      { error: error instanceof Error ? error.message : "Failed to list sales invoices" },
       { status: 500 }
     );
   }

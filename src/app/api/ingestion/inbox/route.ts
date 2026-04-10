@@ -111,6 +111,6 @@ export async function GET(request: Request) {
     return Response.json({ items: inboxItems, total, limit, offset });
   } catch (error) {
     console.error("Failed to fetch ingestion inbox:", error);
-    return Response.json({ error: "Failed to fetch inbox" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch inbox" }, { status: 500 });
   }
 }

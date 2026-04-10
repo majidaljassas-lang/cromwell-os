@@ -62,6 +62,23 @@ const WORK_GROUPS = [
   /supplier/i, /order/i,
 ];
 
+// Group-chat keywords that should auto-dismiss (football/sports noise).
+// Matched case-insensitively as substrings against the chat/group name only —
+// never against 1:1 chats.
+const IGNORED_GROUP_KEYWORDS = [
+  "football", "fc ", " fc", "premier league", "champions league",
+  "fantasy football", "ronaldo", "messi", "arsenal", "chelsea",
+  "liverpool", "man city", "man utd", "tottenham", "spurs",
+  "wba", "fixtures", "matchday", "el clasico", "world cup",
+];
+
+function isIgnoredGroup(chatName: string, isGroup: boolean): boolean {
+  if (!isGroup) return false;
+  if (!chatName) return false;
+  const lower = chatName.toLowerCase();
+  return IGNORED_GROUP_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 function isWorkRelated(msg: {
   message_text: string;
   chat_name: string;
@@ -135,6 +152,12 @@ export async function POST(request: Request) {
       });
     }
 
+    // Football / sports group auto-dismiss (keep audit trail, don't skip).
+    const ignoredByKeyword = isIgnoredGroup(msg.chat_name || "", !!msg.is_group);
+    const eventRawPayload = ignoredByKeyword
+      ? { ...msg, _filteredReason: "football_keyword" }
+      : msg;
+
     // Create ingestion event
     const event = await prisma.ingestionEvent.create({
       data: {
@@ -142,9 +165,9 @@ export async function POST(request: Request) {
         externalMessageId: msg.message_id,
         sourceRecordType: "WHATSAPP",
         eventKind: msg.is_sent ? "WHATSAPP_SENT" : "WHATSAPP_MESSAGE",
-        rawPayload: msg,
+        rawPayload: eventRawPayload,
         receivedAt: msgDate,
-        status: "PARSED",
+        status: ignoredByKeyword ? "DISMISSED" : "PARSED",
       },
     });
 
@@ -180,12 +203,12 @@ export async function POST(request: Request) {
       isSent: msg.is_sent,
     });
 
-    // Update event with classification
+    // Update event with classification (preserve DISMISSED status for filtered groups)
     await prisma.ingestionEvent.update({
       where: { id: event.id },
       data: {
         eventKind: workSignal.isWork ? (msg.is_sent ? "WHATSAPP_SENT" : classification.classification) : "PERSONAL",
-        status: "CLASSIFIED",
+        status: ignoredByKeyword ? "DISMISSED" : "CLASSIFIED",
       },
     });
 
@@ -209,12 +232,12 @@ export async function POST(request: Request) {
       // Inbound event creation failed — continue anyway
     }
 
-    // Update event with classification
+    // Update event with classification (preserve DISMISSED status for filtered groups)
     await prisma.ingestionEvent.update({
       where: { id: event.id },
       data: {
         eventKind: msg.is_sent ? "WHATSAPP_SENT" : classification.classification,
-        status: "CLASSIFIED",
+        status: ignoredByKeyword ? "DISMISSED" : "CLASSIFIED",
       },
     });
 
@@ -226,6 +249,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("WhatsApp live ingest failed:", error);
-    return Response.json({ error: "Failed to ingest" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to ingest" }, { status: 500 });
   }
 }

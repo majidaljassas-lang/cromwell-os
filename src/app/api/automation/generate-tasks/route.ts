@@ -271,7 +271,7 @@ export async function POST() {
   } catch (error) {
     console.error("generate-tasks failed:", error);
     return Response.json(
-      { error: "Failed to generate tasks" },
+      { error: error instanceof Error ? error.message : "Failed to generate tasks" },
       { status: 500 }
     );
   }

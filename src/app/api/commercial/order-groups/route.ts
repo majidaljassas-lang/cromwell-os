@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     return Response.json(groups);
   } catch (error) {
     console.error("Failed to list order groups:", error);
-    return Response.json({ error: "Failed to list order groups" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list order groups" }, { status: 500 });
   }
 }
 
@@ -59,6 +59,6 @@ export async function POST(request: Request) {
     return Response.json(group, { status: 201 });
   } catch (error) {
     console.error("Failed to create order group:", error);
-    return Response.json({ error: "Failed to create order group" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create order group" }, { status: 500 });
   }
 }

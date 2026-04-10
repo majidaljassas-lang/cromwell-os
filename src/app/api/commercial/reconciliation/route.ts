@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     return Response.json(results);
   } catch (error) {
     console.error("Failed to fetch reconciliation results:", error);
-    return Response.json({ error: "Failed to fetch reconciliation results" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch reconciliation results" }, { status: 500 });
   }
 }
 
@@ -54,6 +54,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Failed to run reconciliation:", error);
-    return Response.json({ error: "Failed to run reconciliation" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to run reconciliation" }, { status: 500 });
   }
 }

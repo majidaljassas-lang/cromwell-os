@@ -63,7 +63,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Failed to list media evidence:", error);
-    return Response.json({ error: "Failed to list media evidence" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list media evidence" }, { status: 500 });
   }
 }
 

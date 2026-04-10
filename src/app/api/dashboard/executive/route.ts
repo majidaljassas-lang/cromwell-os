@@ -218,7 +218,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to compute executive dashboard:", error);
     return Response.json(
-      { error: "Failed to compute executive dashboard" },
+      { error: error instanceof Error ? error.message : "Failed to compute executive dashboard" },
       { status: 500 }
     );
   }

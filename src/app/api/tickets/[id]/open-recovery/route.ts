@@ -74,7 +74,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to open recovery case:", error);
     return Response.json(
-      { error: "Failed to open recovery case" },
+      { error: error instanceof Error ? error.message : "Failed to open recovery case" },
       { status: 500 }
     );
   }

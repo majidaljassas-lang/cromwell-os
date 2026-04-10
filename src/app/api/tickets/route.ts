@@ -14,7 +14,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list tickets:", error);
     return Response.json(
-      { error: "Failed to list tickets" },
+      { error: error instanceof Error ? error.message : "Failed to list tickets" },
       { status: 500 }
     );
   }
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create ticket:", error);
     return Response.json(
-      { error: "Failed to create ticket" },
+      { error: error instanceof Error ? error.message : "Failed to create ticket" },
       { status: 500 }
     );
   }

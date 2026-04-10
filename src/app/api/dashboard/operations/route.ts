@@ -90,7 +90,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to compute operations dashboard:", error);
     return Response.json(
-      { error: "Failed to compute operations dashboard" },
+      { error: error instanceof Error ? error.message : "Failed to compute operations dashboard" },
       { status: 500 }
     );
   }

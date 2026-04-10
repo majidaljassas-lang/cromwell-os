@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list absorbed cost allocations:", error);
     return Response.json(
-      { error: "Failed to list absorbed cost allocations" },
+      { error: error instanceof Error ? error.message : "Failed to list absorbed cost allocations" },
       { status: 500 }
     );
   }
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create absorbed cost allocation:", error);
     return Response.json(
-      { error: "Failed to create absorbed cost allocation" },
+      { error: error instanceof Error ? error.message : "Failed to create absorbed cost allocation" },
       { status: 500 }
     );
   }
@@ -103,6 +103,6 @@ export async function DELETE(request: Request) {
     await prisma.absorbedCostAllocation.delete({ where: { id } });
     return Response.json({ deleted: true });
   } catch (error) {
-    return Response.json({ error: "Failed to delete" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
   }
 }

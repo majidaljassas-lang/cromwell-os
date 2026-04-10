@@ -23,7 +23,7 @@ export async function GET(
     return Response.json(compSheet);
   } catch (error) {
     console.error("Failed to fetch comp sheet:", error);
-    return Response.json({ error: "Failed to fetch comp sheet" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch comp sheet" }, { status: 500 });
   }
 }
 
@@ -43,7 +43,7 @@ export async function PATCH(
     return Response.json(compSheet);
   } catch (error) {
     console.error("Failed to update comp sheet:", error);
-    return Response.json({ error: "Failed to update comp sheet" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update comp sheet" }, { status: 500 });
   }
 }
 
@@ -77,6 +77,6 @@ export async function POST(
     return Response.json(line, { status: 201 });
   } catch (error) {
     console.error("Failed to add comp sheet line:", error);
-    return Response.json({ error: "Failed to add comp sheet line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to add comp sheet line" }, { status: 500 });
   }
 }

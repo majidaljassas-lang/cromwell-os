@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     return Response.json(drafts);
   } catch (error) {
     console.error("Failed to fetch draft invoice recovery:", error);
-    return Response.json({ error: "Failed to fetch" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch" }, { status: 500 });
   }
 }
 
@@ -60,6 +60,6 @@ export async function POST(request: Request) {
     return Response.json(draft, { status: 201 });
   } catch (error) {
     console.error("Failed to create draft invoice recovery:", error);
-    return Response.json({ error: "Failed to create" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create" }, { status: 500 });
   }
 }

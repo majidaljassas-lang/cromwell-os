@@ -15,7 +15,7 @@ export async function GET() {
     return Response.json(products);
   } catch (error) {
     console.error("Failed to list canonical products:", error);
-    return Response.json({ error: "Failed to list canonical products" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list canonical products" }, { status: 500 });
   }
 }
 
@@ -34,6 +34,6 @@ export async function POST(request: Request) {
     return Response.json(product, { status: 201 });
   } catch (error) {
     console.error("Failed to create canonical product:", error);
-    return Response.json({ error: "Failed to create canonical product" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create canonical product" }, { status: 500 });
   }
 }

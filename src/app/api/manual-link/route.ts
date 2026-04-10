@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 201 });
   } catch (error) {
     console.error("Manual link failed:", error);
-    return Response.json({ error: "Failed to create manual link" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create manual link" }, { status: 500 });
   }
 }
 

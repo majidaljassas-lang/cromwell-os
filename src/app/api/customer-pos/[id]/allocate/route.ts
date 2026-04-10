@@ -59,7 +59,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create PO allocation:", error);
     return Response.json(
-      { error: "Failed to create PO allocation" },
+      { error: error instanceof Error ? error.message : "Failed to create PO allocation" },
       { status: 500 }
     );
   }

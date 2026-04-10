@@ -20,7 +20,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to list materials drawdowns:", error);
     return Response.json(
-      { error: "Failed to list materials drawdowns" },
+      { error: error instanceof Error ? error.message : "Failed to list materials drawdowns" },
       { status: 500 }
     );
   }
@@ -114,7 +114,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create materials drawdown:", error);
     return Response.json(
-      { error: "Failed to create materials drawdown" },
+      { error: error instanceof Error ? error.message : "Failed to create materials drawdown" },
       { status: 500 }
     );
   }

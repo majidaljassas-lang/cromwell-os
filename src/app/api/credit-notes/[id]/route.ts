@@ -31,7 +31,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to fetch credit note:", error);
     return Response.json(
-      { error: "Failed to fetch credit note" },
+      { error: error instanceof Error ? error.message : "Failed to fetch credit note" },
       { status: 500 }
     );
   }
@@ -80,7 +80,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update credit note:", error);
     return Response.json(
-      { error: "Failed to update credit note" },
+      { error: error instanceof Error ? error.message : "Failed to update credit note" },
       { status: 500 }
     );
   }
@@ -134,7 +134,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to add credit note allocation:", error);
     return Response.json(
-      { error: "Failed to add credit note allocation" },
+      { error: error instanceof Error ? error.message : "Failed to add credit note allocation" },
       { status: 500 }
     );
   }

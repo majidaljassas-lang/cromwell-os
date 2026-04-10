@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     return Response.json({ items, summary });
   } catch (error) {
     console.error("Failed to list review queue:", error);
-    return Response.json({ error: "Failed to list review queue" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list review queue" }, { status: 500 });
   }
 }
 
@@ -58,6 +58,6 @@ export async function PATCH(request: Request) {
     return Response.json(updated);
   } catch (error) {
     console.error("Failed to update review queue item:", error);
-    return Response.json({ error: "Failed to update review queue item" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update review queue item" }, { status: 500 });
   }
 }

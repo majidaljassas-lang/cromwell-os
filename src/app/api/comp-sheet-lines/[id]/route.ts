@@ -55,6 +55,6 @@ export async function PATCH(
     return Response.json(updated);
   } catch (error) {
     console.error("Failed to update comp sheet line:", error);
-    return Response.json({ error: "Failed to update comp sheet line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update comp sheet line" }, { status: 500 });
   }
 }

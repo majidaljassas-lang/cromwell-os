@@ -55,7 +55,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to convert work item to ticket:", error);
     return Response.json(
-      { error: "Failed to convert work item to ticket" },
+      { error: error instanceof Error ? error.message : "Failed to convert work item to ticket" },
       { status: 500 }
     );
   }

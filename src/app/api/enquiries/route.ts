@@ -14,7 +14,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list enquiries:", error);
     return Response.json(
-      { error: "Failed to list enquiries" },
+      { error: error instanceof Error ? error.message : "Failed to list enquiries" },
       { status: 500 }
     );
   }
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create enquiry:", error);
     return Response.json(
-      { error: "Failed to create enquiry" },
+      { error: error instanceof Error ? error.message : "Failed to create enquiry" },
       { status: 500 }
     );
   }

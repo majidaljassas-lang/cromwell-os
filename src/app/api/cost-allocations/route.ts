@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list cost allocations:", error);
     return Response.json(
-      { error: "Failed to list cost allocations" },
+      { error: error instanceof Error ? error.message : "Failed to list cost allocations" },
       { status: 500 }
     );
   }
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create cost allocation:", error);
     return Response.json(
-      { error: "Failed to create cost allocation" },
+      { error: error instanceof Error ? error.message : "Failed to create cost allocation" },
       { status: 500 }
     );
   }

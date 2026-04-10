@@ -12,7 +12,7 @@ export async function GET(
     });
     return Response.json(payments);
   } catch (error) {
-    return Response.json({ error: "Failed to list payments" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to list payments" }, { status: 500 });
   }
 }
 
@@ -38,7 +38,7 @@ export async function POST(
     return Response.json(payment, { status: 201 });
   } catch (error) {
     console.error("Failed to create payment:", error);
-    return Response.json({ error: "Failed to create payment" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create payment" }, { status: 500 });
   }
 }
 
@@ -54,6 +54,6 @@ export async function DELETE(
     await prisma.pOCashPayment.delete({ where: { id: paymentId } });
     return Response.json({ deleted: true });
   } catch (error) {
-    return Response.json({ error: "Failed to delete" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
   }
 }

@@ -20,7 +20,7 @@ export async function GET(
     return Response.json(compSheets);
   } catch (error) {
     console.error("Failed to fetch comp sheets:", error);
-    return Response.json({ error: "Failed to fetch comp sheets" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch comp sheets" }, { status: 500 });
   }
 }
 
@@ -62,6 +62,6 @@ export async function POST(
     return Response.json(compSheet, { status: 201 });
   } catch (error) {
     console.error("Failed to create comp sheet:", error);
-    return Response.json({ error: "Failed to create comp sheet" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create comp sheet" }, { status: 500 });
   }
 }

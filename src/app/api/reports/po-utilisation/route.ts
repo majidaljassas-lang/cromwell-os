@@ -39,7 +39,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to compute PO utilisation:", error);
     return Response.json(
-      { error: "Failed to compute PO utilisation" },
+      { error: error instanceof Error ? error.message : "Failed to compute PO utilisation" },
       { status: 500 }
     );
   }

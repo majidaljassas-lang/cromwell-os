@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list cash sales:", error);
     return Response.json(
-      { error: "Failed to list cash sales" },
+      { error: error instanceof Error ? error.message : "Failed to list cash sales" },
       { status: 500 }
     );
   }
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create cash sale:", error);
     return Response.json(
-      { error: "Failed to create cash sale" },
+      { error: error instanceof Error ? error.message : "Failed to create cash sale" },
       { status: 500 }
     );
   }

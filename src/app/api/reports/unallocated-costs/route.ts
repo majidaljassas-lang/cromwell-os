@@ -18,7 +18,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to list unallocated costs:", error);
     return Response.json(
-      { error: "Failed to list unallocated costs" },
+      { error: error instanceof Error ? error.message : "Failed to list unallocated costs" },
       { status: 500 }
     );
   }

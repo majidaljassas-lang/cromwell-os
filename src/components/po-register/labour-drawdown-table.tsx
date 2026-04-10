@@ -353,9 +353,17 @@ export function LabourDrawdownTable({
       if (entryMode === "balance") {
         // PO Balance / Advance billing entry
         const amt = Number(balanceAmount) || 0;
-        if (!siteId || amt <= 0 || !balanceDate) { setSubmitting(false); return; }
+        const missing: string[] = [];
+        if (!siteId) missing.push("Site");
+        if (amt <= 0) missing.push("Amount");
+        if (!balanceDate) missing.push("Billing Date");
+        if (missing.length > 0) {
+          alert(`Cannot save advance billing — missing: ${missing.join(", ")}`);
+          setSubmitting(false);
+          return;
+        }
         const eqDays = weekdaySellRate > 0 ? amt / weekdaySellRate : 0;
-        await fetch(`/api/customer-pos/${poId}/labour-drawdowns`, {
+        const res = await fetch(`/api/customer-pos/${poId}/labour-drawdowns`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -371,12 +379,25 @@ export function LabourDrawdownTable({
             status: "ADVANCE_BILLED",
           }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(`Failed to log advance billing: ${err.error || res.statusText}`);
+          setSubmitting(false);
+          return;
+        }
       } else {
         // Normal day entries
         const validRows = dateRows.filter((r) => r.workDate);
-        if (!siteId || validRows.length === 0) { setSubmitting(false); return; }
+        const missing: string[] = [];
+        if (!siteId) missing.push("Site");
+        if (validRows.length === 0) missing.push("at least one Work Date");
+        if (missing.length > 0) {
+          alert(`Cannot log labour — missing: ${missing.join(", ")}`);
+          setSubmitting(false);
+          return;
+        }
         for (const row of validRows) {
-          await fetch(`/api/customer-pos/${poId}/labour-drawdowns`, {
+          const res = await fetch(`/api/customer-pos/${poId}/labour-drawdowns`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -393,6 +414,15 @@ export function LabourDrawdownTable({
               deliveryAgainstAdvance: isDeliveryAgainstAdvance || undefined,
             }),
           });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(
+              `Failed to log labour for ${row.workDate}: ${err.error || res.statusText}`
+            );
+            setSubmitting(false);
+            router.refresh();
+            return;
+          }
         }
       }
 

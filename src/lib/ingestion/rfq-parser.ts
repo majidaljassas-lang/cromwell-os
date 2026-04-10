@@ -23,8 +23,9 @@ export interface ExtractedCandidate {
   confidence: number;
 }
 
-// Quantity patterns: "6x", "10 No", "x 20", "8nr", "qty: 5"
+// Quantity patterns: "6x", "10 No", "x 20", "8nr", "qty: 5", "40 meters of 22 mm"
 const QTY_PATTERNS = [
+  /^(\d+)\s*(?:meters?|metres?|m)\s+of\s+/i, // "40 meters of 22mm" — qty 40, unit M
   /^(\d+)\s*[xX×]\s+/,                    // "6x coupling"
   /^(\d+)\s*(?:no|nr|nos|pcs?|off)\s+/i,  // "10 No 15mm"
   /^-?\s*(\d+)\s*(?:no|nr|nos|pcs?|off)\s+/i, // "- 8nr valve"
@@ -123,8 +124,32 @@ function splitIntoLines(text: string): string[] {
     }
   }
 
+  // CRITICAL: explode any single line that contains multiple item markers
+  // Two patterns we explode on:
+  //  (A) "N x SIZE..." — e.g. "20 x 15mm straight coupling 20 x 22mm elbows"
+  //  (B) "N (meters|metres|m) of NN mm" — e.g. "40 meters of 22 mm 40 meters of 15 mm"
+  const finalLines: string[] = [];
+  for (const line of expanded) {
+    const xMatches = line.match(/\b\d+\s*[xX×]\s+\d/g);
+    const mOfMatches = line.match(/\b\d+\s*(?:meters?|metres?|m)\s+of\s+\d/gi);
+    const totalMarkers = (xMatches?.length || 0) + (mOfMatches?.length || 0);
+
+    if (totalMarkers >= 2) {
+      // Split BEFORE either kind of boundary
+      const fragments = line.split(/(?=\b\d+\s*(?:[xX×]|meters?|metres?|m)\s+(?:of\s+)?\d)/);
+      for (const frag of fragments) {
+        const t = frag.trim();
+        if (t.length > 2) finalLines.push(t);
+      }
+    } else {
+      finalLines.push(line);
+    }
+  }
+
   // Only strip numbered list prefixes like "1. " or "2) " — NOT "6x" qty prefixes
-  return expanded.map((l) => l.replace(/^(\d+)[.)]\s+/, "").replace(/^[•\-*]\s*/, "").trim()).filter((l) => l.length > 2);
+  return finalLines
+    .map((l) => l.replace(/^(\d+)[.)]\s+/, "").replace(/^[•\-*]\s*/, "").trim())
+    .filter((l) => l.length > 2);
 }
 
 function parseLine(rawText: string): ExtractedCandidate | null {
@@ -194,12 +219,38 @@ function parseLine(rawText: string): ExtractedCandidate | null {
 
 function isNonProductLine(text: string): boolean {
   const lower = text.toLowerCase();
+  // Skip email headers
+  if (/^(subject|from|to|cc|bcc|date|sent|reply-to|return-path)\s*:/i.test(text)) {
+    return true;
+  }
+  // Skip phone numbers / email signatures (lines that are mostly digits or contain @)
+  if (/^[\d\s+()-]{8,}$/.test(text)) return true;
+  if (/\b\w+@\w+\.\w+\b/.test(text) && text.length < 60) return true;
+  // Skip generic signature roles
+  if (/^(buyer|sales|estimator|director|manager|admin|owner|partner)\s*$/i.test(text)) return true;
+  // Skip signature names: 2-4 capitalised words, no digits, no plumbing keywords
+  if (
+    /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\s*$/.test(text) &&
+    !/\d/.test(text) &&
+    !MATERIAL_KEYWORDS.some((kw) => lower.includes(kw))
+  ) {
+    return true;
+  }
+  // Skip company names ending in common suffixes when no qty/material context
+  if (
+    /(ltd|limited|llp|inc|plc|gmbh|holdings?|park|hall|group|holland|paddington)\s*\.?\s*$/i.test(text) &&
+    !/\d/.test(text) &&
+    !MATERIAL_KEYWORDS.some((kw) => lower.includes(kw))
+  ) {
+    return true;
+  }
   // Skip greetings, pleasantries, signatures
   const skip = [
     "hi ", "hello", "dear ", "please quote", "can you",
     "thanks", "thank you", "regards", "cheers", "kind regards",
     "let me know", "asap", "urgent", "best price",
     "attached", "see below", "please see", "as discussed",
+    "majid", "majiid", "boss", "mate", "morning", "afternoon", "evening",
   ];
   return skip.some((s) => lower.startsWith(s) || lower === s);
 }

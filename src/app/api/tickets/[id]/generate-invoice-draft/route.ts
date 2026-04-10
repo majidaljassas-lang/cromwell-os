@@ -174,7 +174,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to generate invoice draft:", error);
     return Response.json(
-      { error: "Failed to generate invoice draft" },
+      { error: error instanceof Error ? error.message : "Failed to generate invoice draft" },
       { status: 500 }
     );
   }

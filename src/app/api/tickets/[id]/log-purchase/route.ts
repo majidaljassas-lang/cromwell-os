@@ -152,7 +152,7 @@ export async function POST(
     }, { status: 201 });
   } catch (error) {
     console.error("Failed to log purchase:", error);
-    return Response.json({ error: "Failed to log purchase" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to log purchase" }, { status: 500 });
   }
 }
 

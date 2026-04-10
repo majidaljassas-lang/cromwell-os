@@ -50,7 +50,7 @@ export async function GET() {
   } catch (error) {
     console.error("Failed to compute recovery ageing:", error);
     return Response.json(
-      { error: "Failed to compute recovery ageing" },
+      { error: error instanceof Error ? error.message : "Failed to compute recovery ageing" },
       { status: 500 }
     );
   }

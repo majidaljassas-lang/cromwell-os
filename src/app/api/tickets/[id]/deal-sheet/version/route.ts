@@ -57,6 +57,6 @@ export async function POST(
     return Response.json(dealSheet, { status: 201 });
   } catch (error) {
     console.error("Failed to create deal sheet version:", error);
-    return Response.json({ error: "Failed to create deal sheet version" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create deal sheet version" }, { status: 500 });
   }
 }

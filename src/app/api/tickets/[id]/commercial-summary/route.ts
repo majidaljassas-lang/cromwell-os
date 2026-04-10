@@ -118,7 +118,7 @@ export async function GET(
     });
   } catch (error) {
     console.error("Failed to compute commercial summary:", error);
-    return Response.json({ error: "Failed to compute" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to compute" }, { status: 500 });
   }
 }
 

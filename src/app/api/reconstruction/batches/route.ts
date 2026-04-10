@@ -9,7 +9,7 @@ export async function GET() {
     return Response.json(batches);
   } catch (error) {
     console.error("Failed to fetch batches:", error);
-    return Response.json({ error: "Failed to fetch" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch" }, { status: 500 });
   }
 }
 
@@ -52,6 +52,6 @@ export async function POST(request: Request) {
     return Response.json(batch, { status: 201 });
   } catch (error) {
     console.error("Failed to create batch:", error);
-    return Response.json({ error: "Failed to create" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create" }, { status: 500 });
   }
 }

@@ -242,6 +242,6 @@ export async function GET(
     });
   } catch (error) {
     console.error("Failed to serve PDF:", error);
-    return Response.json({ error: "Failed to serve PDF" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to serve PDF" }, { status: 500 });
   }
 }

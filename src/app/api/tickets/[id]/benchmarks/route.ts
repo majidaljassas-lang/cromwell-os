@@ -18,7 +18,7 @@ export async function GET(
     return Response.json(benchmarks);
   } catch (error) {
     console.error("Failed to fetch benchmarks:", error);
-    return Response.json({ error: "Failed to fetch benchmarks" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch benchmarks" }, { status: 500 });
   }
 }
 
@@ -54,6 +54,6 @@ export async function POST(
     return Response.json(benchmark, { status: 201 });
   } catch (error) {
     console.error("Failed to create benchmark:", error);
-    return Response.json({ error: "Failed to create benchmark" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create benchmark" }, { status: 500 });
   }
 }

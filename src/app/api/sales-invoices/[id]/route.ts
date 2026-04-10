@@ -34,7 +34,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get sales invoice:", error);
     return Response.json(
-      { error: "Failed to get sales invoice" },
+      { error: error instanceof Error ? error.message : "Failed to get sales invoice" },
       { status: 500 }
     );
   }
@@ -73,7 +73,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update sales invoice:", error);
     return Response.json(
-      { error: "Failed to update sales invoice" },
+      { error: error instanceof Error ? error.message : "Failed to update sales invoice" },
       { status: 500 }
     );
   }

@@ -22,7 +22,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get enquiry:", error);
     return Response.json(
-      { error: "Failed to get enquiry" },
+      { error: error instanceof Error ? error.message : "Failed to get enquiry" },
       { status: 500 }
     );
   }
@@ -46,7 +46,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update enquiry:", error);
     return Response.json(
-      { error: "Failed to update enquiry" },
+      { error: error instanceof Error ? error.message : "Failed to update enquiry" },
       { status: 500 }
     );
   }

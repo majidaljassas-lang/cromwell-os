@@ -108,6 +108,6 @@ export async function POST(
     return Response.json(line, { status: 201 });
   } catch (error) {
     console.error("Failed to create ticket line:", error);
-    return Response.json({ error: "Failed to create ticket line" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to create ticket line" }, { status: 500 });
   }
 }

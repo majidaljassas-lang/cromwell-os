@@ -21,7 +21,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get payment:", error);
     return Response.json(
-      { error: "Failed to get payment" },
+      { error: error instanceof Error ? error.message : "Failed to get payment" },
       { status: 500 }
     );
   }
@@ -49,7 +49,7 @@ export async function DELETE(
   } catch (error) {
     console.error("Failed to delete payment:", error);
     return Response.json(
-      { error: "Failed to delete payment" },
+      { error: error instanceof Error ? error.message : "Failed to delete payment" },
       { status: 500 }
     );
   }

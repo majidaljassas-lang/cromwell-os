@@ -148,6 +148,6 @@ export async function POST(
     }, { status: 200 });
   } catch (error) {
     console.error("Failed to revise quote:", error);
-    return Response.json({ error: "Failed to revise quote" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to revise quote" }, { status: 500 });
   }
 }

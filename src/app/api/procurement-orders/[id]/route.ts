@@ -32,7 +32,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to fetch procurement order:", error);
     return Response.json(
-      { error: "Failed to fetch procurement order" },
+      { error: error instanceof Error ? error.message : "Failed to fetch procurement order" },
       { status: 500 }
     );
   }
@@ -90,7 +90,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update procurement order:", error);
     return Response.json(
-      { error: "Failed to update procurement order" },
+      { error: error instanceof Error ? error.message : "Failed to update procurement order" },
       { status: 500 }
     );
   }
@@ -108,6 +108,6 @@ export async function DELETE(
     return Response.json({ deleted: true });
   } catch (error) {
     console.error("Failed to delete procurement order:", error);
-    return Response.json({ error: "Failed to delete procurement order" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete procurement order" }, { status: 500 });
   }
 }

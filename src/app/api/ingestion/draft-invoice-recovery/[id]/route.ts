@@ -21,7 +21,7 @@ export async function GET(
     return Response.json({ ...draft, validation });
   } catch (error) {
     console.error("Failed to fetch draft:", error);
-    return Response.json({ error: "Failed to fetch" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to fetch" }, { status: 500 });
   }
 }
 
@@ -85,6 +85,6 @@ export async function PATCH(
     return Response.json(updated);
   } catch (error) {
     console.error("Failed to update draft:", error);
-    return Response.json({ error: "Failed to update" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update" }, { status: 500 });
   }
 }

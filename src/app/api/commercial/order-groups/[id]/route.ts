@@ -36,7 +36,7 @@ export async function GET(
     return Response.json(group);
   } catch (error) {
     console.error("Failed to get order group:", error);
-    return Response.json({ error: "Failed to get order group" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to get order group" }, { status: 500 });
   }
 }
 
@@ -73,6 +73,6 @@ export async function PATCH(
     return Response.json(updated);
   } catch (error) {
     console.error("Failed to update order group:", error);
-    return Response.json({ error: "Failed to update order group" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to update order group" }, { status: 500 });
   }
 }

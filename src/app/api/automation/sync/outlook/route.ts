@@ -1,12 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { refreshAccessToken, fetchEmails, fetchUserProfile, fetchAttachments } from "@/lib/microsoft/graph-client";
-import fs from "fs";
-import path from "path";
-import { execSync } from "child_process";
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse/lib/pdf-parse");
+import { refreshAccessToken, fetchEmails } from "@/lib/microsoft/graph-client";
+import { processEmailAttachments } from "@/lib/ingestion/email-attachments";
 import { classifyMessage } from "@/lib/ingestion/classifier";
-import { resolveLink } from "@/lib/ingestion/link-resolver";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 /**
  * POST /api/automation/sync/outlook
@@ -81,7 +80,7 @@ export async function POST() {
           const folder = (email as any)._folder || "INBOX";
           const isSent = folder === "SENT";
 
-          // Create ingestion event
+          // Create ingestion event FIRST so we have an id for attachment filenames
           const event = await prisma.ingestionEvent.create({
             data: {
               sourceId: source.id,
@@ -94,67 +93,44 @@ export async function POST() {
             },
           });
 
-          // Create parsed message with full text including attachments
+          // Download and parse attachments BEFORE building the parsed text
+          let attachmentText = "";
+          let attachmentCount = 0;
+          if (email.hasAttachments) {
+            try {
+              const result = await processEmailAttachments(
+                tokens.access_token,
+                email.id,
+                event.id
+              );
+              attachmentText = result.attachmentText;
+              attachmentCount = result.count;
+            } catch (err) {
+              console.error(`Attachment processing failed for ${event.id}:`, err);
+            }
+          }
+
+          // Combine body + attachment text — this is the full searchable record
+          const fullText = `${bodyText}\n${attachmentText}`.trim();
+
+          // Create parsed message with the FULL text now that attachments are processed
           await prisma.parsedMessage.create({
             data: {
               ingestionEventId: event.id,
               messageType: "EMAIL",
-              extractedText: `Subject: ${email.subject}\nFrom: ${email.from?.emailAddress?.name} <${email.from?.emailAddress?.address}>\nDate: ${email.receivedDateTime}\n\n${fullText.substring(0, 8000)}`,
+              extractedText: `Subject: ${email.subject}\nFrom: ${email.from?.emailAddress?.name} <${email.from?.emailAddress?.address}>\nDate: ${email.receivedDateTime}\n\n${fullText.substring(0, 16000)}`,
               structuredData: {
                 subject: email.subject,
                 from: email.from?.emailAddress,
                 to: email.toRecipients?.map((r) => r.emailAddress),
                 cc: email.ccRecipients?.map((r) => r.emailAddress),
                 hasAttachments: email.hasAttachments,
-                attachmentCount: email.hasAttachments ? 1 : 0,
+                attachmentCount,
                 hasAttachmentText: attachmentText.length > 0,
                 conversationId: email.conversationId,
               },
             },
           });
-
-          // Download and parse attachments
-          let attachmentText = "";
-          if (email.hasAttachments) {
-            try {
-              const attachData = await fetchAttachments(tokens.access_token, email.id);
-              const uploadDir = path.join(process.cwd(), "public", "email-attachments");
-              if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-              for (const att of (attachData.value || [])) {
-                if (att.isInline || !att.contentBytes) continue;
-                const ext = (att.name.split(".").pop() || "").toLowerCase();
-                const buffer = Buffer.from(att.contentBytes, "base64");
-
-                // Save attachment
-                const fileName = `${Date.now()}_${att.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-                fs.writeFileSync(path.join(uploadDir, fileName), buffer);
-
-                // Extract text from PDFs
-                if (ext === "pdf") {
-                  try {
-                    const pdfData = await pdfParse(buffer);
-                    attachmentText += `\n--- ${att.name} ---\n${pdfData.text.substring(0, 3000)}`;
-                  } catch { /* skip unparseable PDFs */ }
-                }
-                // OCR images
-                else if (["png", "jpg", "jpeg", "tiff"].includes(ext)) {
-                  try {
-                    const tmpPath = path.join(uploadDir, `ocr_${Date.now()}.${ext}`);
-                    const outBase = tmpPath.replace(/\.\w+$/, "_out");
-                    fs.writeFileSync(tmpPath, buffer);
-                    execSync(`tesseract "${tmpPath}" "${outBase}" --psm 6 -l eng`, { timeout: 15000 });
-                    const ocrText = fs.readFileSync(`${outBase}.txt`, "utf-8");
-                    attachmentText += `\n--- ${att.name} ---\n${ocrText.substring(0, 3000)}`;
-                    try { fs.unlinkSync(tmpPath); fs.unlinkSync(`${outBase}.txt`); } catch {}
-                  } catch { /* skip failed OCR */ }
-                }
-              }
-            } catch { /* attachment fetch failed — continue without */ }
-          }
-
-          // Combine body + attachment text for classification
-          const fullText = `${bodyText}\n${attachmentText}`.trim();
 
           // Classify the message
           const classText = `${email.subject || ""} ${fullText.substring(0, 1000)}`;

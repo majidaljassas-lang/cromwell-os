@@ -23,7 +23,7 @@ export async function GET(
   } catch (error) {
     console.error("Failed to get work item:", error);
     return Response.json(
-      { error: "Failed to get work item" },
+      { error: error instanceof Error ? error.message : "Failed to get work item" },
       { status: 500 }
     );
   }
@@ -44,7 +44,7 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update work item:", error);
     return Response.json(
-      { error: "Failed to update work item" },
+      { error: error instanceof Error ? error.message : "Failed to update work item" },
       { status: 500 }
     );
   }

@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list supplier bills:", error);
     return Response.json(
-      { error: "Failed to list supplier bills" },
+      { error: error instanceof Error ? error.message : "Failed to list supplier bills" },
       { status: 500 }
     );
   }
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to create supplier bill:", error);
     return Response.json(
-      { error: "Failed to create supplier bill" },
+      { error: error instanceof Error ? error.message : "Failed to create supplier bill" },
       { status: 500 }
     );
   }
