@@ -426,7 +426,7 @@ function InlineLineRow({
           {line.description}
         </TableCell>
         <TableCell className="text-[10px] text-[#888888] p-1">
-          {line.supplierName || "\u2014"}
+          {line.supplierName || "—"}
         </TableCell>
         <TableCell className="text-right tabular-nums text-xs p-1">
           {dec(line.qty)}
@@ -441,9 +441,9 @@ function InlineLineRow({
           {dec(line.actualSaleUnit)}
         </TableCell>
         <TableCell className="text-right tabular-nums text-xs p-1">
-          \u2014
+          —
         </TableCell>
-        <TableCell className="text-right text-[10px] p-1">\u2014</TableCell>
+        <TableCell className="text-right text-[10px] p-1">—</TableCell>
         <TableCell className="p-1">
           <Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#888888] bg-[#333333]">
             {line.status.replace(/_/g, " ")}
@@ -1284,9 +1284,8 @@ export function TicketDetail({
               Ticket Lines
             </h2>
             <div className="flex gap-2">
-              {/* Generate Quote button */}
-              {isQuoteReady &&
-                ticket.status !== "QUOTED" &&
+              {/* Generate Quote button — always available when there are lines */}
+              {ticket.lines.length > 0 &&
                 ticket.status !== "INVOICED" &&
                 ticket.status !== "CLOSED" && (
                   <Button
@@ -1632,6 +1631,25 @@ export function TicketDetail({
                     </React.Fragment>
                   ))
                 )}
+                {/* TOTALS ROW */}
+                {activeLines.length > 0 && (() => {
+                  const totalCost = activeLines.reduce((s, l) => s + (Number(l.expectedCostUnit || 0) * Number(l.qty || 0)), 0);
+                  const totalSale = activeLines.reduce((s, l) => s + (Number(l.actualSaleUnit || 0) * Number(l.qty || 0)), 0);
+                  const totalMargin = totalSale - totalCost;
+                  const totalMarginPct = totalSale > 0 ? (totalMargin / totalSale) * 100 : 0;
+                  return (
+                    <TableRow className="border-t-2 border-[#444444] bg-[#1A1A1A] font-bold">
+                      <TableCell colSpan={2}></TableCell>
+                      <TableCell colSpan={3} className="text-right text-[10px] text-[#888888] uppercase tracking-wider">TOTALS</TableCell>
+                      <TableCell className="text-right tabular-nums text-xs">£{totalCost.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-right tabular-nums text-xs">£{totalSale.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className={`text-right tabular-nums text-xs ${totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>£{totalMargin.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className={`text-right tabular-nums text-[10px] ${totalMarginPct >= 20 ? "text-[#00CC66]" : totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>{totalMarginPct.toFixed(1)}%</TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                    </TableRow>
+                  );
+                })()}
               </TableBody>
             </Table>
           </div>
