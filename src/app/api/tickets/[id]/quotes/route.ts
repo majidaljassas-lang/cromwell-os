@@ -30,7 +30,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { quoteType, customerId, siteId, siteCommercialLinkId, notes } = body;
+    const { quoteType, customerId, siteId, siteCommercialLinkId, notes, lineIds } = body;
 
     if (!quoteType || !customerId) {
       return Response.json(
@@ -50,14 +50,27 @@ export async function POST(
     });
     const versionNo = (latestQuote?.versionNo ?? 0) + 1;
 
-    // Get all ticket lines for this ticket
+    // Get ticket lines — filter by selected lineIds if provided
     const ticketLines = await prisma.ticketLine.findMany({
-      where: { ticketId: id },
+      where: {
+        ticketId: id,
+        ...(lineIds && lineIds.length > 0 ? { id: { in: lineIds } } : {}),
+      },
     });
 
-    // Calculate total sell from lines
+    // FILTER OUT lines with no unit price (only quote priced lines)
+    const pricedLines = ticketLines.filter((line) => {
+      const price = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
+      return price > 0;
+    });
+
+    if (pricedLines.length === 0) {
+      return Response.json({ error: "No priced lines to quote" }, { status: 400 });
+    }
+
+    // Calculate total sell from priced lines only
     let totalSell = 0;
-    const quoteLineData = ticketLines.map((line) => {
+    const quoteLineData = pricedLines.map((line) => {
       const unitPrice = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
       const lineTotal = unitPrice * Number(line.qty);
       totalSell += lineTotal;

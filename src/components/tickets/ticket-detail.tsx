@@ -746,6 +746,7 @@ export function TicketDetail({
   async function handleCreateQuote() {
     setCreatingQuote(true);
     try {
+      const lineIds = selectedLineIds.size > 0 ? [...selectedLineIds] : undefined;
       const res = await fetch(`/api/tickets/${ticket.id}/quotes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -754,10 +755,14 @@ export function TicketDetail({
           customerId: ticket.payingCustomer.id,
           siteId: ticket.site?.id,
           siteCommercialLinkId: ticket.siteCommercialLink?.id,
+          lineIds,
         }),
       });
       if (res.ok) {
         router.refresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to create quote");
       }
     } finally {
       setCreatingQuote(false);
