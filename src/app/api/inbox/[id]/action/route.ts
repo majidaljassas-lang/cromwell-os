@@ -53,10 +53,35 @@ export async function POST(
         );
       }
 
+      // For ingestion events, copy the source message text into the ticket description
+      // so the RFQ extractor has material to work with
+      let description: string | undefined;
+      if (itemType === "INGESTION") {
+        const parsedMessage = await prisma.parsedMessage.findFirst({
+          where: { ingestionEventId: id },
+          orderBy: { createdAt: "desc" },
+          select: { extractedText: true },
+        });
+        if (parsedMessage?.extractedText) {
+          description = parsedMessage.extractedText;
+        } else {
+          // Fallback: get raw payload from ingestion event
+          const event = await prisma.ingestionEvent.findUnique({
+            where: { id },
+            select: { rawPayload: true },
+          });
+          if (event?.rawPayload) {
+            const payload = event.rawPayload as any;
+            description = payload?.message_text || payload?.body || payload?.text || payload?.subject || undefined;
+          }
+        }
+      }
+
       const ticket = await prisma.ticket.create({
         data: {
           payingCustomerId,
           title,
+          description,
           ticketMode,
           status: "CAPTURED",
           revenueState: "OPERATIONAL",

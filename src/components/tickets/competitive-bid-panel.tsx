@@ -1003,9 +1003,39 @@ function ExistingBidCard({
     for (const l of lines) m[l.ticketLine.id] = l.ourSaleUnit;
     return m;
   });
+  const [localCompetitor, setLocalCompetitor] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const l of lines) m[l.id] = l.competitorUnit;
+    return m;
+  });
+  const [competitorName, setCompetitorName] = useState(competitorDisplay);
+  const [savingName, setSavingName] = useState(false);
 
   function getCost(id: string) { return localCosts[id] || 0; }
   function getPrice(id: string) { return localPrices[id] || 0; }
+  function getCompetitorUnit(compLineId: string) { return localCompetitor[compLineId] || 0; }
+
+  async function saveCompetitorPrice(compLineId: string, value: number) {
+    setLocalCompetitor(prev => ({ ...prev, [compLineId]: value }));
+    await fetch(`/api/comp-sheet-lines/${compLineId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ competitorUnitPrice: value }),
+    });
+  }
+
+  async function saveCompetitorName(newName: string) {
+    setSavingName(true);
+    try {
+      await fetch(`/api/comp-sheets/${bid.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `Competitive Bid vs ${newName}` }),
+      });
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   async function saveCost(lineId: string, value: number) {
     setLocalCosts(prev => ({ ...prev, [lineId]: value }));
@@ -1036,7 +1066,18 @@ function ExistingBidCard({
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-bold">{bid.name}</CardTitle>
+          <CardTitle className="text-sm font-bold flex items-center gap-2">
+            <span className="text-[#888]">Competitive Bid vs</span>
+            <input
+              value={competitorName}
+              onChange={(e) => setCompetitorName(e.target.value)}
+              onBlur={() => saveCompetitorName(competitorName)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              className="bg-transparent border-b border-[#444] px-1 focus:border-[#FF6600] focus:outline-none text-[#FF6600] min-w-[120px]"
+              placeholder="Competitor name"
+            />
+            {savingName && <span className="text-[10px] text-[#666]">saving...</span>}
+          </CardTitle>
           <div className="flex items-center gap-2">
             <Badge variant="secondary">v{bid.versionNo}</Badge>
             <Badge variant="outline">{bid.status}</Badge>
@@ -1104,8 +1145,19 @@ function ExistingBidCard({
                       {line.ticketLine.description}
                     </TableCell>
                     <TableCell className="text-xs text-right tabular-nums">{line.qty}</TableCell>
-                    <TableCell className="text-xs text-right tabular-nums text-[#FF9900] font-medium">
-                      {line.competitorUnit > 0 ? `£${fmtMoney(line.competitorUnit)}` : "—"}
+                    <TableCell className="p-0">
+                      <input
+                        type="number" step="0.01"
+                        className="w-full bg-transparent text-right text-xs tabular-nums px-2 py-1.5 border-0 focus:outline-none focus:bg-[#222] text-[#FF9900] font-medium"
+                        defaultValue={getCompetitorUnit(line.id) > 0 ? getCompetitorUnit(line.id) : ""}
+                        placeholder="—"
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = Number(e.target.value || 0);
+                          saveCompetitorPrice(line.id, v);
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      />
                     </TableCell>
                     {hasUtopia && (
                       <TableCell className="text-xs text-right tabular-nums text-[#888888]">
