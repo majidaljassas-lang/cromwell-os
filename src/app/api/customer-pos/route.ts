@@ -113,6 +113,36 @@ export async function POST(request: Request) {
           },
         });
         resolvedTicketId = ticket.id;
+      } else {
+        // TRICKLE DOWN: PO added to existing ticket
+        // 1. Link site if provided and ticket has none
+        // 2. Advance ticket status if appropriate
+        // 3. Update title if it's a generic placeholder
+        const existingTicket = await tx.ticket.findUnique({
+          where: { id: resolvedTicketId },
+          select: { siteId: true, status: true, title: true }
+        });
+        if (existingTicket) {
+          const updates: any = { poStatus: "RECEIVED" };
+
+          // Link site if not already linked
+          if (siteId && !existingTicket.siteId) {
+            updates.siteId = siteId;
+          }
+
+          // Update title if it's a placeholder
+          if (existingTicket.title === "Quote" || existingTicket.title?.startsWith("Untitled")) {
+            const site = siteId ? await tx.site.findUnique({ where: { id: siteId }, select: { siteName: true } }) : null;
+            if (site) updates.title = `${site.siteName} — ${poNo}`;
+          }
+
+          // Advance status: if at PRICING/QUOTED/CAPTURED, jump to APPROVED
+          if (["CAPTURED", "PRICING", "QUOTED"].includes(existingTicket.status)) {
+            updates.status = "APPROVED";
+          }
+
+          await tx.ticket.update({ where: { id: resolvedTicketId }, data: updates });
+        }
       }
 
       return tx.customerPO.create({
