@@ -3,25 +3,52 @@ import { prisma } from "@/lib/prisma";
 /**
  * Auto-match supplier bills to ticket lines / POs.
  *
- * Strategy:
- *  1. PO number match  — bill.siteRef or bill.customerRef contains a ProcurementOrder.poNo
- *  2. Product match    — normalizedItemName / description overlap between bill line and ticket line
- *  3. Site match       — bill line siteId matches ticket siteId
+ * Strategy (in order, first hit wins):
+ *  1. PO number reference   — SupplierBill.billNo / siteRef / customerRef
+ *                             contains a known ProcurementOrder.poNo
+ *                             (or supplierRef). We then pick the best
+ *                             PO line / ticket line by description + qty.
+ *  2. Site + description    — SupplierBillLine.siteId matches a ticket
+ *                             with a fuzzy description hit on a ticket line.
+ *  3. Description only      — pure fuzzy description match across all
+ *                             active tickets (lower confidence, marked
+ *                             SUGGESTED rather than MATCHED).
  *
- * Idempotent: already-matched lines are skipped.
+ * Idempotent: already-allocated bill lines are skipped.
+ * Uses select-only queries on TicketLine to avoid deserialising legacy
+ * TicketLine.status values that are missing from the current Prisma enum.
  */
 export async function POST() {
   try {
-    // 1. Fetch all UNALLOCATED supplier bill lines
+    // 1. Fetch all UNALLOCATED supplier bill lines.
     const unallocatedLines = await prisma.supplierBillLine.findMany({
-      where: { allocationStatus: "UNALLOCATED" },
-      include: {
-        supplierBill: { include: { supplier: true } },
+      where: { allocationStatus: "UNALLOCATED" as any },
+      select: {
+        id: true,
+        description: true,
+        normalizedItemName: true,
+        qty: true,
+        unitCost: true,
+        lineTotal: true,
+        siteId: true,
+        ticketId: true,
+        supplierBill: {
+          select: {
+            id: true,
+            billNo: true,
+            siteRef: true,
+            customerRef: true,
+            supplierId: true,
+            supplier: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
     if (unallocatedLines.length === 0) {
       return Response.json({
+        ok: true,
+        scanned: 0,
         matched: 0,
         skipped: 0,
         unmatched: 0,
@@ -30,32 +57,60 @@ export async function POST() {
       });
     }
 
-    // 2. Build lookup indexes
+    // 2. Build PO lookup index.
     const procurementOrders = await prisma.procurementOrder.findMany({
-      include: {
-        lines: { include: { ticketLine: true } },
-        ticket: true,
+      select: {
+        id: true,
+        poNo: true,
+        supplierRef: true,
+        ticketId: true,
+        lines: {
+          select: {
+            id: true,
+            ticketLineId: true,
+            description: true,
+            qty: true,
+            ticketLine: {
+              select: {
+                id: true,
+                description: true,
+                normalizedItemName: true,
+                qty: true,
+              },
+            },
+          },
+        },
       },
     });
 
-    // Map PO numbers to their procurement orders (case-insensitive)
-    const poByNumber = new Map<string, typeof procurementOrders[number]>();
+    const poByNumber = new Map<string, (typeof procurementOrders)[number]>();
     for (const po of procurementOrders) {
-      poByNumber.set(po.poNo.toLowerCase(), po);
-      if (po.supplierRef) {
-        poByNumber.set(po.supplierRef.toLowerCase(), po);
-      }
+      if (po.poNo) poByNumber.set(po.poNo.toLowerCase(), po);
+      if (po.supplierRef) poByNumber.set(po.supplierRef.toLowerCase(), po);
     }
 
-    // Active tickets with lines for fallback matching
+    // 3. Active tickets with lines (for site/description fallback).
     const activeTickets = await prisma.ticket.findMany({
       where: {
-        status: { notIn: ["CLOSED", "INVOICED"] },
+        status: { notIn: ["CLOSED", "INVOICED"] as any },
       },
-      include: { lines: true },
+      select: {
+        id: true,
+        siteId: true,
+        lines: {
+          select: {
+            id: true,
+            description: true,
+            normalizedItemName: true,
+            qty: true,
+          },
+        },
+      },
     });
 
     const results = {
+      ok: true,
+      scanned: unallocatedLines.length,
       matched: 0,
       skipped: 0,
       unmatched: 0,
@@ -72,9 +127,10 @@ export async function POST() {
     for (const billLine of unallocatedLines) {
       const bill = billLine.supplierBill;
 
-      // Already has a cost allocation? Skip (idempotent)
+      // Idempotency: skip if a CostAllocation already exists for this bill line.
       const existingAllocation = await prisma.costAllocation.findFirst({
         where: { supplierBillLineId: billLine.id },
+        select: { id: true },
       });
       if (existingAllocation) {
         results.skipped++;
@@ -85,32 +141,33 @@ export async function POST() {
       let matchedTicketId: string | null = null;
       let matchType = "";
 
-      // Strategy A: PO number reference match
+      // ── Strategy A: PO number reference ─────────────────────────────────
       const refsToCheck = [
+        bill.billNo,
         bill.siteRef,
         bill.customerRef,
-        bill.billNo,
       ].filter(Boolean) as string[];
 
       for (const ref of refsToCheck) {
-        // Check if reference contains a PO number
+        const needle = ref.toLowerCase();
         for (const [poKey, po] of poByNumber.entries()) {
-          if (ref.toLowerCase().includes(poKey)) {
-            // Found PO match — now match the bill line to a PO line
-            const bestPoLine = findBestLineMatch(
+          if (needle.includes(poKey)) {
+            const bestLineId = findBestLineMatch(
               billLine.description,
               billLine.normalizedItemName,
               Number(billLine.qty),
-              po.lines.map((l: { ticketLineId: string | null; description: string; ticketLine: { normalizedItemName: string | null } | null; qty: unknown }) => ({
-                id: l.ticketLineId || "",
-                description: l.description,
-                normalizedItemName: l.ticketLine?.normalizedItemName || null,
-                qty: Number(l.qty),
-              }))
+              po.lines
+                .filter((l) => !!l.ticketLineId)
+                .map((l) => ({
+                  id: l.ticketLineId as string,
+                  description: l.description,
+                  normalizedItemName:
+                    l.ticketLine?.normalizedItemName ?? null,
+                  qty: Number(l.qty),
+                }))
             );
-
-            if (bestPoLine) {
-              matchedTicketLineId = bestPoLine;
+            if (bestLineId) {
+              matchedTicketLineId = bestLineId;
               matchedTicketId = po.ticketId;
               matchType = "PO_REFERENCE";
             }
@@ -120,38 +177,35 @@ export async function POST() {
         if (matchedTicketLineId) break;
       }
 
-      // Strategy B: Product description + site match
+      // ── Strategy B: Site + description ──────────────────────────────────
       if (!matchedTicketLineId) {
         for (const ticket of activeTickets) {
-          // If bill line has a siteId, try to match ticket by site
-          const siteMatch = billLine.siteId && ticket.siteId === billLine.siteId;
-          // If bill line has a ticketId already set, use that
-          const ticketRefMatch = billLine.ticketId && ticket.id === billLine.ticketId;
+          const siteMatch =
+            (billLine.siteId && ticket.siteId === billLine.siteId) ||
+            (!!billLine.ticketId && ticket.id === billLine.ticketId);
+          if (!siteMatch) continue;
 
-          if (siteMatch || ticketRefMatch) {
-            const bestLine = findBestLineMatch(
-              billLine.description,
-              billLine.normalizedItemName,
-              Number(billLine.qty),
-              ticket.lines.map((l: { id: string; description: string; normalizedItemName: string | null; qty: unknown }) => ({
-                id: l.id,
-                description: l.description,
-                normalizedItemName: l.normalizedItemName,
-                qty: Number(l.qty),
-              }))
-            );
-
-            if (bestLine) {
-              matchedTicketLineId = bestLine;
-              matchedTicketId = ticket.id;
-              matchType = siteMatch ? "SITE_AND_DESCRIPTION" : "TICKET_REF_AND_DESCRIPTION";
-              break;
-            }
+          const bestLineId = findBestLineMatch(
+            billLine.description,
+            billLine.normalizedItemName,
+            Number(billLine.qty),
+            ticket.lines.map((l) => ({
+              id: l.id,
+              description: l.description,
+              normalizedItemName: l.normalizedItemName,
+              qty: Number(l.qty),
+            }))
+          );
+          if (bestLineId) {
+            matchedTicketLineId = bestLineId;
+            matchedTicketId = ticket.id;
+            matchType = "SITE_AND_DESCRIPTION";
+            break;
           }
         }
       }
 
-      // Strategy C: Pure description match across all active tickets (lower confidence)
+      // ── Strategy C: Pure description match ──────────────────────────────
       if (!matchedTicketLineId) {
         let bestScore = 0;
         for (const ticket of activeTickets) {
@@ -173,8 +227,16 @@ export async function POST() {
       }
 
       if (matchedTicketLineId && matchedTicketId) {
-        // Create CostAllocation
-        await prisma.$transaction(async (tx: typeof prisma) => {
+        const finalStatus =
+          matchType === "DESCRIPTION_ONLY" ? "SUGGESTED" : "MATCHED";
+        const confidence =
+          matchType === "PO_REFERENCE"
+            ? 95
+            : matchType === "DESCRIPTION_ONLY"
+              ? 60
+              : 80;
+
+        await prisma.$transaction(async (tx) => {
           await tx.costAllocation.create({
             data: {
               ticketLineId: matchedTicketLineId!,
@@ -183,29 +245,28 @@ export async function POST() {
               qtyAllocated: billLine.qty,
               unitCost: billLine.unitCost,
               totalCost: billLine.lineTotal,
-              allocationStatus: matchType === "DESCRIPTION_ONLY" ? "SUGGESTED" : "MATCHED",
-              confidenceScore: matchType === "PO_REFERENCE" ? 95 : matchType === "DESCRIPTION_ONLY" ? 60 : 80,
+              allocationStatus: finalStatus as any,
+              confidenceScore: confidence,
               notes: `Auto-matched via ${matchType}`,
             },
           });
 
           await tx.supplierBillLine.update({
             where: { id: billLine.id },
+            data: { allocationStatus: finalStatus as any },
+          });
+
+          await tx.event.create({
             data: {
-              allocationStatus: matchType === "DESCRIPTION_ONLY" ? "SUGGESTED" : "MATCHED",
+              ticketId: matchedTicketId!,
+              ticketLineId: matchedTicketLineId,
+              eventType: "AUTO_BILL_MATCHED" as any,
+              timestamp: new Date(),
+              notes: `Bill ${bill.billNo} line "${billLine.description}" auto-matched via ${matchType} (£${Number(
+                billLine.lineTotal
+              ).toFixed(2)})`,
             },
           });
-        });
-
-        // Log event on the ticket
-        await prisma.event.create({
-          data: {
-            ticketId: matchedTicketId,
-            ticketLineId: matchedTicketLineId,
-            eventType: "AUTO_BILL_MATCHED",
-            timestamp: new Date(),
-            notes: `Bill ${bill.billNo} line "${billLine.description}" auto-matched via ${matchType} (£${Number(billLine.lineTotal).toFixed(2)})`,
-          },
         });
 
         results.matched++;
@@ -235,7 +296,10 @@ export async function POST() {
   } catch (error) {
     console.error("Auto-match bills failed:", error);
     return Response.json(
-      { error: "Auto-match bills failed" },
+      {
+        error: "Auto-match bills failed",
+        detail: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
@@ -269,7 +333,7 @@ function findBestLineMatch(
       candidate.normalizedItemName
     );
 
-    // Boost score for matching quantities
+    // Boost score for matching quantities.
     if (billQty > 0 && candidate.qty > 0 && billQty === candidate.qty) {
       score += 0.15;
     }
@@ -289,13 +353,12 @@ function descriptionSimilarity(
   desc2: string,
   norm2: string | null
 ): number {
-  // Use normalized names if available, else raw descriptions
-  const a = (norm1 || desc1).toLowerCase().trim();
-  const b = (norm2 || desc2).toLowerCase().trim();
+  const a = (norm1 || desc1 || "").toLowerCase().trim();
+  const b = (norm2 || desc2 || "").toLowerCase().trim();
 
+  if (!a || !b) return 0;
   if (a === b) return 1.0;
 
-  // Token overlap scoring
   const tokensA = new Set(a.split(/[\s,.\-/]+/).filter((t) => t.length > 1));
   const tokensB = new Set(b.split(/[\s,.\-/]+/).filter((t) => t.length > 1));
 
@@ -306,7 +369,6 @@ function descriptionSimilarity(
     if (tokensB.has(token)) overlap++;
   }
 
-  // Jaccard-like score
   const union = new Set([...tokensA, ...tokensB]).size;
   return overlap / union;
 }

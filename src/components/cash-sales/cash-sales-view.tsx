@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter,
 } from "@/components/ui/table";
 import {
   Select,
@@ -47,6 +48,20 @@ function num(val: Decimal): number {
   return Number(val.toString());
 }
 
+type TicketLine = {
+  id: string;
+  description: string;
+  qty: Decimal;
+  unit: string;
+  expectedCostUnit: Decimal;
+  expectedCostTotal: Decimal;
+  actualCostTotal: Decimal;
+  actualSaleUnit: Decimal;
+  actualSaleTotal: Decimal;
+  lineType: string;
+  supplierName: string | null;
+};
+
 type CashSale = {
   id: string;
   ticketId: string;
@@ -59,6 +74,7 @@ type CashSale = {
     id: string;
     title: string;
     payingCustomer: { id: string; name: string } | null;
+    lines: TicketLine[];
   };
 };
 
@@ -92,6 +108,12 @@ function statusBadge(status: string) {
   }
 }
 
+function profitColor(profit: number): string {
+  if (profit > 0) return "text-[#00CC66]";
+  if (profit < 0) return "text-[#FF3333]";
+  return "text-[#888888]";
+}
+
 export function CashSalesView({
   cashSales,
   tickets,
@@ -102,6 +124,7 @@ export function CashSalesView({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [expandedSale, setExpandedSale] = useState<string | null>(null);
 
   const [ticketId, setTicketId] = useState("");
   const [receivedAmount, setReceivedAmount] = useState("");
@@ -122,6 +145,12 @@ export function CashSalesView({
     (s, cs) => s + num(cs.receivedAmount),
     0
   );
+
+  // Calculate total cost across all cash sales
+  const totalCost = cashSales.reduce((s, cs) => {
+    return s + cs.ticket.lines.reduce((ls, l) => ls + num(l.actualCostTotal ?? l.expectedCostTotal), 0);
+  }, 0);
+  const totalProfit = totalAll - totalCost;
 
   async function handleSubmit() {
     if (!ticketId || !receivedAmount) return;
@@ -154,10 +183,10 @@ export function CashSalesView({
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-[#888888]">Total Cash Sales</p>
+            <p className="text-sm text-[#888888]">Total Cash Received</p>
             <p className="text-2xl font-bold">{money(totalAll)}</p>
           </CardContent>
         </Card>
@@ -169,10 +198,24 @@ export function CashSalesView({
         </Card>
         <Card>
           <CardContent className="pt-4">
+            <p className="text-sm text-[#888888]">Total Profit</p>
+            <p className={`text-2xl font-bold ${profitColor(totalProfit)}`}>{money(totalProfit)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
             <p className="text-sm text-[#888888]">Count</p>
             <p className="text-2xl font-bold">{cashSales.length}</p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* VAT Note */}
+      <div className="flex items-start gap-2 px-3 py-2 border border-[#333333] bg-[#1A1A1A] text-sm text-[#888888]">
+        <AlertTriangle className="size-4 text-[#FF9900] shrink-0 mt-0.5" />
+        <span>
+          Bill VAT on supplier costs is reclaimable. Cash sale income is off-books and not invoiced through the standard sales ledger.
+        </span>
       </div>
 
       {/* Actions */}
@@ -285,17 +328,19 @@ export function CashSalesView({
         </Sheet>
       </div>
 
-      {/* Table */}
+      {/* Table with expandable line items */}
       <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
               <TableHead>Ticket</TableHead>
               <TableHead>Customer</TableHead>
-              <TableHead className="text-right">Received Amount</TableHead>
-              <TableHead>Payment Method</TableHead>
-              <TableHead>Receipt Ref</TableHead>
-              <TableHead>Received At</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
+              <TableHead className="text-right">Cash Received</TableHead>
+              <TableHead className="text-right">Profit</TableHead>
+              <TableHead>Method</TableHead>
+              <TableHead>Date</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>
@@ -303,40 +348,151 @@ export function CashSalesView({
             {cashSales.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={9}
                   className="text-center py-8 text-[#888888]"
                 >
                   No cash sales recorded yet.
                 </TableCell>
               </TableRow>
             ) : (
-              cashSales.map((cs) => (
-                <TableRow key={cs.id}>
-                  <TableCell className="font-medium max-w-[200px] truncate">
-                    {cs.ticket.title}
-                  </TableCell>
-                  <TableCell className="text-[#888888]">
-                    {cs.ticket.payingCustomer?.name ?? "\u2014"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">
-                    {money(cs.receivedAmount)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {cs.paymentMethod.replace(/_/g, " ")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-[#888888]">
-                    {cs.receiptRef || "\u2014"}
-                  </TableCell>
-                  <TableCell className="text-[#888888] tabular-nums">
-                    {new Date(cs.receivedAt).toLocaleDateString("en-GB")}
-                  </TableCell>
-                  <TableCell>{statusBadge(cs.status)}</TableCell>
-                </TableRow>
-              ))
+              cashSales.map((cs) => {
+                const isExpanded = expandedSale === cs.id;
+                const lineCost = cs.ticket.lines.reduce(
+                  (s, l) => s + num(l.actualCostTotal ?? l.expectedCostTotal),
+                  0
+                );
+                const received = num(cs.receivedAmount);
+                const profit = received - lineCost;
+
+                return (
+                  <Fragment key={cs.id}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-[#222222]"
+                      onClick={() => setExpandedSale(isExpanded ? null : cs.id)}
+                    >
+                      <TableCell>
+                        {cs.ticket.lines.length > 0 ? (
+                          isExpanded ? (
+                            <ChevronDown className="size-4" />
+                          ) : (
+                            <ChevronRight className="size-4" />
+                          )
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="font-medium max-w-[200px] truncate">
+                        {cs.ticket.title}
+                      </TableCell>
+                      <TableCell className="text-[#888888]">
+                        {cs.ticket.payingCustomer?.name ?? "\u2014"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {lineCost > 0 ? money(lineCost) : "\u2014"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {money(cs.receivedAmount)}
+                      </TableCell>
+                      <TableCell className={`text-right tabular-nums font-medium ${profitColor(profit)}`}>
+                        {lineCost > 0 ? money(profit) : "\u2014"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {cs.paymentMethod.replace(/_/g, " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-[#888888] tabular-nums">
+                        {new Date(cs.receivedAt).toLocaleDateString("en-GB")}
+                      </TableCell>
+                      <TableCell>{statusBadge(cs.status)}</TableCell>
+                    </TableRow>
+
+                    {/* Expanded line items */}
+                    {isExpanded && cs.ticket.lines.length > 0 && (
+                      <>
+                        <TableRow className="bg-[#111111]">
+                          <TableCell />
+                          <TableCell colSpan={2} className="text-xs font-bold text-[#888888] uppercase tracking-wider">
+                            Line Item
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-bold text-[#888888] uppercase tracking-wider">
+                            Cost/Unit
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-bold text-[#888888] uppercase tracking-wider">
+                            Qty
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-bold text-[#888888] uppercase tracking-wider">
+                            Total Cost
+                          </TableCell>
+                          <TableCell colSpan={2} className="text-xs font-bold text-[#888888] uppercase tracking-wider">
+                            Supplier
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                        {cs.ticket.lines.map((line) => {
+                          const costUnit = num(line.expectedCostUnit);
+                          const costTotal = num(line.actualCostTotal ?? line.expectedCostTotal);
+                          return (
+                            <TableRow key={line.id} className="bg-[#111111] border-t border-[#222222]">
+                              <TableCell />
+                              <TableCell colSpan={2} className="text-sm text-[#CCCCCC] pl-6">
+                                {line.description}
+                                <Badge variant="outline" className="ml-2 text-[10px]">
+                                  {line.lineType}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-sm">
+                                {costUnit > 0 ? money(costUnit) : "\u2014"}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-sm">
+                                {num(line.qty)} {line.unit}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-sm font-medium">
+                                {costTotal > 0 ? money(costTotal) : "\u2014"}
+                              </TableCell>
+                              <TableCell colSpan={2} className="text-sm text-[#888888]">
+                                {line.supplierName || "\u2014"}
+                              </TableCell>
+                              <TableCell />
+                            </TableRow>
+                          );
+                        })}
+                        {/* Line items summary row */}
+                        <TableRow className="bg-[#111111] border-t border-[#333333]">
+                          <TableCell />
+                          <TableCell colSpan={4} className="text-sm font-bold text-[#CCCCCC] text-right">
+                            Total Cost / Cash / Profit:
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-bold">
+                            {money(lineCost)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-bold">
+                            {money(received)}
+                          </TableCell>
+                          <TableCell className={`text-right tabular-nums text-sm font-bold ${profitColor(profit)}`}>
+                            {money(profit)}
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                      </>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </TableBody>
+          {cashSales.length > 0 && (
+            <TableFooter>
+              <TableRow>
+                <TableCell />
+                <TableCell className="font-bold" colSpan={2}>Totals</TableCell>
+                <TableCell className="text-right tabular-nums font-bold">{money(totalCost)}</TableCell>
+                <TableCell className="text-right tabular-nums font-bold">{money(totalAll)}</TableCell>
+                <TableCell className={`text-right tabular-nums font-bold ${profitColor(totalProfit)}`}>
+                  {money(totalProfit)}
+                </TableCell>
+                <TableCell colSpan={3} />
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
     </div>

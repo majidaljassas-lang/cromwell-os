@@ -4,15 +4,18 @@ import { prisma } from "@/lib/prisma";
  * Auto-progress ticket status based on data conditions.
  *
  * Progression rules:
- *   CAPTURED  -> PRICING    : when ticket has lines
- *   PRICING   -> QUOTED     : when a quote exists
- *   QUOTED    -> APPROVED   : when a quote has status APPROVED
- *   APPROVED  -> ORDERED    : when a ProcurementOrder exists
- *   ORDERED   -> DELIVERED  : when a LogisticsEvent with type DELIVERED exists
- *   DELIVERED -> COSTED     : when all lines have cost allocations
+ *   CAPTURED  -> PRICING    : when lines.length > 0
+ *   PRICING   -> QUOTED     : when an APPROVED quote exists
+ *   QUOTED    -> APPROVED   : when CustomerPO exists
+ *   APPROVED  -> ORDERED    : when ProcurementOrder exists
+ *   ORDERED   -> DELIVERED  : when ProcurementOrder.status = DELIVERED
+ *                             OR LogisticsEvent type = GOODS_DELIVERED
+ *   DELIVERED -> COSTED     : when all lines have expectedCostUnit > 0
+ *   COSTED    -> INVOICED   : when SalesInvoice with status SENT or PAID exists
  *
- * Does NOT progress beyond COSTED (invoicing/payment is manual).
- * Idempotent and safe to run repeatedly.
+ * Idempotent and safe to run repeatedly. Uses select-only queries on TicketLine
+ * so it does not choke on legacy TicketLine.status values that are missing from
+ * the current Prisma enum.
  */
 
 const PROGRESSABLE_STATUSES = [
@@ -22,44 +25,63 @@ const PROGRESSABLE_STATUSES = [
   "APPROVED",
   "ORDERED",
   "DELIVERED",
+  "COSTED",
 ] as const;
 
 type ProgressableStatus = (typeof PROGRESSABLE_STATUSES)[number];
 
+interface Transition {
+  ticketId: string;
+  ticketNo: number;
+  title: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
 export async function POST() {
   try {
-    // Fetch all tickets in progressable statuses
+    // Fetch all active tickets (not CLOSED, not INVOICED).
+    // Use select to avoid deserialising TicketLine.status, which may contain
+    // legacy values not present in the current Prisma enum.
     const tickets = await prisma.ticket.findMany({
       where: {
-        status: { in: [...PROGRESSABLE_STATUSES] },
+        status: { in: [...PROGRESSABLE_STATUSES] as any },
       },
-      include: {
+      select: {
+        id: true,
+        ticketNo: true,
+        title: true,
+        status: true,
         lines: {
-          include: {
-            costAllocations: true,
+          select: {
+            id: true,
+            expectedCostUnit: true,
           },
         },
-        quotes: true,
-        procurementOrders: true,
-        logisticsEvents: true,
+        quotes: {
+          select: { id: true, quoteNo: true, status: true },
+        },
+        customerPOs: {
+          select: { id: true, poNo: true },
+        },
+        procurementOrders: {
+          select: { id: true, poNo: true, status: true },
+        },
+        logisticsEvents: {
+          select: { id: true, eventType: true, timestamp: true },
+        },
+        invoices: {
+          select: { id: true, invoiceNo: true, status: true },
+        },
       },
     });
 
-    const results = {
-      checked: tickets.length,
-      progressed: 0,
-      details: [] as {
-        ticketId: string;
-        title: string;
-        from: string;
-        to: string;
-        reason: string;
-      }[],
-    };
+    const transitions: Transition[] = [];
 
     for (const ticket of tickets) {
       const status = ticket.status as ProgressableStatus;
-      let newStatus: string | null = null;
+      let newStatus: ProgressableStatus | "INVOICED" | null = null;
       let reason = "";
 
       switch (status) {
@@ -72,20 +94,20 @@ export async function POST() {
         }
 
         case "PRICING": {
-          if (ticket.quotes.length > 0) {
+          const approvedQuote = ticket.quotes.find(
+            (q) => q.status === "APPROVED"
+          );
+          if (approvedQuote) {
             newStatus = "QUOTED";
-            reason = `Quote ${ticket.quotes[0].quoteNo} exists`;
+            reason = `Quote ${approvedQuote.quoteNo} approved`;
           }
           break;
         }
 
         case "QUOTED": {
-          const approvedQuote = ticket.quotes.find(
-            (q: { status: string; quoteNo: string }) => q.status === "APPROVED"
-          );
-          if (approvedQuote) {
+          if (ticket.customerPOs.length > 0) {
             newStatus = "APPROVED";
-            reason = `Quote ${approvedQuote.quoteNo} approved`;
+            reason = `Customer PO ${ticket.customerPOs[0].poNo} received`;
           }
           break;
         }
@@ -99,52 +121,69 @@ export async function POST() {
         }
 
         case "ORDERED": {
-          const deliveryEvent = ticket.logisticsEvents.find(
-            (e: { eventType: string; timestamp: Date }) => e.eventType === "DELIVERED"
+          const deliveredPO = ticket.procurementOrders.find(
+            (po) => (po.status || "").toUpperCase() === "DELIVERED"
           );
-          if (deliveryEvent) {
+          const deliveryEvent = ticket.logisticsEvents.find(
+            (e) => (e.eventType || "").toUpperCase() === "GOODS_DELIVERED"
+          );
+          if (deliveredPO) {
             newStatus = "DELIVERED";
-            reason = `Delivery event logged at ${deliveryEvent.timestamp.toISOString().split("T")[0]}`;
+            reason = `Procurement order ${deliveredPO.poNo} marked DELIVERED`;
+          } else if (deliveryEvent) {
+            newStatus = "DELIVERED";
+            reason = `GOODS_DELIVERED event logged at ${deliveryEvent.timestamp
+              .toISOString()
+              .split("T")[0]}`;
           }
           break;
         }
 
         case "DELIVERED": {
-          // All lines must have at least one cost allocation
-          const linesWithoutCost = ticket.lines.filter(
-            (line: { costAllocations: unknown[]; status: string }) =>
-              line.costAllocations.length === 0 &&
-              line.status !== "RETURNED" &&
-              line.status !== "CLOSED"
+          if (ticket.lines.length === 0) break;
+          const allCosted = ticket.lines.every(
+            (l) => l.expectedCostUnit != null && Number(l.expectedCostUnit) > 0
           );
-          if (ticket.lines.length > 0 && linesWithoutCost.length === 0) {
+          if (allCosted) {
             newStatus = "COSTED";
-            reason = `All ${ticket.lines.length} line(s) have cost allocations`;
+            reason = `All ${ticket.lines.length} line(s) have expectedCostUnit > 0`;
+          }
+          break;
+        }
+
+        case "COSTED": {
+          const sentOrPaidInvoice = ticket.invoices.find((inv) => {
+            const s = (inv.status || "").toUpperCase();
+            return s === "SENT" || s === "PAID";
+          });
+          if (sentOrPaidInvoice) {
+            newStatus = "INVOICED";
+            reason = `Sales invoice ${sentOrPaidInvoice.invoiceNo ?? sentOrPaidInvoice.id} is ${sentOrPaidInvoice.status}`;
           }
           break;
         }
       }
 
       if (newStatus) {
-        await prisma.$transaction(async (tx: typeof prisma) => {
+        await prisma.$transaction(async (tx) => {
           await tx.ticket.update({
             where: { id: ticket.id },
-            data: { status: newStatus as ProgressableStatus },
+            data: { status: newStatus as any },
           });
 
           await tx.event.create({
             data: {
               ticketId: ticket.id,
-              eventType: "AUTO_STATUS_PROGRESSED",
+              eventType: "AUTO_STATUS_PROGRESSED" as any,
               timestamp: new Date(),
               notes: `Auto-progressed ${status} -> ${newStatus}: ${reason}`,
             },
           });
         });
 
-        results.progressed++;
-        results.details.push({
+        transitions.push({
           ticketId: ticket.id,
+          ticketNo: ticket.ticketNo,
           title: ticket.title,
           from: status,
           to: newStatus,
@@ -154,13 +193,19 @@ export async function POST() {
     }
 
     return Response.json({
-      ...results,
-      message: `Checked ${results.checked} tickets, progressed ${results.progressed}`,
+      ok: true,
+      ticketsScanned: tickets.length,
+      transitionsApplied: transitions.length,
+      transitions,
+      message: `Scanned ${tickets.length} tickets, progressed ${transitions.length}`,
     });
   } catch (error) {
     console.error("Auto-progress failed:", error);
     return Response.json(
-      { error: "Auto-progress failed" },
+      {
+        error: "Auto-progress failed",
+        detail: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }

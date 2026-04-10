@@ -30,31 +30,12 @@ export default async function TicketDetailPage({
       tasks: {
         orderBy: { createdAt: "desc" },
       },
-      recoveryCases: {
-        orderBy: { createdAt: "desc" },
-      },
-      dealSheets: {
-        orderBy: { versionNo: "desc" },
-      },
     },
   });
 
   if (!ticket) {
     notFound();
   }
-
-  // Fetch sales bundles with cost links
-  const salesBundles = await prisma.salesBundle.findMany({
-    where: { ticketId: id },
-    include: {
-      costLinks: {
-        include: {
-          ticketLine: true,
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
 
   // Fetch quotes with lines and customer
   const quotes = await prisma.quote.findMany({
@@ -108,14 +89,18 @@ export default async function TicketDetailPage({
     orderBy: { createdAt: "desc" },
   });
 
-  // Fetch sites & commercial links for PO entry
-  const allSites = await prisma.site.findMany({
+  // Fetch sites and commercial links for PO creation
+  const sites = await prisma.site.findMany({
+    where: { isActive: true },
     orderBy: { siteName: "asc" },
     select: { id: true, siteName: true },
   });
   const commercialLinks = await prisma.siteCommercialLink.findMany({
     where: { isActive: true },
-    select: { id: true, siteId: true, customerId: true, site: { select: { id: true, siteName: true } } },
+    include: {
+      site: { select: { id: true, siteName: true } },
+      customer: { select: { id: true, name: true } },
+    },
   });
 
   // Serialize to plain objects — Prisma Decimal/Date objects can't pass to client components
@@ -125,7 +110,6 @@ export default async function TicketDetailPage({
     <div className="p-8">
       <TicketDetail
         ticket={s(ticket)}
-        salesBundles={s(salesBundles)}
         quotes={s(quotes)}
         customers={s(customers)}
         procurementOrders={s(procurementOrders)}
@@ -135,7 +119,7 @@ export default async function TicketDetailPage({
         customerPOs={s(customerPOs)}
         evidencePacks={s(evidencePacks)}
         salesInvoices={s(salesInvoices)}
-        sites={s(allSites)}
+        sites={s(sites)}
         commercialLinks={s(commercialLinks)}
       />
     </div>

@@ -1,14 +1,23 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ArrowLeft, SeparatorHorizontal, Pencil, Trash2, FileText } from "lucide-react";
+import {
+  Plus,
+  ArrowLeft,
+  SeparatorHorizontal,
+  Pencil,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Tabs,
   TabsList,
@@ -41,13 +50,12 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import Link from "next/link";
-import { SalesBundlesPanel } from "@/components/sales-bundles/sales-bundles-panel";
 import { QuotePanel } from "@/components/quotes/quote-panel";
 import { TicketProcurementTab } from "@/components/procurement/ticket-procurement-tab";
 import { RfqExploder } from "@/components/tickets/rfq-exploder";
-import { TicketPOTab } from "@/components/po-register/ticket-po-tab";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
-import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
+
+// ─── Constants ──────────────────────────────────────────────────────────────
 
 const LINE_TYPES = [
   "MATERIAL",
@@ -58,6 +66,8 @@ const LINE_TYPES = [
   "CASH_SALE",
   "RETURN_ADJUSTMENT",
 ] as const;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Decimal = { toString(): string } | string | number | null;
 
@@ -70,123 +80,47 @@ function dec(val: Decimal): string {
 }
 
 function fmtMoney(n: number): string {
-  return n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
-const INPUT_CLS = "h-7 text-xs px-1.5 bg-transparent border border-transparent hover:border-[#444] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0]";
+/**
+ * Evaluate simple math expressions: 500/2, 500*0.8, 100+50, 200-30
+ * Returns the number result, or NaN if invalid.
+ */
+function evalMathExpr(raw: string): number {
+  const trimmed = raw.trim();
+  if (!trimmed) return NaN;
+  // Check if it's a simple math expression (numbers with +, -, *, /)
+  if (/^[\d.]+\s*[+\-*/]\s*[\d.]+$/.test(trimmed)) {
+    const parts = trimmed.match(/^([\d.]+)\s*([+\-*/])\s*([\d.]+)$/);
+    if (parts) {
+      const a = parseFloat(parts[1]);
+      const op = parts[2];
+      const b = parseFloat(parts[3]);
+      switch (op) {
+        case "+":
+          return a + b;
+        case "-":
+          return a - b;
+        case "*":
+          return a * b;
+        case "/":
+          return b !== 0 ? a / b : NaN;
+      }
+    }
+  }
+  // Otherwise treat as a plain number
+  return parseFloat(trimmed);
+}
+
+const INPUT_CLS =
+  "h-7 text-xs px-1.5 bg-transparent border border-transparent hover:border-[#444] focus:border-[#FF6600] focus:bg-[#222222] outline-none text-[#E0E0E0]";
 const NUM_CLS = `${INPUT_CLS} w-20 text-right tabular-nums`;
 
-function InlineLineRow({ line, onClickRow, onSaved }: {
-  line: TicketLine;
-  onClickRow: () => void;
-  onSaved: () => void;
-}) {
-  const [desc, setDesc] = useState("");
-  const [qtyVal, setQtyVal] = useState("");
-  const [costVal, setCostVal] = useState("");
-  const [saleVal, setSaleVal] = useState("");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setDesc(line.description);
-    setQtyVal(line.qty ? String(Number(line.qty)) : "1");
-    setCostVal(Number(line.expectedCostUnit || 0) ? String(Number(line.expectedCostUnit)) : "");
-    setSaleVal(Number(line.actualSaleUnit || 0) ? String(Number(line.actualSaleUnit)) : "");
-    setMounted(true);
-  }, [line.description, line.qty, line.expectedCostUnit, line.actualSaleUnit]);
-  const [saving, setSaving] = useState(false);
-
-  const qty = Number(qtyVal || 1);
-  const costUnit = Number(costVal || 0);
-  const saleUnit = Number(saleVal || 0);
-  const costTotal = costUnit * qty;
-  const saleTotal = saleUnit * qty;
-  const margin = saleTotal - costTotal;
-  const marginPct = saleTotal > 0 ? (margin / saleTotal) * 100 : 0;
-
-  const sc = line.status === "READY_FOR_QUOTE"
-    ? "text-[#00CC66] bg-[#00CC66]/10"
-    : line.status === "PRICED"
-    ? "text-[#FF9900] bg-[#FF9900]/10"
-    : "text-[#888888] bg-[#333333]";
-
-  async function saveField(field: string, value: unknown) {
-    setSaving(true);
-    await fetch(`/api/ticket-lines/${line.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: value || undefined }),
-    });
-    setSaving(false);
-    onSaved();
-  }
-
-  function onBlurDesc() { if (desc !== line.description) saveField("description", desc); }
-  function onBlurQty() { const v = Number(qtyVal); if (v !== Number(line.qty)) saveField("qty", v); }
-  function onBlurCost() { const v = Number(costVal || 0); if (v !== Number(line.expectedCostUnit || 0)) saveField("expectedCostUnit", v || undefined); }
-  function onBlurSale() { const v = Number(saleVal || 0); if (v !== Number(line.actualSaleUnit || 0)) saveField("actualSaleUnit", v || undefined); }
-
-  function kd(e: React.KeyboardEvent) { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }
-
-  if (!mounted) {
-    // SSR placeholder — static text only, no inputs
-    return (
-      <TableRow className="hover:bg-[#1E1E1E]">
-        <TableCell className="p-1 max-w-[250px] font-medium text-xs">{line.description}</TableCell>
-        <TableCell className="text-[10px] text-[#888888] p-1">{line.supplierName || "—"}</TableCell>
-        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.qty)}</TableCell>
-        <TableCell className="text-[10px] text-[#888888] p-1">{line.unit}</TableCell>
-        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.expectedCostUnit)}</TableCell>
-        <TableCell className="text-right tabular-nums text-xs p-1">{dec(line.actualSaleUnit)}</TableCell>
-        <TableCell className="text-right tabular-nums text-xs p-1">—</TableCell>
-        <TableCell className="text-right text-[10px] p-1">—</TableCell>
-        <TableCell className="p-1"><Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#888888] bg-[#333333]">{line.status.replace(/_/g, " ")}</Badge></TableCell>
-      </TableRow>
-    );
-  }
-
-  return (
-    <TableRow className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""}`}>
-      <TableCell className="p-0 max-w-[250px]">
-        <input value={desc} onChange={(e) => setDesc(e.target.value)} onBlur={onBlurDesc} onKeyDown={kd}
-          className={`${INPUT_CLS} w-full font-medium`} />
-      </TableCell>
-      <TableCell className="text-[10px] text-[#888888] max-w-[100px] truncate cursor-pointer p-1" onClick={onClickRow}>
-        {line.supplierName || "—"}
-      </TableCell>
-      <TableCell className="p-0">
-        <input type="number" step="0.01" value={qtyVal} onChange={(e) => setQtyVal(e.target.value)} onBlur={onBlurQty} onKeyDown={kd}
-          className={`${NUM_CLS} w-16`} />
-      </TableCell>
-      <TableCell className="text-[#888888] text-[10px] cursor-pointer p-1" onClick={onClickRow}>
-        {line.unit}
-      </TableCell>
-      <TableCell className="p-0">
-        <input type="number" step="0.01" value={costVal} onChange={(e) => setCostVal(e.target.value)} onBlur={onBlurCost} onKeyDown={kd}
-          className={NUM_CLS} placeholder="0.00" />
-      </TableCell>
-      <TableCell className="p-0">
-        <input type="number" step="0.01" value={saleVal} onChange={(e) => setSaleVal(e.target.value)} onBlur={onBlurSale} onKeyDown={kd}
-          className={NUM_CLS} placeholder="0.00" />
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-xs">
-        <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
-          {fmtMoney(margin)}
-        </span>
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-[10px]">
-        <span className={marginPct >= 20 ? "text-[#00CC66]" : marginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}>
-          {marginPct.toFixed(1)}%
-        </span>
-      </TableCell>
-      <TableCell>
-        <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}>
-          {line.status.replace(/_/g, " ")}
-        </Badge>
-      </TableCell>
-    </TableRow>
-  );
-}
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 type TicketLine = {
   id: string;
@@ -241,49 +175,6 @@ type TaskItem = {
   assignedTo: string | null;
 };
 
-type RecoveryCaseItem = {
-  id: string;
-  reasonType: string;
-  recoveryStatus: string;
-  stuckValue: Decimal;
-  nextAction: string | null;
-  currentStageStartedAt: Date | null;
-};
-
-type DealSheetItem = {
-  id: string;
-  versionNo: number;
-  mode: string;
-  status: string;
-  totalExpectedCost: Decimal;
-  totalExpectedSell: Decimal;
-  totalExpectedMargin: Decimal;
-  totalActualCost: Decimal;
-  totalActualSell: Decimal;
-  totalActualMargin: Decimal;
-};
-
-type SalesBundleCostLink = {
-  id: string;
-  ticketLineId: string;
-  linkedCostValue: Decimal;
-  linkedQty: Decimal;
-  contributionType: string;
-  ticketLine: { id: string; description: string };
-};
-
-type SalesBundleData = {
-  id: string;
-  name: string;
-  description: string | null;
-  bundleType: string;
-  pricingMode: string;
-  targetSellTotal: Decimal;
-  actualSellTotal: Decimal;
-  status: string;
-  costLinks: SalesBundleCostLink[];
-};
-
 type QuoteLineData = {
   id: string;
   description: string;
@@ -334,34 +225,17 @@ type EvidencePackData = {
   items: EvidencePackItemData[];
 };
 
-type SalesInvoiceLineData = {
-  id: string;
-  description: string;
-  qty: Decimal;
-  unitPrice: Decimal;
-  lineTotal: Decimal;
-  poMatched: boolean;
-  poMatchStatus: string | null;
-};
-
-type SalesInvoiceData = {
-  id: string;
-  invoiceNo: string | null;
-  poNo: string | null;
-  invoiceType: string;
-  status: string;
-  issuedAt: string | null;
-  paidAt: string | null;
-  totalSell: Decimal;
-  customer: { id: string; name: string };
-  lines: SalesInvoiceLineData[];
-  poAllocations: { id: string; allocatedValue: Decimal; status: string }[];
-};
-
 type CustomerOption = { id: string; name: string };
 type SupplierOption = { id: string; name: string };
 type SiteOption = { id: string; siteName: string };
-type CommercialLinkOption = { id: string; siteId: string; customerId: string; site: SiteOption };
+type CommercialLinkOption = {
+  id: string;
+  siteId: string;
+  customerId: string;
+  role: string;
+  site: { id: string; siteName: string };
+  customer: { id: string; name: string };
+};
 
 type TicketData = {
   id: string;
@@ -370,6 +244,8 @@ type TicketData = {
   ticketMode: string;
   status: string;
   revenueState: string;
+  poRequired: boolean;
+  poStatus: string | null;
   createdAt: Date;
   closedAt: Date | null;
   payingCustomer: { id: string; name: string };
@@ -379,9 +255,308 @@ type TicketData = {
   evidenceFragments: EvidenceFragment[];
   events: EventItem[];
   tasks: TaskItem[];
-  recoveryCases: RecoveryCaseItem[];
-  dealSheets: DealSheetItem[];
 };
+
+// ─── InlineLineRow ──────────────────────────────────────────────────────────
+
+function InlineLineRow({
+  line,
+  selected,
+  onToggleSelect,
+  onSaved,
+  onDelete,
+  supplierLookup,
+}: {
+  line: TicketLine;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onSaved: () => void;
+  onDelete: () => void;
+  supplierLookup: Record<string, string>;
+}) {
+  const [desc, setDesc] = useState("");
+  const [supplierVal, setSupplierVal] = useState("");
+  const [qtyVal, setQtyVal] = useState("");
+  const [costVal, setCostVal] = useState("");
+  const [saleVal, setSaleVal] = useState("");
+  const [marginPctVal, setMarginPctVal] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setDesc(line.description);
+    setSupplierVal(line.supplierName || supplierLookup[line.id] || "");
+    setQtyVal(line.qty ? String(Number(line.qty)) : "1");
+    setCostVal(
+      Number(line.expectedCostUnit || 0)
+        ? String(Number(line.expectedCostUnit))
+        : ""
+    );
+    setSaleVal(
+      Number(line.actualSaleUnit || 0)
+        ? String(Number(line.actualSaleUnit))
+        : ""
+    );
+    setMarginPctVal("");
+    setMounted(true);
+  }, [
+    line.id,
+    line.description,
+    line.qty,
+    line.expectedCostUnit,
+    line.actualSaleUnit,
+    line.supplierName,
+    supplierLookup,
+  ]);
+  const [saving, setSaving] = useState(false);
+
+  const qty = Number(qtyVal || 1);
+  const costUnit = evalMathExpr(costVal || "0");
+  const saleUnit = evalMathExpr(saleVal || "0");
+  const costTotal = (isNaN(costUnit) ? 0 : costUnit) * qty;
+  const saleTotal = (isNaN(saleUnit) ? 0 : saleUnit) * qty;
+  const margin = saleTotal - costTotal;
+  const marginPct = saleTotal > 0 ? (margin / saleTotal) * 100 : 0;
+
+  const sc =
+    line.status === "READY_FOR_QUOTE"
+      ? "text-[#00CC66] bg-[#00CC66]/10"
+      : line.status === "PRICED"
+      ? "text-[#FF9900] bg-[#FF9900]/10"
+      : "text-[#888888] bg-[#333333]";
+
+  async function saveField(field: string, value: unknown) {
+    setSaving(true);
+    await fetch(`/api/ticket-lines/${line.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value || undefined }),
+    });
+    setSaving(false);
+    // Silent save — do NOT call onSaved/router.refresh
+  }
+
+  async function saveMultipleFields(fields: Record<string, unknown>) {
+    setSaving(true);
+    await fetch(`/api/ticket-lines/${line.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    setSaving(false);
+  }
+
+  function onBlurDesc() {
+    if (desc !== line.description) saveField("description", desc);
+  }
+
+  function onBlurSupplier() {
+    if (supplierVal !== (line.supplierName || "")) {
+      saveField("supplierName", supplierVal || null);
+    }
+  }
+
+  function onBlurQty() {
+    const v = Number(qtyVal);
+    if (v !== Number(line.qty)) saveField("qty", v);
+  }
+
+  function onBlurCost() {
+    const v = evalMathExpr(costVal || "0");
+    if (!isNaN(v)) {
+      setCostVal(v ? String(v) : "");
+      if (v !== Number(line.expectedCostUnit || 0))
+        saveField("expectedCostUnit", v || undefined);
+    }
+  }
+
+  function onBlurSale() {
+    const v = evalMathExpr(saleVal || "0");
+    if (!isNaN(v)) {
+      setSaleVal(v ? String(v) : "");
+      if (v !== Number(line.actualSaleUnit || 0))
+        saveField("actualSaleUnit", v || undefined);
+    }
+  }
+
+  function onBlurMarginPct() {
+    const pct = Number(marginPctVal);
+    if (!marginPctVal.trim() || isNaN(pct)) {
+      setMarginPctVal("");
+      return;
+    }
+    // margin% = (sale - cost) / sale * 100
+    // => sale = cost / (1 - pct/100)
+    const currentCost = evalMathExpr(costVal || "0");
+    if (!isNaN(currentCost) && currentCost > 0 && pct < 100) {
+      const newSale = currentCost / (1 - pct / 100);
+      const rounded = Math.round(newSale * 100) / 100;
+      setSaleVal(String(rounded));
+      setMarginPctVal("");
+      saveField("actualSaleUnit", rounded);
+    } else {
+      setMarginPctVal("");
+    }
+  }
+
+  function kd(e: React.KeyboardEvent) {
+    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete "${line.description}"?`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/ticket-lines/${line.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (!mounted) {
+    return (
+      <TableRow className="hover:bg-[#1E1E1E]">
+        <TableCell className="p-1 w-8">
+          <input type="checkbox" disabled className="accent-[#FF6600]" />
+        </TableCell>
+        <TableCell className="p-1 max-w-[250px] font-medium text-xs">
+          {line.description}
+        </TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">
+          {line.supplierName || "\u2014"}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">
+          {dec(line.qty)}
+        </TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">
+          {line.unit}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">
+          {dec(line.expectedCostUnit)}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">
+          {dec(line.actualSaleUnit)}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">
+          \u2014
+        </TableCell>
+        <TableCell className="text-right text-[10px] p-1">\u2014</TableCell>
+        <TableCell className="p-1">
+          <Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#888888] bg-[#333333]">
+            {line.status.replace(/_/g, " ")}
+          </Badge>
+        </TableCell>
+        <TableCell className="p-1 w-8" />
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow
+      key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
+      className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${selected ? "bg-[#FF6600]/5" : ""}`}
+    >
+      <TableCell className="p-1 w-8">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          className="accent-[#FF6600]"
+        />
+      </TableCell>
+      <TableCell className="p-0 max-w-[250px]">
+        <input
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          onBlur={onBlurDesc}
+          onKeyDown={kd}
+          className={`${INPUT_CLS} w-full font-medium`}
+        />
+      </TableCell>
+      <TableCell className="p-0 max-w-[100px]">
+        <input
+          value={supplierVal}
+          onChange={(e) => setSupplierVal(e.target.value)}
+          onBlur={onBlurSupplier}
+          onKeyDown={kd}
+          className={`${INPUT_CLS} w-full text-[10px] text-[#888888]`}
+          placeholder="\u2014"
+        />
+      </TableCell>
+      <TableCell className="p-0">
+        <input
+          type="number"
+          step="0.01"
+          value={qtyVal}
+          onChange={(e) => setQtyVal(e.target.value)}
+          onBlur={onBlurQty}
+          onKeyDown={kd}
+          className={`${NUM_CLS} w-16`}
+        />
+      </TableCell>
+      <TableCell className="text-[#888888] text-[10px] p-1">
+        {line.unit}
+      </TableCell>
+      <TableCell className="p-0">
+        <input
+          value={costVal}
+          onChange={(e) => setCostVal(e.target.value)}
+          onBlur={onBlurCost}
+          onKeyDown={kd}
+          className={NUM_CLS}
+          placeholder="0.00"
+        />
+      </TableCell>
+      <TableCell className="p-0">
+        <input
+          value={saleVal}
+          onChange={(e) => setSaleVal(e.target.value)}
+          onBlur={onBlurSale}
+          onKeyDown={kd}
+          className={NUM_CLS}
+          placeholder="0.00"
+        />
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-xs">
+        <span className={margin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>
+          {fmtMoney(margin)}
+        </span>
+      </TableCell>
+      <TableCell className="p-0">
+        <input
+          value={marginPctVal}
+          onChange={(e) => setMarginPctVal(e.target.value)}
+          onBlur={onBlurMarginPct}
+          onKeyDown={kd}
+          className={`${NUM_CLS} w-16`}
+          placeholder={`${marginPct.toFixed(1)}%`}
+        />
+      </TableCell>
+      <TableCell>
+        <Badge
+          className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${sc}`}
+        >
+          {line.status.replace(/_/g, " ")}
+        </Badge>
+      </TableCell>
+      <TableCell className="p-1 w-8">
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="p-1 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
+          title="Delete line"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+// ─── Status helpers ─────────────────────────────────────────────────────────
 
 function statusVariant(
   status: string
@@ -437,9 +612,10 @@ function priorityVariant(
   }
 }
 
+// ─── Main Component ─────────────────────────────────────────────────────────
+
 export function TicketDetail({
   ticket,
-  salesBundles = [],
   quotes = [],
   customers = [],
   procurementOrders = [],
@@ -453,7 +629,6 @@ export function TicketDetail({
   commercialLinks = [],
 }: {
   ticket: TicketData;
-  salesBundles?: SalesBundleData[];
   quotes?: QuoteData[];
   customers?: CustomerOption[];
   procurementOrders?: any[];
@@ -462,96 +637,111 @@ export function TicketDetail({
   suppliers?: SupplierOption[];
   customerPOs?: any[];
   evidencePacks?: EvidencePackData[];
-  salesInvoices?: SalesInvoiceData[];
+  salesInvoices?: any[];
   sites?: SiteOption[];
   commercialLinks?: CommercialLinkOption[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState<{
-    totals: { totalSale: number; totalCost: number; totalMargin: number; totalMarginPct: number };
+    totals: {
+      totalSale: number;
+      totalCost: number;
+      totalMargin: number;
+      totalMarginPct: number;
+    };
   } | null>(null);
 
   // Fetch commercial summary from backend (single source of truth)
-  useEffect(() => {
+  const refreshSummary = useCallback(() => {
     fetch(`/api/tickets/${ticket.id}/commercial-summary`)
-      .then((r) => r.ok ? r.json() : null)
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => setSummary(d))
       .catch(() => {});
   }, [ticket.id]);
+
+  useEffect(() => {
+    refreshSummary();
+  }, [refreshSummary]);
 
   // Filter lines: only show ACTIVE statuses (exclude RAW and MERGED)
   const activeLines = ticket.lines.filter(
     (l) => l.status !== "RAW" && l.status !== "MERGED"
   );
 
-  const [lineSheetOpen, setLineSheetOpen] = useState(false);
-  const [submittingLine, setSubmittingLine] = useState(false);
-  const [lineType, setLineType] = useState<string>("MATERIAL");
-  const [lineUnit, setLineUnit] = useState<string>("EA");
-  const [editingLine, setEditingLine] = useState<TicketLine | null>(null);
-  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
-  const [sectionLabel, setSectionLabel] = useState("EXTRA ORDER");
-  const [sectionSource, setSectionSource] = useState("CALL");
-  const [sectionMaterials, setSectionMaterials] = useState("");
-  const [addingSection, setAddingSection] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<{ id: string; notes: string; sourceRef: string } | null>(null);
-  const [editEventOpen, setEditEventOpen] = useState(false);
-  const [editEventNotes, setEditEventNotes] = useState("");
-  const [editEventSourceRef, setEditEventSourceRef] = useState("");
-  const [editSheetOpen, setEditSheetOpen] = useState(false);
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [deletingLine, setDeletingLine] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // ── Line selection for Convert to Invoice ──
+  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(
+    new Set()
+  );
+  const allSelected =
+    activeLines.length > 0 && selectedLineIds.size === activeLines.length;
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedLineIds(new Set());
+    } else {
+      setSelectedLineIds(new Set(activeLines.map((l) => l.id)));
+    }
+  }
+  function toggleSelectLine(lineId: string) {
+    setSelectedLineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
 
-  // PO entry state (ticket header)
-  const [poSheetOpen, setPoSheetOpen] = useState(false);
-  const [submittingPO, setSubmittingPO] = useState(false);
-  const [poNumber, setPoNumber] = useState("");
-  const [poDate, setPoDate] = useState(new Date().toISOString().split("T")[0]);
-  const [poIssuer, setPoIssuer] = useState("");
-  const [poSiteId, setPoSiteId] = useState("");
-  const [poNotes, setPoNotes] = useState("");
-
-  // Build supplier lookup from procurement orders for lines
-  const supplierByLineId = React.useMemo(() => {
+  // ── Supplier lookup from procurement orders (memoized) ──
+  const supplierLookup = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const po of procurementOrders) {
-      const supplierName = po.supplier?.name;
-      if (!supplierName) continue;
-      for (const pol of po.lines || []) {
-        if (pol.ticketLineId) {
-          map[pol.ticketLineId] = supplierName;
+    if (procurementOrders) {
+      for (const po of procurementOrders) {
+        if (po.supplier?.name && po.lines) {
+          for (const pl of po.lines) {
+            if (pl.ticketLineId) {
+              map[pl.ticketLineId] = po.supplier.name;
+            }
+          }
         }
       }
     }
     return map;
   }, [procurementOrders]);
 
-  async function handleDeleteLine() {
-    if (!editingLine) return;
-    if (!confirm(`Delete "${editingLine.description}"? This cannot be undone.`)) return;
-    setDeletingLine(true);
-    setDeleteError(null);
-    try {
-      const res = await fetch(`/api/ticket-lines/${editingLine.id}`, { method: "DELETE" });
-      if (res.ok) {
-        setEditSheetOpen(false);
-        setEditingLine(null);
-        router.refresh();
-      } else {
-        const data = await res.json();
-        setDeleteError(data.error || "Failed to delete");
-      }
-    } finally {
-      setDeletingLine(false);
-    }
-  }
+  // ── Line management state ──
+  const [lineSheetOpen, setLineSheetOpen] = useState(false);
+  const [submittingLine, setSubmittingLine] = useState(false);
+  const [lineType, setLineType] = useState<string>("MATERIAL");
+  const [lineUnit, setLineUnit] = useState<string>("EA");
+  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
+  const [sectionLabel, setSectionLabel] = useState("EXTRA ORDER");
+  const [sectionSource, setSectionSource] = useState("CALL");
+  const [sectionMaterials, setSectionMaterials] = useState("");
+  const [addingSection, setAddingSection] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<{
+    id: string;
+    notes: string;
+    sourceRef: string;
+  } | null>(null);
+  const [editEventOpen, setEditEventOpen] = useState(false);
+  const [editEventNotes, setEditEventNotes] = useState("");
+  const [editEventSourceRef, setEditEventSourceRef] = useState("");
+
+  // ── RFQ Extract collapsible state ──
+  const [rfqOpen, setRfqOpen] = useState(false);
+
+  // ── Quote button state ──
   const [creatingQuote, setCreatingQuote] = useState(false);
 
   // Quote readiness: all lines READY_FOR_QUOTE, at least 1 line
-  const isQuoteReady = ticket.lines.length > 0 && ticket.lines.every(
-    (l) => l.status === "READY_FOR_QUOTE" || l.status === "ORDERED" || l.status === "FULLY_COSTED" || l.status === "INVOICED"
-  );
+  const isQuoteReady =
+    ticket.lines.length > 0 &&
+    ticket.lines.every(
+      (l) =>
+        l.status === "READY_FOR_QUOTE" ||
+        l.status === "ORDERED" ||
+        l.status === "FULLY_COSTED" ||
+        l.status === "INVOICED"
+    );
 
   async function handleCreateQuote() {
     setCreatingQuote(true);
@@ -567,94 +757,40 @@ export function TicketDetail({
         }),
       });
       if (res.ok) {
-        const data = await res.json();
-        router.push(`/quotes/${data.id}`);
+        router.refresh();
       }
     } finally {
       setCreatingQuote(false);
     }
   }
 
-  const [creatingPOs, setCreatingPOs] = useState(false);
+  // ── Convert to Invoice ──
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
 
-  // Check if quote is accepted (procurement can proceed)
-  const hasAcceptedQuote = (quotes || []).some((q: { status: string }) => q.status === "APPROVED");
-  const hasSuppliers = ticket.lines.some((l) => l.supplierId);
-  const canCreatePurchasePlan = hasAcceptedQuote && hasSuppliers && ticket.status !== "ORDERED" && ticket.status !== "CLOSED";
-
-  async function handleCreatePurchasePlan() {
-    setCreatingPOs(true);
+  async function handleConvertToInvoice() {
+    if (selectedLineIds.size === 0) return;
+    setCreatingInvoice(true);
     try {
-      const res = await fetch(`/api/tickets/${ticket.id}/create-purchase-plan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+      const res = await fetch(
+        `/api/tickets/${ticket.id}/generate-invoice-draft`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerId: ticket.payingCustomer.id,
+            lineIds: [...selectedLineIds],
+          }),
+        }
+      );
       if (res.ok) {
-        router.refresh();
+        router.push("/invoices");
       }
     } finally {
-      setCreatingPOs(false);
+      setCreatingInvoice(false);
     }
   }
 
-  async function handleSaveLineEdit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!editingLine) return;
-    setSavingEdit(true);
-
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-
-    const body: Record<string, unknown> = {};
-    const desc = fd.get("edit-description") as string;
-    if (desc && desc !== editingLine.description) body.description = desc;
-    const notes = fd.get("edit-internalNotes") as string;
-    if (notes !== (editingLine.internalNotes || "")) body.internalNotes = notes || null;
-    const qty = Number(fd.get("edit-qty"));
-    if (qty && qty !== Number(editingLine.qty)) body.qty = qty;
-    const unit = fd.get("edit-unit") as string;
-    if (unit && unit !== editingLine.unit) body.unit = unit;
-    const expCost = fd.get("edit-expectedCostUnit") as string;
-    if (expCost !== "") body.expectedCostUnit = Number(expCost);
-    const actCost = fd.get("edit-actualCostTotal") as string;
-    if (actCost !== "") body.actualCostTotal = Number(actCost);
-    const suggSale = fd.get("edit-suggestedSaleUnit") as string;
-    if (suggSale !== "") body.suggestedSaleUnit = Number(suggSale);
-    const actSale = fd.get("edit-actualSaleUnit") as string;
-    if (actSale !== "") body.actualSaleUnit = Number(actSale);
-    const suppId = fd.get("edit-supplierId") as string;
-    body.supplierId = suppId || null;
-    if (suppId) {
-      const sup = suppliers.find((s) => s.id === suppId);
-      body.supplierName = sup?.name || null;
-    } else {
-      body.supplierName = null;
-    }
-    const supRef = fd.get("edit-supplierReference") as string;
-    body.supplierReference = supRef || null;
-
-    try {
-      const res = await fetch(`/api/ticket-lines/${editingLine.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setEditSheetOpen(false);
-        setEditingLine(null);
-        router.refresh();
-      }
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-
-  const statusIndex = STATUS_ORDER.indexOf(ticket.status);
-  const progressPercent =
-    statusIndex >= 0
-      ? Math.round(((statusIndex + 1) / STATUS_ORDER.length) * 100)
-      : 0;
-
+  // ── Add Line ──
   async function handleAddLine(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmittingLine(true);
@@ -669,8 +805,10 @@ export function TicketDetail({
       unit: lineUnit,
       payingCustomerId: ticket.payingCustomer.id,
       internalNotes: (formData.get("internalNotes") as string) || undefined,
-      expectedCostUnit: Number(formData.get("expectedCostUnit")) || undefined,
-      suggestedSaleUnit: Number(formData.get("suggestedSaleUnit")) || undefined,
+      expectedCostUnit:
+        Number(formData.get("expectedCostUnit")) || undefined,
+      suggestedSaleUnit:
+        Number(formData.get("suggestedSaleUnit")) || undefined,
       actualSaleUnit: Number(formData.get("actualSaleUnit")) || undefined,
     };
 
@@ -693,31 +831,7 @@ export function TicketDetail({
     }
   }
 
-  function openEditEvent(ev: { id: string; notes: string | null; sourceRef: string | null }) {
-    setEditingEvent({ id: ev.id, notes: ev.notes || "", sourceRef: ev.sourceRef || "" });
-    setEditEventNotes(ev.notes || "");
-    setEditEventSourceRef(ev.sourceRef || "");
-    setEditEventOpen(true);
-  }
-
-  async function handleSaveEvent() {
-    if (!editingEvent) return;
-    await fetch(`/api/events/${editingEvent.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: editEventNotes, sourceRef: editEventSourceRef }),
-    });
-    setEditEventOpen(false);
-    setEditingEvent(null);
-    router.refresh();
-  }
-
-  async function handleDeleteEvent(eventId: string) {
-    if (!confirm("Delete this event?")) return;
-    await fetch(`/api/events/${eventId}`, { method: "DELETE" });
-    router.refresh();
-  }
-
+  // ── Add Section ──
   async function handleAddSection() {
     if (!sectionLabel.trim()) return;
     setAddingSection(true);
@@ -743,60 +857,128 @@ export function TicketDetail({
     }
   }
 
-  // Find existing PO for this ticket
-  const existingPO = customerPOs.length > 0 ? customerPOs[0] : null;
+  // ── Delete section ──
+  async function handleDeleteSection(sectionLabelToDelete: string) {
+    if (
+      !confirm(
+        `Delete section "${sectionLabelToDelete}" and all its lines? This cannot be undone.`
+      )
+    )
+      return;
+    // Delete all lines in this section
+    const sectionLines = activeLines.filter(
+      (l) => l.sectionLabel === sectionLabelToDelete
+    );
+    for (const line of sectionLines) {
+      await fetch(`/api/ticket-lines/${line.id}`, { method: "DELETE" });
+    }
+    router.refresh();
+  }
 
-  // Filter sites for PO entry
-  const customerLinks = commercialLinks.filter(cl => cl.customerId === ticket.payingCustomer.id);
-  const filteredSites = customerLinks.length > 0
-    ? customerLinks.map(cl => cl.site)
-    : sites;
+  // ── Event management ──
+  function openEditEvent(ev: {
+    id: string;
+    notes: string | null;
+    sourceRef: string | null;
+  }) {
+    setEditingEvent({
+      id: ev.id,
+      notes: ev.notes || "",
+      sourceRef: ev.sourceRef || "",
+    });
+    setEditEventNotes(ev.notes || "");
+    setEditEventSourceRef(ev.sourceRef || "");
+    setEditEventOpen(true);
+  }
 
-  async function handleSubmitPO() {
-    if (!poNumber.trim()) return;
-    setSubmittingPO(true);
+  async function handleSaveEvent() {
+    if (!editingEvent) return;
+    await fetch(`/api/events/${editingEvent.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        notes: editEventNotes,
+        sourceRef: editEventSourceRef,
+      }),
+    });
+    setEditEventOpen(false);
+    setEditingEvent(null);
+    router.refresh();
+  }
+
+  async function handleDeleteEvent(eventId: string) {
+    if (!confirm("Delete this event?")) return;
+    await fetch(`/api/events/${eventId}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  // ── PO Sheet state ──
+  const [poSheetOpen, setPoSheetOpen] = useState(false);
+  const [poSubmitting, setPoSubmitting] = useState(false);
+  const [poNo, setPoNo] = useState("");
+  const [poDate, setPoDate] = useState("");
+  const [poIssuer, setPoIssuer] = useState("");
+  const [poSiteId, setPoSiteId] = useState(ticket.site?.id || "");
+  const [poNotes, setPoNotes] = useState("");
+
+  // Filter sites by customer commercial links
+  const filteredSites = useMemo(() => {
+    if (!commercialLinks || commercialLinks.length === 0) return sites || [];
+    const customerLinkSiteIds = commercialLinks
+      .filter((cl) => cl.customerId === ticket.payingCustomer.id)
+      .map((cl) => cl.siteId);
+    if (customerLinkSiteIds.length === 0) return sites || [];
+    return (sites || []).filter((s) => customerLinkSiteIds.includes(s.id));
+  }, [sites, commercialLinks, ticket.payingCustomer.id]);
+
+  async function handleCreatePO() {
+    if (!poNo.trim()) return;
+    setPoSubmitting(true);
     try {
-      const noteParts: string[] = [];
-      if (poIssuer.trim()) noteParts.push(`Issued by: ${poIssuer.trim()}`);
-      if (poNotes.trim()) noteParts.push(poNotes.trim());
-
-      const body: Record<string, unknown> = {
-        ticketId: ticket.id,
-        customerId: ticket.payingCustomer.id,
-        poNo: poNumber.trim(),
-        poType: "STANDARD_FIXED",
-        poDate: poDate || undefined,
-        status: "RECEIVED",
-        notes: noteParts.length > 0 ? noteParts.join("\n") : undefined,
-      };
-      if (poSiteId) {
-        body.siteId = poSiteId;
-        const cl = customerLinks.find(l => l.siteId === poSiteId);
-        if (cl) body.siteCommercialLinkId = cl.id;
-      }
-
       const res = await fetch("/api/customer-pos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          customerId: ticket.payingCustomer.id,
+          siteId: poSiteId || ticket.site?.id || undefined,
+          siteCommercialLinkId: ticket.siteCommercialLink?.id || undefined,
+          poNo: poNo.trim(),
+          poType: "STANDARD_FIXED",
+          poDate: poDate || undefined,
+          status: "RECEIVED",
+          notes: poNotes || undefined,
+        }),
       });
       if (res.ok) {
         setPoSheetOpen(false);
-        setPoNumber("");
-        setPoDate(new Date().toISOString().split("T")[0]);
+        setPoNo("");
+        setPoDate("");
         setPoIssuer("");
-        setPoSiteId("");
         setPoNotes("");
         router.refresh();
       }
     } finally {
-      setSubmittingPO(false);
+      setPoSubmitting(false);
     }
   }
 
+  // First PO linked to this ticket
+  const linkedPO = customerPOs && customerPOs.length > 0 ? customerPOs[0] : null;
+
+  // First invoice linked to this ticket
+  const linkedInvoice =
+    salesInvoices && salesInvoices.length > 0 ? salesInvoices[0] : null;
+
+  const statusIndex = STATUS_ORDER.indexOf(ticket.status);
+  const progressPercent =
+    statusIndex >= 0
+      ? Math.round(((statusIndex + 1) / STATUS_ORDER.length) * 100)
+      : 0;
+
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ── HEADER ──────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
@@ -810,18 +992,13 @@ export function TicketDetail({
               {ticket.title}
             </h1>
           </div>
-          <div className="flex items-center gap-2 ml-[72px]">
+          <div className="flex items-center gap-2 ml-[72px] flex-wrap">
             <Badge variant="outline">
               {ticket.ticketMode.replace(/_/g, " ")}
             </Badge>
             <Badge variant={statusVariant(ticket.status)}>
               {ticket.status.replace(/_/g, " ")}
             </Badge>
-            {ticket.revenueState && ticket.revenueState !== "OPERATIONAL" && (
-              <Badge className={ticket.revenueState === "RECOVERY_PIPELINE" ? "text-[9px] bg-[#FF9900]/15 text-[#FF9900] border border-[#FF9900]/30" : "text-[9px] bg-[#00CC66]/15 text-[#00CC66] border border-[#00CC66]/30"}>
-                {ticket.revenueState === "RECOVERY_PIPELINE" ? "RECOVERY PIPELINE" : "REALISED"}
-              </Badge>
-            )}
             <span className="text-sm text-[#888888]">
               {ticket.payingCustomer.name}
             </span>
@@ -836,71 +1013,74 @@ export function TicketDetail({
             <span className="text-xs text-[#888888] ml-2">
               ID: {ticket.id.slice(0, 8)}
             </span>
-            <span className="text-[#888888]">|</span>
-            {existingPO ? (
-              <Link href={`/po-register`}>
-                <Badge variant="secondary" className="cursor-pointer hover:bg-[#333333]">
-                  <FileText className="size-3 mr-1" />
-                  PO: {existingPO.poNo}
-                </Badge>
+
+            {/* PO Number */}
+            <Separator orientation="vertical" className="h-4 mx-1" />
+            {linkedPO ? (
+              <Link
+                href="/po-register"
+                className="text-xs text-[#FF6600] hover:underline flex items-center gap-1"
+              >
+                <FileText className="size-3" />
+                PO: {linkedPO.poNo}
               </Link>
             ) : (
               <Sheet open={poSheetOpen} onOpenChange={setPoSheetOpen}>
                 <SheetTrigger
                   render={
-                    <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
-                      <Plus className="size-3 mr-1" />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] px-2 bg-[#222222] text-[#888888] border-[#333333] hover:text-[#FF6600] hover:border-[#FF6600]"
+                    >
+                      <Plus className="size-3 mr-0.5" />
                       Add PO
                     </Button>
                   }
                 />
                 <SheetContent side="right">
                   <SheetHeader>
-                    <SheetTitle>Add Purchase Order</SheetTitle>
+                    <SheetTitle>Add Customer PO</SheetTitle>
                     <SheetDescription>
-                      Enter the customer PO details for this ticket.
+                      Enter the Purchase Order details received from the
+                      customer.
                     </SheetDescription>
                   </SheetHeader>
                   <div className="flex flex-col gap-4 px-4">
                     <div className="space-y-1.5">
-                      <Label htmlFor="po-number">PO Number *</Label>
+                      <Label>PO Number *</Label>
                       <Input
-                        id="po-number"
-                        value={poNumber}
-                        onChange={(e) => setPoNumber(e.target.value)}
+                        value={poNo}
+                        onChange={(e) => setPoNo(e.target.value)}
                         placeholder="e.g. PO-12345"
-                        required
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="po-date">PO Date</Label>
+                      <Label>PO Date</Label>
                       <Input
-                        id="po-date"
                         type="date"
                         value={poDate}
                         onChange={(e) => setPoDate(e.target.value)}
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="po-issuer">PO Issuer</Label>
+                      <Label>Issuer</Label>
                       <Input
-                        id="po-issuer"
                         value={poIssuer}
                         onChange={(e) => setPoIssuer(e.target.value)}
-                        placeholder="Who issued this PO?"
+                        placeholder="Who issued the PO?"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Site</Label>
-                      {customerLinks.length === 0 && sites.length > 0 && (
-                        <p className="text-[10px] text-[#FF9900]">No sites linked to this customer. Showing all sites.</p>
-                      )}
-                      <Select value={poSiteId} onValueChange={(v) => setPoSiteId(v ?? "")}>
+                      <Select
+                        value={poSiteId}
+                        onValueChange={(v) => setPoSiteId(v ?? "")}
+                      >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select site (optional)" />
+                          <SelectValue placeholder="Select site" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">-- None --</SelectItem>
                           {filteredSites.map((s) => (
                             <SelectItem key={s.id} value={s.id}>
                               {s.siteName}
@@ -910,9 +1090,8 @@ export function TicketDetail({
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="po-notes">Notes</Label>
+                      <Label>Notes</Label>
                       <Textarea
-                        id="po-notes"
                         value={poNotes}
                         onChange={(e) => setPoNotes(e.target.value)}
                         rows={3}
@@ -921,47 +1100,31 @@ export function TicketDetail({
                     </div>
                     <SheetFooter>
                       <Button
-                        onClick={handleSubmitPO}
-                        disabled={submittingPO || !poNumber.trim()}
+                        onClick={handleCreatePO}
+                        disabled={poSubmitting || !poNo.trim()}
                       >
-                        {submittingPO ? "Creating..." : "Create PO"}
+                        {poSubmitting ? "Creating..." : "Create PO"}
                       </Button>
                     </SheetFooter>
                   </div>
                 </SheetContent>
               </Sheet>
             )}
+
+            {/* Invoice Reference */}
+            {linkedInvoice && (
+              <>
+                <Separator orientation="vertical" className="h-4 mx-1" />
+                <Link
+                  href="/invoices"
+                  className="text-xs text-[#00CC66] hover:underline flex items-center gap-1"
+                >
+                  <FileText className="size-3" />
+                  INV: {linkedInvoice.invoiceNo || "Draft"}
+                </Link>
+              </>
+            )}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {isQuoteReady && ticket.status !== "QUOTED" && ticket.status !== "INVOICED" && ticket.status !== "CLOSED" && (
-            <Button
-              onClick={handleCreateQuote}
-              disabled={creatingQuote}
-              className="bg-[#FF6600] text-black hover:bg-[#FF9900] font-bold"
-            >
-              {creatingQuote ? "Creating..." : "Create Quote"}
-            </Button>
-          )}
-          {!isQuoteReady && ticket.lines.length > 0 && ticket.status !== "QUOTED" && ticket.status !== "ORDERED" && (
-            <div className="text-[10px] text-[#888888] bb-mono">
-              {ticket.lines.filter((l) => l.status === "READY_FOR_QUOTE").length}/{ticket.lines.length} LINES READY
-            </div>
-          )}
-          {canCreatePurchasePlan && (
-            <Button
-              onClick={handleCreatePurchasePlan}
-              disabled={creatingPOs}
-              className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
-            >
-              {creatingPOs ? "Creating POs..." : "Create Purchase Plan"}
-            </Button>
-          )}
-          {ticket.status === "ORDERED" && (
-            <Badge className="text-[9px] uppercase tracking-wider font-bold px-2 py-1 text-[#00CC66] bg-[#00CC66]/10">
-              POs CREATED
-            </Badge>
-          )}
         </div>
       </div>
 
@@ -992,26 +1155,51 @@ export function TicketDetail({
         </div>
       </div>
 
-      {/* Commercial Summary Cards — PRIMARY DECISION LAYER */}
+      {/* Commercial Summary Cards */}
       {summary && (
         <div className="grid grid-cols-4 gap-3">
           <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-            <div className="text-[9px] uppercase tracking-widest text-[#888888]">TOTAL SALE</div>
-            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">£{summary.totals.totalSale.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-            <div className="text-[9px] uppercase tracking-widest text-[#888888]">TOTAL COST</div>
-            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">£{summary.totals.totalCost.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-            <div className="text-[9px] uppercase tracking-widest text-[#888888]">MARGIN</div>
-            <div className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}>
-              £{summary.totals.totalMargin.toLocaleString("en-GB", { minimumFractionDigits: 2 })}
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">
+              TOTAL SALE
+            </div>
+            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">
+              &pound;
+              {summary.totals.totalSale.toLocaleString("en-GB", {
+                minimumFractionDigits: 2,
+              })}
             </div>
           </div>
           <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-            <div className="text-[9px] uppercase tracking-widest text-[#888888]">MARGIN %</div>
-            <div className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMarginPct >= 20 ? "text-[#00CC66]" : summary.totals.totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}>
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">
+              TOTAL COST
+            </div>
+            <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">
+              &pound;
+              {summary.totals.totalCost.toLocaleString("en-GB", {
+                minimumFractionDigits: 2,
+              })}
+            </div>
+          </div>
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">
+              MARGIN
+            </div>
+            <div
+              className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}`}
+            >
+              &pound;
+              {summary.totals.totalMargin.toLocaleString("en-GB", {
+                minimumFractionDigits: 2,
+              })}
+            </div>
+          </div>
+          <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+            <div className="text-[9px] uppercase tracking-widest text-[#888888]">
+              MARGIN %
+            </div>
+            <div
+              className={`text-lg font-bold bb-mono mt-1 ${summary.totals.totalMarginPct >= 20 ? "text-[#00CC66]" : summary.totals.totalMarginPct >= 10 ? "text-[#FF9900]" : "text-[#FF3333]"}`}
+            >
               {summary.totals.totalMarginPct.toFixed(1)}%
             </div>
           </div>
@@ -1022,20 +1210,15 @@ export function TicketDetail({
       {ticket.description && (
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-[#888888]">
-              {ticket.description}
-            </p>
+            <p className="text-sm text-[#888888]">{ticket.description}</p>
           </CardContent>
         </Card>
       )}
 
-      {/* Tabs */}
+      {/* ── 6 TABS ─────────────────────────────────────────────────── */}
       <Tabs defaultValue="lines">
         <TabsList>
-          <TabsTrigger value="lines">
-            Lines ({activeLines.length})
-          </TabsTrigger>
-          <TabsTrigger value="rfq">RFQ Extract</TabsTrigger>
+          <TabsTrigger value="lines">Lines ({activeLines.length})</TabsTrigger>
           <TabsTrigger value="evidence">
             Evidence ({ticket.evidenceFragments.length})
           </TabsTrigger>
@@ -1045,218 +1228,349 @@ export function TicketDetail({
           <TabsTrigger value="events">
             Events ({ticket.events.length})
           </TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="deal-sheet">Deal Sheet</TabsTrigger>
-          <TabsTrigger value="bundles">
-            Bundles ({salesBundles.length})
-          </TabsTrigger>
           <TabsTrigger value="quotes">
             Quotes ({quotes.length})
           </TabsTrigger>
           <TabsTrigger value="procurement">
             Procurement ({procurementOrders.length})
           </TabsTrigger>
-          <TabsTrigger value="po-register">
-            PO Register ({customerPOs?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="invoices">
-            Invoices ({salesInvoices.length})
-          </TabsTrigger>
-          <TabsTrigger value="recovery">
-            Recovery ({ticket.recoveryCases.length})
-          </TabsTrigger>
         </TabsList>
 
-        {/* ── LINES TAB ────────────────────────────────────────────── */}
-        <TabsContent value="lines" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Ticket Lines</h2>
+        {/* ── TAB 1: LINES ──────────────────────────────────────────── */}
+        <TabsContent value="lines" className="mt-4 space-y-4">
+          {/* RFQ Extract — collapsible at top */}
+          <div className="border border-[#333333] bg-[#1A1A1A]">
+            <button
+              onClick={() => setRfqOpen(!rfqOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#222222] transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {rfqOpen ? (
+                  <ChevronDown className="size-3 text-[#888888]" />
+                ) : (
+                  <ChevronRight className="size-3 text-[#888888]" />
+                )}
+                <span className="text-[10px] uppercase tracking-widest text-[#888888] font-bold">
+                  RFQ EXTRACT
+                </span>
+              </div>
+              <span className="text-[10px] text-[#666666]">
+                Paste enquiry text and extract line items
+              </span>
+            </button>
+            {rfqOpen && (
+              <div className="border-t border-[#333333] p-3">
+                <RfqExploder
+                  ticketId={ticket.id}
+                  payingCustomerId={ticket.payingCustomer.id}
+                  sourceText={[
+                    ticket.description,
+                    ...ticket.events
+                      .filter((ev) => ev.notes)
+                      .map((ev) =>
+                        (ev.notes || "").replace(/^Section added:\s*/i, "")
+                      ),
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n")}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Lines header with actions */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">
+              Ticket Lines
+            </h2>
             <div className="flex gap-2">
-            <Sheet open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
-              <SheetTrigger
-                render={
-                  <Button size="sm" variant="outline" className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]">
-                    <SeparatorHorizontal className="size-4 mr-1" />
-                    Add Section
+              {/* Generate Quote button */}
+              {isQuoteReady &&
+                ticket.status !== "QUOTED" &&
+                ticket.status !== "INVOICED" &&
+                ticket.status !== "CLOSED" && (
+                  <Button
+                    onClick={handleCreateQuote}
+                    disabled={creatingQuote}
+                    className="bg-[#FF6600] text-black hover:bg-[#FF9900] font-bold"
+                    size="sm"
+                  >
+                    {creatingQuote ? "Creating..." : "Generate Quote"}
                   </Button>
-                }
-              />
-              <SheetContent side="right">
-                <SheetHeader>
-                  <SheetTitle>Add Section & Lines</SheetTitle>
-                  <SheetDescription>
-                    Type the items from a call/email. Lines will be created automatically with events logged.
-                  </SheetDescription>
-                </SheetHeader>
-                <div className="flex flex-col gap-4 px-4">
-                  <div className="space-y-1.5">
-                    <Label>Source</Label>
-                    <Select value={sectionSource} onValueChange={setSectionSource}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CALL">Phone Call</SelectItem>
-                        <SelectItem value="EMAIL">Email</SelectItem>
-                        <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
-                        <SelectItem value="IN_PERSON">In Person</SelectItem>
-                        <SelectItem value="OTHER">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                )}
+              {!isQuoteReady &&
+                ticket.lines.length > 0 &&
+                ticket.status !== "QUOTED" &&
+                ticket.status !== "ORDERED" && (
+                  <div className="text-[10px] text-[#888888] bb-mono self-center">
+                    {
+                      ticket.lines.filter(
+                        (l) => l.status === "READY_FOR_QUOTE"
+                      ).length
+                    }
+                    /{ticket.lines.length} LINES READY
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Section Label</Label>
-                    <Input
-                      value={sectionLabel}
-                      onChange={(e) => setSectionLabel(e.target.value)}
-                      placeholder="e.g. EXTRA ORDER"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Materials / Items</Label>
-                    <Textarea
-                      value={sectionMaterials}
-                      onChange={(e) => setSectionMaterials(e.target.value)}
-                      rows={6}
-                      placeholder={"Type or paste the items, e.g.:\n35mm Compression Lever Ball Valve Red Handle - 2 no.\n22mm Compression Lever Ball Valve Blue - 1 no.\n15mm Copper Tube 3m - 10 lengths"}
-                    />
-                    <p className="text-[10px] text-[#666666]">
-                      One item per line. The system will auto-parse quantities and descriptions.
-                    </p>
-                  </div>
-                  <SheetFooter>
-                    <Button onClick={handleAddSection} disabled={addingSection || !sectionLabel.trim() || !sectionMaterials.trim()}>
-                      {addingSection ? "Processing..." : "Add Section & Lines"}
-                    </Button>
-                  </SheetFooter>
-                </div>
-              </SheetContent>
-            </Sheet>
-            <Sheet open={lineSheetOpen} onOpenChange={setLineSheetOpen}>
-              <SheetTrigger
-                render={
-                  <Button size="sm">
-                    <Plus className="size-4 mr-1" />
-                    Add Line
-                  </Button>
-                }
-              />
-              <SheetContent side="right">
-                <SheetHeader>
-                  <SheetTitle>Add Ticket Line</SheetTitle>
-                  <SheetDescription>
-                    Add a new line item to this ticket.
-                  </SheetDescription>
-                </SheetHeader>
-                <form
-                  onSubmit={handleAddLine}
-                  className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto"
+                )}
+
+              {/* Convert to Invoice button */}
+              {selectedLineIds.size > 0 && (
+                <Button
+                  onClick={handleConvertToInvoice}
+                  disabled={creatingInvoice}
+                  className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
+                  size="sm"
                 >
-                  <div className="space-y-1.5">
-                    <Label>Line Type</Label>
-                    <Select value={lineType} onValueChange={(v) => setLineType(v ?? "MATERIAL")}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LINE_TYPES.map((lt) => (
-                          <SelectItem key={lt} value={lt}>
-                            {lt.replace(/_/g, " ")}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="line-description">Description *</Label>
-                    <Input
-                      id="line-description"
-                      name="description"
-                      required
-                      placeholder="e.g. 25mm rebar 6m lengths"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  {creatingInvoice
+                    ? "Creating..."
+                    : `Convert ${selectedLineIds.size} to Invoice`}
+                </Button>
+              )}
+
+              {/* Add Section */}
+              <Sheet
+                open={sectionDialogOpen}
+                onOpenChange={setSectionDialogOpen}
+              >
+                <SheetTrigger
+                  render={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]"
+                    >
+                      <SeparatorHorizontal className="size-4 mr-1" />
+                      Add Section
+                    </Button>
+                  }
+                />
+                <SheetContent side="right">
+                  <SheetHeader>
+                    <SheetTitle>Add Section &amp; Lines</SheetTitle>
+                    <SheetDescription>
+                      Type the items from a call/email. Lines will be created
+                      automatically with events logged.
+                    </SheetDescription>
+                  </SheetHeader>
+                  <div className="flex flex-col gap-4 px-4">
                     <div className="space-y-1.5">
-                      <Label htmlFor="qty">Qty</Label>
+                      <Label>Source</Label>
+                      <Select
+                        value={sectionSource}
+                        onValueChange={(v) => setSectionSource(v ?? "CALL")}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CALL">Phone Call</SelectItem>
+                          <SelectItem value="EMAIL">Email</SelectItem>
+                          <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+                          <SelectItem value="IN_PERSON">In Person</SelectItem>
+                          <SelectItem value="OTHER">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Section Label</Label>
                       <Input
-                        id="qty"
-                        name="qty"
-                        type="number"
-                        step="0.01"
-                        defaultValue="1"
+                        value={sectionLabel}
+                        onChange={(e) => setSectionLabel(e.target.value)}
+                        placeholder="e.g. EXTRA ORDER"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Unit of Measure</Label>
-                      <Select value={lineUnit} onValueChange={(v) => setLineUnit(v ?? "EA")}>
+                      <Label>Materials / Items</Label>
+                      <Textarea
+                        value={sectionMaterials}
+                        onChange={(e) => setSectionMaterials(e.target.value)}
+                        rows={6}
+                        placeholder={
+                          "Type or paste the items, e.g.:\n35mm Compression Lever Ball Valve Red Handle - 2 no.\n22mm Compression Lever Ball Valve Blue - 1 no.\n15mm Copper Tube 3m - 10 lengths"
+                        }
+                      />
+                      <p className="text-[10px] text-[#666666]">
+                        One item per line. The system will auto-parse quantities
+                        and descriptions.
+                      </p>
+                    </div>
+                    <SheetFooter>
+                      <Button
+                        onClick={handleAddSection}
+                        disabled={
+                          addingSection ||
+                          !sectionLabel.trim() ||
+                          !sectionMaterials.trim()
+                        }
+                      >
+                        {addingSection
+                          ? "Processing..."
+                          : "Add Section & Lines"}
+                      </Button>
+                    </SheetFooter>
+                  </div>
+                </SheetContent>
+              </Sheet>
+
+              {/* Add Line */}
+              <Sheet open={lineSheetOpen} onOpenChange={setLineSheetOpen}>
+                <SheetTrigger
+                  render={
+                    <Button size="sm">
+                      <Plus className="size-4 mr-1" />
+                      Add Line
+                    </Button>
+                  }
+                />
+                <SheetContent side="right">
+                  <SheetHeader>
+                    <SheetTitle>Add Ticket Line</SheetTitle>
+                    <SheetDescription>
+                      Add a new line item to this ticket.
+                    </SheetDescription>
+                  </SheetHeader>
+                  <form
+                    onSubmit={handleAddLine}
+                    className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto"
+                  >
+                    <div className="space-y-1.5">
+                      <Label>Line Type</Label>
+                      <Select
+                        value={lineType}
+                        onValueChange={(v) => setLineType(v ?? "MATERIAL")}
+                      >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select UOM" />
+                          <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                          {(["EA", "M", "LENGTH", "PACK", "LOT", "SET"] as const).map((u) => (
-                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          {LINE_TYPES.map((lt) => (
+                            <SelectItem key={lt} value={lt}>
+                              {lt.replace(/_/g, " ")}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="internalNotes">Internal Breakdown / Notes</Label>
-                    <Textarea
-                      id="internalNotes"
-                      name="internalNotes"
-                      rows={3}
-                      placeholder={"e.g.\n10x 15mm lengths\n10x 22mm lengths\n2x 28mm lengths"}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="expectedCostUnit">Cost / Unit</Label>
+                      <Label htmlFor="line-description">Description *</Label>
                       <Input
-                        id="expectedCostUnit"
-                        name="expectedCostUnit"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
+                        id="line-description"
+                        name="description"
+                        required
+                        placeholder="e.g. 25mm rebar 6m lengths"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="suggestedSaleUnit">Sugg. Sale / Unit</Label>
-                      <Input
-                        id="suggestedSaleUnit"
-                        name="suggestedSaleUnit"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="qty">Qty</Label>
+                        <Input
+                          id="qty"
+                          name="qty"
+                          type="number"
+                          step="0.01"
+                          defaultValue="1"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Unit of Measure</Label>
+                        <Select
+                          value={lineUnit}
+                          onValueChange={(v) => setLineUnit(v ?? "EA")}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select UOM" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(
+                              [
+                                "EA",
+                                "M",
+                                "LENGTH",
+                                "PACK",
+                                "LOT",
+                                "SET",
+                              ] as const
+                            ).map((u) => (
+                              <SelectItem key={u} value={u}>
+                                {u}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="actualSaleUnit">Actual Sale / Unit</Label>
-                      <Input
-                        id="actualSaleUnit"
-                        name="actualSaleUnit"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
+                      <Label htmlFor="internalNotes">
+                        Internal Breakdown / Notes
+                      </Label>
+                      <Textarea
+                        id="internalNotes"
+                        name="internalNotes"
+                        rows={3}
+                        placeholder={
+                          "e.g.\n10x 15mm lengths\n10x 22mm lengths\n2x 28mm lengths"
+                        }
                       />
                     </div>
-                  </div>
-                  <SheetFooter>
-                    <Button type="submit" disabled={submittingLine}>
-                      {submittingLine ? "Adding..." : "Add Line"}
-                    </Button>
-                  </SheetFooter>
-                </form>
-              </SheetContent>
-            </Sheet>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="expectedCostUnit">Cost / Unit</Label>
+                        <Input
+                          id="expectedCostUnit"
+                          name="expectedCostUnit"
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="suggestedSaleUnit">
+                          Sugg. Sale / Unit
+                        </Label>
+                        <Input
+                          id="suggestedSaleUnit"
+                          name="suggestedSaleUnit"
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="actualSaleUnit">
+                          Actual Sale / Unit
+                        </Label>
+                        <Input
+                          id="actualSaleUnit"
+                          name="actualSaleUnit"
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    <SheetFooter>
+                      <Button type="submit" disabled={submittingLine}>
+                        {submittingLine ? "Adding..." : "Add Line"}
+                      </Button>
+                    </SheetFooter>
+                  </form>
+                </SheetContent>
+              </Sheet>
             </div>
           </div>
 
+          {/* Lines Table */}
           <div className="border border-[#333333] bg-[#1A1A1A]">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8 p-1">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      className="accent-[#FF6600]"
+                    />
+                  </TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
@@ -1266,162 +1580,64 @@ export function TicketDetail({
                   <TableHead className="text-right">Margin</TableHead>
                   <TableHead className="text-right">Margin %</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {activeLines.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={9}
+                      colSpan={11}
                       className="text-center py-8 text-[#888888]"
                     >
                       No lines yet. Add your first line item.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeLines.map((line) => {
-                    // Enrich supplier from procurement orders if not already set
-                    const enrichedLine = line.supplierName
-                      ? line
-                      : { ...line, supplierName: supplierByLineId[line.id] || line.supplierName };
-                    return (
+                  activeLines.map((line) => (
                     <React.Fragment key={line.id}>
                       {line.sectionLabel && (
                         <TableRow className="bg-[#252525] border-t-2 border-[#555555]">
-                          <TableCell colSpan={9} className="py-2 px-3">
+                          <TableCell colSpan={10} className="py-2 px-3">
                             <span className="text-[11px] uppercase tracking-widest font-bold text-[#FF9900]">
                               {line.sectionLabel}
                             </span>
+                          </TableCell>
+                          <TableCell className="py-2 px-1">
+                            <button
+                              onClick={() =>
+                                handleDeleteSection(line.sectionLabel!)
+                              }
+                              className="p-1 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
+                              title="Delete section"
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
                           </TableCell>
                         </TableRow>
                       )}
                       <InlineLineRow
                         key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
-                        line={enrichedLine}
-                        onClickRow={() => { setEditingLine(line); setEditSheetOpen(true); }}
-                        onSaved={() => { router.refresh(); fetch(`/api/tickets/${ticket.id}/commercial-summary`).then(r => r.ok ? r.json() : null).then(d => setSummary(d)); }}
+                        line={line}
+                        selected={selectedLineIds.has(line.id)}
+                        onToggleSelect={() => toggleSelectLine(line.id)}
+                        onSaved={() => {
+                          refreshSummary();
+                        }}
+                        onDelete={() => {
+                          router.refresh();
+                        }}
+                        supplierLookup={supplierLookup}
                       />
                     </React.Fragment>
-                    );
-                  })
+                  ))
                 )}
               </TableBody>
             </Table>
           </div>
-
-          {/* Edit Line Drawer */}
-          <Sheet open={editSheetOpen} onOpenChange={(open) => { setEditSheetOpen(open); if (!open) setEditingLine(null); }}>
-            <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333] w-[420px] sm:max-w-[420px]">
-              <SheetHeader>
-                <SheetTitle className="text-[#E0E0E0]">Edit Line</SheetTitle>
-                <SheetDescription className="text-[#666666]">
-                  {editingLine?.description}
-                </SheetDescription>
-              </SheetHeader>
-              {editingLine && (
-                <form onSubmit={handleSaveLineEdit} className="flex flex-col gap-3 px-4 flex-1 overflow-y-auto">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="edit-description">Description</Label>
-                    <Input id="edit-description" name="edit-description" defaultValue={editingLine.description} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="edit-internalNotes">Internal Notes / Breakdown</Label>
-                    <Textarea id="edit-internalNotes" name="edit-internalNotes" rows={4} defaultValue={editingLine.internalNotes || ""} placeholder={"e.g.\n10x 15mm lengths\n10x 22mm lengths"} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="edit-qty">Qty</Label>
-                      <Input id="edit-qty" name="edit-qty" type="number" step="0.01" defaultValue={Number(editingLine.qty)} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Unit of Measure</Label>
-                      <select name="edit-unit" defaultValue={editingLine.unit} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
-                        {["EA", "M", "LENGTH", "PACK", "LOT", "SET"].map((u) => (
-                          <option key={u} value={u}>{u}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="border-t border-[#333333] pt-3 mt-1">
-                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">SUPPLIER (INTERNAL)</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label>Supplier</Label>
-                        <select name="edit-supplierId" defaultValue={editingLine.supplierId || ""} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
-                          <option value="">— None —</option>
-                          {suppliers.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="edit-supplierReference">Supplier Ref</Label>
-                        <Input id="edit-supplierReference" name="edit-supplierReference" defaultValue={editingLine.supplierReference || ""} placeholder="PO / ref number" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="border-t border-[#333333] pt-3 mt-1">
-                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">PRICING (EX VAT)</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="edit-expectedCostUnit">Expected Cost / Unit</Label>
-                        <Input id="edit-expectedCostUnit" name="edit-expectedCostUnit" type="number" step="0.01" defaultValue={Number(editingLine.expectedCostUnit) || ""} placeholder="0.00" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="edit-actualCostTotal">Actual Cost Total</Label>
-                        <Input id="edit-actualCostTotal" name="edit-actualCostTotal" type="number" step="0.01" defaultValue={Number(editingLine.actualCostTotal) || ""} placeholder="0.00" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="edit-suggestedSaleUnit">Suggested Sale / Unit</Label>
-                        <Input id="edit-suggestedSaleUnit" name="edit-suggestedSaleUnit" type="number" step="0.01" defaultValue={Number(editingLine.suggestedSaleUnit) || ""} placeholder="0.00" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="edit-actualSaleUnit">Actual Sale / Unit</Label>
-                        <Input id="edit-actualSaleUnit" name="edit-actualSaleUnit" type="number" step="0.01" defaultValue={Number(editingLine.actualSaleUnit) || ""} placeholder="0.00" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="border-t border-[#333333] pt-3 mt-1">
-                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-1">CURRENT STATUS</div>
-                    <Badge className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${
-                      editingLine.status === "READY_FOR_QUOTE" ? "text-[#00CC66] bg-[#00CC66]/10" :
-                      editingLine.status === "PRICED" ? "text-[#FF9900] bg-[#FF9900]/10" :
-                      "text-[#888888] bg-[#333333]"
-                    }`}>{editingLine.status.replace(/_/g, " ")}</Badge>
-                    <p className="text-[10px] text-[#666666] mt-1">Status auto-updates on save based on pricing completeness.</p>
-                  </div>
-                  {deleteError && (
-                    <div className="text-[#FF3333] text-xs border border-[#FF3333]/30 bg-[#FF3333]/10 px-3 py-2">{deleteError}</div>
-                  )}
-                  <SheetFooter className="mt-2 flex justify-between">
-                    <Button type="button" onClick={handleDeleteLine} disabled={deletingLine} variant="outline" className="bg-[#222222] text-[#FF3333] border-[#FF3333]/30 hover:bg-[#FF3333]/10">
-                      {deletingLine ? "Deleting..." : "Delete Line"}
-                    </Button>
-                    <Button type="submit" disabled={savingEdit} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
-                      {savingEdit ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </SheetFooter>
-                </form>
-              )}
-            </SheetContent>
-          </Sheet>
         </TabsContent>
 
-        {/* ── RFQ EXTRACTION TAB ────────────────────────────────────── */}
-        <TabsContent value="rfq" className="mt-4">
-          <RfqExploder
-            ticketId={ticket.id}
-            payingCustomerId={ticket.payingCustomer.id}
-            sourceText={[
-              ticket.description,
-              ...ticket.events
-                .filter((ev) => ev.notes)
-                .map((ev) => (ev.notes || "").replace(/^Section added:\s*/i, "")),
-            ].filter(Boolean).join("\n\n")}
-          />
-        </TabsContent>
-
-        {/* ── EVIDENCE TAB ─────────────────────────────────────────── */}
+        {/* ── TAB 2: EVIDENCE ──────────────────────────────────────── */}
         <TabsContent value="evidence" className="mt-4">
           <EvidencePanel
             ticketId={ticket.id}
@@ -1434,9 +1650,11 @@ export function TicketDetail({
           />
         </TabsContent>
 
-        {/* ── TASKS TAB ────────────────────────────────────────────── */}
+        {/* ── TAB 3: TASKS ─────────────────────────────────────────── */}
         <TabsContent value="tasks" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Tasks</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">
+            Tasks
+          </h2>
           {ticket.tasks.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-[#888888]">
@@ -1489,9 +1707,11 @@ export function TicketDetail({
           )}
         </TabsContent>
 
-        {/* ── EVENTS TAB ───────────────────────────────────────────── */}
+        {/* ── TAB 4: EVENTS ────────────────────────────────────────── */}
         <TabsContent value="events" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Events</h2>
+          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">
+            Events
+          </h2>
           {ticket.events.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-[#888888]">
@@ -1515,9 +1735,7 @@ export function TicketDetail({
                       </span>
                     </div>
                     {ev.notes && (
-                      <p className="text-sm text-[#888888] mt-1">
-                        {ev.notes}
-                      </p>
+                      <p className="text-sm text-[#888888] mt-1">{ev.notes}</p>
                     )}
                     {ev.sourceRef && (
                       <p className="text-xs text-[#888888] mt-0.5">
@@ -1526,10 +1744,20 @@ export function TicketDetail({
                     )}
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openEditEvent(ev)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 w-7 p-0"
+                      onClick={() => openEditEvent(ev)}
+                    >
                       <Pencil className="size-3" />
                     </Button>
-                    <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-red-500 hover:text-red-400" onClick={() => handleDeleteEvent(ev.id)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 w-7 p-0 text-red-500 hover:text-red-400"
+                      onClick={() => handleDeleteEvent(ev.id)}
+                    >
                       <Trash2 className="size-3" />
                     </Button>
                   </div>
@@ -1537,20 +1765,36 @@ export function TicketDetail({
               ))}
 
               {/* Edit Event Sheet */}
-              <Sheet open={editEventOpen} onOpenChange={(open) => { setEditEventOpen(open); if (!open) setEditingEvent(null); }}>
+              <Sheet
+                open={editEventOpen}
+                onOpenChange={(open) => {
+                  setEditEventOpen(open);
+                  if (!open) setEditingEvent(null);
+                }}
+              >
                 <SheetContent side="right">
                   <SheetHeader>
                     <SheetTitle>Edit Event</SheetTitle>
-                    <SheetDescription>Update the event details.</SheetDescription>
+                    <SheetDescription>
+                      Update the event details.
+                    </SheetDescription>
                   </SheetHeader>
                   <div className="flex flex-col gap-4 px-4">
                     <div className="space-y-1.5">
                       <Label>Source</Label>
-                      <Input value={editEventSourceRef} onChange={(e) => setEditEventSourceRef(e.target.value)} placeholder="e.g. CALL, EMAIL, WhatsApp" />
+                      <Input
+                        value={editEventSourceRef}
+                        onChange={(e) => setEditEventSourceRef(e.target.value)}
+                        placeholder="e.g. CALL, EMAIL, WhatsApp"
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Notes</Label>
-                      <Textarea value={editEventNotes} onChange={(e) => setEditEventNotes(e.target.value)} rows={4} />
+                      <Textarea
+                        value={editEventNotes}
+                        onChange={(e) => setEditEventNotes(e.target.value)}
+                        rows={4}
+                      />
                     </div>
                     <SheetFooter>
                       <Button onClick={handleSaveEvent}>Save</Button>
@@ -1562,172 +1806,18 @@ export function TicketDetail({
           )}
         </TabsContent>
 
-        {/* ── TIMELINE TAB ─────────────────────────────────────────── */}
-        <TabsContent value="timeline" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Timeline</h2>
-          {(() => {
-            const items = [
-              ...ticket.events.map((ev) => ({
-                id: ev.id,
-                type: "event" as const,
-                label: ev.eventType.replace(/_/g, " "),
-                notes: ev.notes,
-                timestamp: new Date(ev.timestamp),
-              })),
-              ...ticket.evidenceFragments.map((ef) => ({
-                id: ef.id,
-                type: "evidence" as const,
-                label: ef.fragmentType.replace(/_/g, " "),
-                notes: ef.fragmentText,
-                timestamp: new Date(ef.timestamp),
-              })),
-              ...ticket.tasks.map((t) => ({
-                id: t.id,
-                type: "task" as const,
-                label: `${t.taskType.replace(/_/g, " ")} [${t.status}]`,
-                notes: t.generatedReason,
-                timestamp: new Date(t.dueAt || t.id), // fallback
-              })),
-            ].sort(
-              (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
-            );
-
-            if (items.length === 0) {
-              return (
-                <Card>
-                  <CardContent className="py-8 text-center text-[#888888]">
-                    No timeline entries yet.
-                  </CardContent>
-                </Card>
-              );
-            }
-
-            return (
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    className="flex items-start gap-3 border-l-2 border-[#333333] pl-4 py-2"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            item.type === "event"
-                              ? "outline"
-                              : item.type === "evidence"
-                              ? "secondary"
-                              : "default"
-                          }
-                        >
-                          {item.type}
-                        </Badge>
-                        <span className="text-sm font-medium">
-                          {item.label}
-                        </span>
-                        <span className="text-xs text-[#888888]">
-                          {item.timestamp.toLocaleString()}
-                        </span>
-                      </div>
-                      {item.notes && (
-                        <p className="text-sm text-[#888888] mt-1">
-                          {item.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </TabsContent>
-
-        {/* ── DEAL SHEET TAB ──────────────────────────────────────── */}
-        <TabsContent value="deal-sheet" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Deal Sheet</h2>
-            <Link href={`/tickets/${ticket.id}/deal-sheet`}>
-              <Button size="sm" variant="outline">
-                Open Full Deal Sheet
-              </Button>
-            </Link>
-          </div>
-          {ticket.dealSheets.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No deal sheet versions yet.{" "}
-                <Link
-                  href={`/tickets/${ticket.id}/deal-sheet`}
-                  className="text-[#FF6600] underline"
-                >
-                  Create one
-                </Link>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {ticket.dealSheets.slice(0, 3).map((ds) => (
-                <Card key={ds.id}>
-                  <CardContent className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">v{ds.versionNo}</Badge>
-                        <Badge variant="outline">{ds.status}</Badge>
-                        <span className="text-sm text-[#888888]">
-                          {ds.mode}
-                        </span>
-                      </div>
-                      <div className="flex gap-4 text-sm tabular-nums">
-                        <span>Cost: {dec(ds.totalExpectedCost)}</span>
-                        <span>Sell: {dec(ds.totalExpectedSell)}</span>
-                        <span
-                          className={
-                            Number(ds.totalExpectedMargin?.toString() || 0) >= 0
-                              ? "text-[#00CC66]"
-                              : "text-[#FF3333]"
-                          }
-                        >
-                          Margin: {dec(ds.totalExpectedMargin)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* ── COMPETITIVE BID PANEL ── */}
-          <div className="mt-6">
-            <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-3">Competitive Bids</h2>
-            <CompetitiveBidPanel ticketId={ticket.id} />
-          </div>
-        </TabsContent>
-
-        {/* ── BUNDLES TAB ─────────────────────────────────────────── */}
-        <TabsContent value="bundles" className="mt-4">
-          <SalesBundlesPanel
-            ticketId={ticket.id}
-            bundles={salesBundles}
-            ticketLines={ticket.lines.map((l) => ({
-              id: l.id,
-              description: l.description,
-            }))}
-          />
-        </TabsContent>
-
-        {/* ── QUOTES TAB ──────────────────────────────────────────── */}
+        {/* ── TAB 5: QUOTES ────────────────────────────────────────── */}
         <TabsContent value="quotes" className="mt-4">
-          <QuotePanel
+          <QuotePanelWithPO
             ticketId={ticket.id}
             quotes={quotes}
             customers={customers}
-            sites={sites}
-            commercialLinks={commercialLinks}
+            ticket={ticket}
+            filteredSites={filteredSites}
           />
         </TabsContent>
 
-        {/* ── PROCUREMENT TAB ────────────────────────────────────── */}
+        {/* ── TAB 6: PROCUREMENT ───────────────────────────────────── */}
         <TabsContent value="procurement" className="mt-4">
           <TicketProcurementTab
             ticketId={ticket.id}
@@ -1750,197 +1840,191 @@ export function TicketDetail({
             }))}
           />
         </TabsContent>
-
-        {/* ── PO REGISTER TAB ───────────────────────────────────── */}
-        <TabsContent value="po-register" className="mt-4">
-          <TicketPOTab
-            ticketId={ticket.id}
-            customerPOs={customerPOs || []}
-            ticketLines={ticket.lines.map((l) => ({
-              id: l.id,
-              description: l.description,
-            }))}
-          />
-        </TabsContent>
-
-        {/* ── INVOICES TAB ──────────────────────────────────────── */}
-        <TabsContent value="invoices" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Sales Invoices</h2>
-          {salesInvoices.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No invoices for this ticket yet.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {salesInvoices.map((inv) => (
-                <Card key={inv.id}>
-                  <CardContent className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium text-sm">
-                          {inv.invoiceNo || "Draft"}
-                        </span>
-                        <Badge
-                          variant={
-                            inv.status === "PAID"
-                              ? "default"
-                              : inv.status === "SENT"
-                              ? "secondary"
-                              : inv.status === "OVERDUE"
-                              ? "destructive"
-                              : "outline"
-                          }
-                        >
-                          {inv.status}
-                        </Badge>
-                        <span className="text-sm text-[#888888]">
-                          {inv.customer.name}
-                        </span>
-                        {inv.poNo && (
-                          <span className="text-xs text-[#888888]">
-                            PO: {inv.poNo}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium tabular-nums">
-                          {dec(inv.totalSell)}
-                        </span>
-                        {inv.status === "DRAFT" && (
-                          <TicketInvoiceSendButton invoiceId={inv.id} />
-                        )}
-                        {inv.status === "SENT" && (
-                          <TicketInvoiceMarkPaidButton invoiceId={inv.id} />
-                        )}
-                      </div>
-                    </div>
-                    {inv.lines.length > 0 && (
-                      <div className="mt-2 text-xs text-[#888888]">
-                        {inv.lines.length} line{inv.lines.length !== 1 ? "s" : ""} |{" "}
-                        {inv.lines.filter((l) => l.poMatched).length} PO matched
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* ── RECOVERY TAB ─────────────────────────────────────── */}
-        <TabsContent value="recovery" className="mt-4">
-          <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold mb-4">Recovery Cases</h2>
-          {ticket.recoveryCases.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-[#888888]">
-                No recovery cases for this ticket.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {ticket.recoveryCases.map((rc) => {
-                const daysInStage = rc.currentStageStartedAt
-                  ? Math.floor(
-                      (Date.now() - new Date(rc.currentStageStartedAt).getTime()) /
-                        (1000 * 60 * 60 * 24)
-                    )
-                  : 0;
-
-                return (
-                  <Card key={rc.id}>
-                    <CardContent className="py-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">
-                            {rc.reasonType.replace(/_/g, " ")}
-                          </Badge>
-                          <Badge
-                            variant={
-                              rc.recoveryStatus === "CLOSED"
-                                ? "default"
-                                : "destructive"
-                            }
-                          >
-                            {rc.recoveryStatus.replace(/_/g, " ")}
-                          </Badge>
-                          <span className="text-sm text-[#888888]">
-                            {daysInStage}d in stage
-                          </span>
-                        </div>
-                        <span className="text-sm font-medium tabular-nums text-[#FF3333]">
-                          {dec(rc.stuckValue)}
-                        </span>
-                      </div>
-                      {rc.nextAction && (
-                        <p className="text-sm text-[#888888]">
-                          Next: {rc.nextAction}
-                        </p>
-                      )}
-                      <div className="flex gap-2">
-                        <Link href="/recovery">
-                          <Button size="sm" variant="outline">
-                            Open in Recovery
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function TicketInvoiceSendButton({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const [sending, setSending] = useState(false);
+// ─── QuotePanelWithPO ───────────────────────────────────────────────────────
+// Wraps QuotePanel and adds "Enter PO" button on APPROVED quotes
 
-  async function handleSend() {
-    setSending(true);
+function QuotePanelWithPO({
+  ticketId,
+  quotes,
+  customers,
+  ticket,
+  filteredSites,
+}: {
+  ticketId: string;
+  quotes: QuoteData[];
+  customers: CustomerOption[];
+  ticket: TicketData;
+  filteredSites: SiteOption[];
+}) {
+  const router = useRouter();
+  const [enterPOOpen, setEnterPOOpen] = useState(false);
+  const [poQuoteId, setPOQuoteId] = useState<string | null>(null);
+  const [poSubmitting, setPOSubmitting] = useState(false);
+  const [poNo, setPONo] = useState("");
+  const [poDate, setPODate] = useState("");
+  const [poIssuer, setPOIssuer] = useState("");
+  const [poSiteId, setPOSiteId] = useState(ticket.site?.id || "");
+  const [poNotes, setPONotes] = useState("");
+
+  function openEnterPO(quoteId: string) {
+    setPOQuoteId(quoteId);
+    setEnterPOOpen(true);
+    setPONo("");
+    setPODate("");
+    setPOIssuer("");
+    setPOSiteId(ticket.site?.id || "");
+    setPONotes("");
+  }
+
+  async function handleCreatePO() {
+    if (!poNo.trim()) return;
+    setPOSubmitting(true);
     try {
-      const res = await fetch(`/api/sales-invoices/${invoiceId}/send`, {
+      // Find the quote to get its value
+      const quote = quotes.find((q) => q.id === poQuoteId);
+      const totalValue = quote ? Number(quote.totalSell) : undefined;
+
+      const res = await fetch("/api/customer-pos", {
         method: "POST",
-      });
-      if (res.ok) router.refresh();
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <Button size="sm" variant="outline" onClick={handleSend} disabled={sending}>
-      {sending ? "Sending..." : "Send"}
-    </Button>
-  );
-}
-
-function TicketInvoiceMarkPaidButton({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const [marking, setMarking] = useState(false);
-
-  async function handleMarkPaid() {
-    setMarking(true);
-    try {
-      const res = await fetch(`/api/sales-invoices/${invoiceId}`, {
-        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PAID", paidAt: new Date().toISOString() }),
+        body: JSON.stringify({
+          ticketId,
+          customerId: ticket.payingCustomer.id,
+          siteId: poSiteId || ticket.site?.id || undefined,
+          siteCommercialLinkId: ticket.siteCommercialLink?.id || undefined,
+          poNo: poNo.trim(),
+          poType: "STANDARD_FIXED",
+          poDate: poDate || undefined,
+          status: "RECEIVED",
+          totalValue,
+          notes: poNotes
+            ? `Issuer: ${poIssuer}\n${poNotes}`
+            : poIssuer
+            ? `Issuer: ${poIssuer}`
+            : undefined,
+        }),
       });
-      if (res.ok) router.refresh();
+      if (res.ok) {
+        setEnterPOOpen(false);
+        setPOQuoteId(null);
+        router.refresh();
+      }
     } finally {
-      setMarking(false);
+      setPOSubmitting(false);
     }
   }
 
   return (
-    <Button size="sm" variant="outline" onClick={handleMarkPaid} disabled={marking}>
-      {marking ? "Updating..." : "Mark Paid"}
-    </Button>
+    <div className="space-y-4">
+      <QuotePanel
+        ticketId={ticketId}
+        quotes={quotes}
+        customers={customers}
+      />
+
+      {/* Enter PO buttons on APPROVED quotes */}
+      {quotes
+        .filter((q) => q.status === "APPROVED")
+        .map((q) => (
+          <div
+            key={`po-btn-${q.id}`}
+            className="flex items-center gap-2 border border-[#00CC66]/20 bg-[#00CC66]/5 px-3 py-2"
+          >
+            <Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#00CC66] bg-[#00CC66]/10">
+              APPROVED
+            </Badge>
+            <span className="text-xs text-[#E0E0E0] flex-1">
+              {q.quoteNo} &mdash; {dec(q.totalSell)}
+            </span>
+            <Button
+              size="sm"
+              onClick={() => openEnterPO(q.id)}
+              className="bg-[#FF6600] text-black hover:bg-[#FF9900] font-bold"
+            >
+              <FileText className="size-3 mr-1" />
+              Enter PO
+            </Button>
+          </div>
+        ))}
+
+      {/* Enter PO Sheet */}
+      <Sheet open={enterPOOpen} onOpenChange={setEnterPOOpen}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle>Enter Customer PO</SheetTitle>
+            <SheetDescription>
+              Record the Purchase Order received from the customer for this
+              approved quote.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-4 px-4">
+            <div className="space-y-1.5">
+              <Label>PO Number *</Label>
+              <Input
+                value={poNo}
+                onChange={(e) => setPONo(e.target.value)}
+                placeholder="e.g. PO-12345"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>PO Date</Label>
+              <Input
+                type="date"
+                value={poDate}
+                onChange={(e) => setPODate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Issuer</Label>
+              <Input
+                value={poIssuer}
+                onChange={(e) => setPOIssuer(e.target.value)}
+                placeholder="Who issued the PO?"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select
+                value={poSiteId}
+                onValueChange={(v) => setPOSiteId(v ?? "")}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select site" />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredSites.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.siteName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notes</Label>
+              <Textarea
+                value={poNotes}
+                onChange={(e) => setPONotes(e.target.value)}
+                rows={3}
+                placeholder="Optional notes"
+              />
+            </div>
+            <SheetFooter>
+              <Button
+                onClick={handleCreatePO}
+                disabled={poSubmitting || !poNo.trim()}
+              >
+                {poSubmitting ? "Creating..." : "Create PO"}
+              </Button>
+            </SheetFooter>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }
