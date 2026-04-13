@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { processBill } from "@/lib/finance/bill-processor";
 
 export async function GET(request: Request) {
   try {
@@ -112,7 +113,30 @@ export async function POST(request: Request) {
       });
     });
 
-    return Response.json(bill, { status: 201 });
+    // Auto-process: create AP journal entry + match bill lines to tickets
+    let processingResult = null;
+    try {
+      processingResult = await processBill(bill!.id);
+    } catch (procError) {
+      console.error("Bill processing (non-fatal):", procError);
+    }
+
+    // Re-fetch bill after processing to reflect updated statuses
+    const finalBill = processingResult
+      ? await prisma.supplierBill.findUnique({
+          where: { id: bill!.id },
+          include: {
+            supplier: true,
+            lines: true,
+            _count: { select: { lines: true } },
+          },
+        })
+      : bill;
+
+    return Response.json(
+      { bill: finalBill, processing: processingResult },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Failed to create supplier bill:", error);
     return Response.json(
