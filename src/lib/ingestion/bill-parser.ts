@@ -68,10 +68,9 @@ export function parseBillText(rawText: string): ParsedBill {
 // ─── Bill Number Extraction ─────────────────────────────────────────────────
 
 function extractBillNumber(lines: string[]): string | null {
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     // "Invoice No: 12345", "Invoice Number: INV-12345", "Bill No: B-001"
-    // "Document No: 12345", "Ref: 12345", "Credit Note No: CN-001"
-    // "Invoice #12345", "Inv No 12345"
     const patterns = [
       /(?:invoice|inv|bill|document|doc|credit\s*note|debit\s*note)\s*(?:no|number|#|ref|reference)\s*[:.]?\s*([A-Z0-9][\w\-\/]+)/i,
       /(?:our\s*ref|your\s*ref|reference)\s*[:.]?\s*([A-Z0-9][\w\-\/]+)/i,
@@ -83,6 +82,17 @@ function extractBillNumber(lines: string[]): string | null {
       const match = line.match(pattern);
       if (match) {
         return match[1].trim();
+      }
+    }
+
+    // Handle "Invoice Number" on one line, number on nearby line (Kerridge K8)
+    // The number may not be immediately next — scan ahead up to 5 lines
+    if (/invoice\s*number/i.test(line)) {
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+        const candidate = lines[j].trim();
+        if (/^\d{4}\/\d{5,}$/.test(candidate)) {
+          return candidate;
+        }
       }
     }
   }
@@ -238,12 +248,16 @@ function extractTotals(lines: string[]): {
 function extractLineItems(lines: string[]): ParsedBillLine[] {
   const parsed: ParsedBillLine[] = [];
 
-  // Step 1: Find header row to determine column layout
-  const headerInfo = findHeaderRow(lines);
+  // Step 0: Kerridge K8 / VERDIS format (F W Hipkin, etc.)
+  // Lines start with product code (K-number), description, then "qty EA  price EA  total V"
+  parseKerridgeK8(lines, parsed);
 
-  if (headerInfo) {
-    // Parse lines based on detected header
-    parseFromHeader(lines, headerInfo.headerIndex, parsed);
+  // Step 1: Find header row to determine column layout
+  if (parsed.length === 0) {
+    const headerInfo = findHeaderRow(lines);
+    if (headerInfo) {
+      parseFromHeader(lines, headerInfo.headerIndex, parsed);
+    }
   }
 
   // Step 2: Fallback — generic tabular parsing
@@ -462,6 +476,139 @@ function resolveColumns(nums: number[]): {
   }
 
   return null;
+}
+
+// ─── Kerridge K8 / VERDIS Format ───────────────────────────────────────────
+// Used by F W Hipkin, and other Kerridge-based suppliers.
+// Pattern: product code starts line, description follows, trailing numbers are qty/price/total.
+// Multi-line descriptions: continuation lines don't start with a product code.
+// Example: "K08170 KP-MR15 - 15mm Munsen Ring (50) 50 EA 0.24 EA 12.00 S"
+// Or spread across lines:
+//   "K09933    K09933 - Galvanised Band - 12mm x"
+//   "          10m (10)"
+//   followed by "6 EA 2.00 EA 12.00 S"
+
+function parseKerridgeK8(lines: string[], parsed: ParsedBillLine[]) {
+  // Detect if this is a K8 format: look for product code pattern at line starts
+  const productCodePattern = /^[A-Z]\d{4,}/;
+  const k8Lines = lines.filter(l => productCodePattern.test(l.trim()));
+  if (k8Lines.length < 2) return; // Not a K8 format
+
+  // Skip non-product lines
+  const skipPatterns = [
+    /^product\s*code/i, /^advice\s*note/i, /^continued/i,
+    /^invoice/i, /^deliver/i, /^account/i, /^mobile/i, /^tel\s*no/i,
+    /^reg\s*no/i, /^verdis/i, /^powered/i, /^page/i,
+    /^\s*$/, /^cromwell/i, /^harrow/i, /^north\s*kensington/i,
+    /^london/i, /^w10/i, /^net\s*goods/i, /^vat/i, /^total/i,
+    /^carriage/i, /^sub\s*total/i, /^\d{4,}\/\d+$/, /^0\d{9,}/,
+    /^your\s*(contact|reference)/i, /^taxpoint/i, /^order\s*number/i,
+    /^email/i, /^our\s*operator/i, /^majid/i,
+  ];
+
+  function shouldSkip(line: string): boolean {
+    return skipPatterns.some(p => p.test(line.trim()));
+  }
+
+  // Regex for trailing numbers: "qty EA price EA [-discount%] total V"
+  // Handles: "50 EA  0.24 EA   12.00  S"
+  // Handles: "6 EA  1.88 EA  -72.00%          3.18  S"  (discount with spaces before total)
+  const trailingNumbersPattern = /(\d+)\s+EA\s+([\d.]+)\s+EA\s+(?:-?[\d.]+%\s+)?\s*([\d.]+)\s+[A-Z]\s*$/;
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (shouldSkip(line) || !line) { i++; continue; }
+
+    // Check if line starts with a product code
+    const codeMatch = line.match(/^([A-Z]\d{4,})\s+(.*)/);
+    if (!codeMatch) { i++; continue; }
+
+    const productCode = codeMatch[1];
+    let restOfLine = codeMatch[2];
+
+    // Check if this line itself has trailing numbers
+    let numbersMatch = restOfLine.match(trailingNumbersPattern);
+
+    if (numbersMatch) {
+      // Numbers on same line as product code
+      let description = restOfLine.replace(trailingNumbersPattern, "").trim();
+      // Check if next line(s) are description continuation (not a product code, not numbers-only)
+      let j = i + 1;
+      while (j < lines.length) {
+        const nextL = lines[j].trim();
+        if (!nextL || shouldSkip(nextL) || productCodePattern.test(nextL)) break;
+        // If it has trailing numbers pattern, it's a new item that was on a continuation — stop
+        if (trailingNumbersPattern.test(nextL)) break;
+        if (/^\d+\s+EA\s+/.test(nextL)) break;
+        description += " " + nextL;
+        j++;
+      }
+      parsed.push({
+        description: cleanDescription(description),
+        productCode,
+        qty: parseInt(numbersMatch[1]),
+        unitCost: parseFloat(numbersMatch[2]),
+        lineTotal: parseFloat(numbersMatch[3]),
+        vatAmount: null,
+      });
+      i = j;
+      continue;
+    }
+
+    // Numbers might be on a subsequent line — collect description continuation
+    let fullDescription = restOfLine;
+    i++;
+
+    // Look ahead for continuation lines (don't start with product code, don't have numbers yet)
+    while (i < lines.length) {
+      const nextLine = lines[i].trim();
+      if (!nextLine || shouldSkip(nextLine)) { i++; continue; }
+      if (productCodePattern.test(nextLine)) break; // Next product
+
+      // Check if this continuation has the trailing numbers
+      numbersMatch = nextLine.match(trailingNumbersPattern);
+      if (numbersMatch) {
+        const extraDesc = nextLine.replace(trailingNumbersPattern, "").trim();
+        if (extraDesc) fullDescription += " " + extraDesc;
+        parsed.push({
+          description: cleanDescription(fullDescription),
+          productCode,
+          qty: parseInt(numbersMatch[1]),
+          unitCost: parseFloat(numbersMatch[2]),
+          lineTotal: parseFloat(numbersMatch[3]),
+          vatAmount: null,
+        });
+        i++;
+        break;
+      }
+
+      // Also check simpler pattern: just "qty EA price EA total S" on its own line
+      const simpleMatch = nextLine.match(/^(\d+)\s+EA\s+([\d.]+)\s+EA\s+(?:-?[\d.]+%\s+)?\s*([\d.]+)\s+[A-Z]\s*$/);
+      if (simpleMatch) {
+        parsed.push({
+          description: cleanDescription(fullDescription),
+          productCode,
+          qty: parseInt(simpleMatch[1]),
+          unitCost: parseFloat(simpleMatch[2]),
+          lineTotal: parseFloat(simpleMatch[3]),
+          vatAmount: null,
+        });
+        i++;
+        break;
+      }
+
+      // It's a description continuation line
+      fullDescription += " " + nextLine;
+      i++;
+    }
+  }
+}
+
+function cleanDescription(desc: string): string {
+  // Remove leading product code reference if duplicated (e.g., "K09933 - Galvanised Band")
+  // Keep the human-readable part
+  return desc.replace(/^[A-Z]\d{4,}\s*[-–]\s*/, "").replace(/\s+/g, " ").trim();
 }
 
 // ─── Fallback: Generic Tabular ──────────────────────────────────────────────

@@ -91,3 +91,33 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  try {
+    // Get line IDs for cleanup
+    const lineIds = (await prisma.supplierBillLine.findMany({
+      where: { supplierBillId: id },
+      select: { id: true },
+    })).map(l => l.id);
+
+    if (lineIds.length > 0) {
+      // Clean up cost allocations and absorbed costs linked to these bill lines
+      await prisma.costAllocation.deleteMany({ where: { supplierBillLineId: { in: lineIds } } });
+      await prisma.absorbedCostAllocation.deleteMany({ where: { supplierBillLineId: { in: lineIds } } });
+      await prisma.creditNoteAllocation.deleteMany({ where: { supplierBillLineId: { in: lineIds } } }).catch(() => {});
+    }
+
+    // Delete lines then bill
+    await prisma.supplierBillLine.deleteMany({ where: { supplierBillId: id } });
+    await prisma.supplierBill.delete({ where: { id } });
+
+    return Response.json({ deleted: true, id });
+  } catch (error) {
+    console.error("Failed to delete supplier bill:", error);
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
+  }
+}

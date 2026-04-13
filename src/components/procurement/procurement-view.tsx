@@ -13,6 +13,7 @@ import {
   Warehouse,
   Upload,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -730,6 +731,7 @@ function SupplierBillsTab({
               <TableHead className="text-right">Total Cost</TableHead>
               <TableHead className="text-right">Lines</TableHead>
               <TableHead>Allocation</TableHead>
+              <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -785,6 +787,26 @@ function SupplierBillsTab({
                       <span className="text-xs text-muted-foreground">
                         {allocationSummary(bill.lines)}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0 text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete bill ${bill.billNo}?`)) return;
+                          const res = await fetch(`/api/supplier-bills/${bill.id}`, { method: "DELETE" });
+                          if (res.ok) {
+                            router.refresh();
+                          } else {
+                            const err = await res.json().catch(() => null);
+                            alert(err?.error || "Failed to delete bill");
+                          }
+                        }}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                   {expandedBill === bill.id && bill.lines.length > 0 && (
