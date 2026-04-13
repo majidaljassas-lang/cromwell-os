@@ -337,8 +337,13 @@ export function TicketsTable({
                       onClick={async (e) => {
                         e.stopPropagation();
                         if (!confirm(`Delete ticket T-${ticket.ticketNo} "${ticket.title}"?`)) return;
-                        await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
-                        router.refresh();
+                        const res = await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
+                        if (res.ok) {
+                          router.refresh();
+                        } else {
+                          const err = await res.json().catch(() => null);
+                          alert(err?.error || "Failed to delete ticket");
+                        }
                       }}
                     >
                       <Trash2 className="size-3" />

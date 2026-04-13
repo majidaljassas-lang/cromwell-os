@@ -121,13 +121,38 @@ export async function POST(
       data: { totalSell: newTotalSell },
     });
 
-    // === 4. Revert ticket status ===
+    // === 4. Void any DRAFT invoices on this ticket (pricing has changed) ===
+    const draftInvoices = await prisma.salesInvoice.findMany({
+      where: { ticketId: quote.ticketId, status: "DRAFT" },
+      select: { id: true, invoiceNo: true },
+    });
+
+    if (draftInvoices.length > 0) {
+      await prisma.salesInvoice.updateMany({
+        where: { ticketId: quote.ticketId, status: "DRAFT" },
+        data: { status: "VOIDED" },
+      });
+
+      const voidedNos = draftInvoices.map(i => i.invoiceNo || i.id).join(", ");
+      notes += `\n⚠ Auto-voided ${draftInvoices.length} draft invoice(s): ${voidedNos} (pricing changed)`;
+
+      await prisma.event.create({
+        data: {
+          ticketId: quote.ticketId,
+          eventType: "INVOICE_VOIDED",
+          timestamp: new Date(),
+          notes: `Draft invoice(s) ${voidedNos} auto-voided — quote revised from v${oldVersion} to v${newVersion}, pricing no longer valid.`,
+        },
+      });
+    }
+
+    // === 5. Revert ticket status ===
     await prisma.ticket.update({
       where: { id: quote.ticketId },
       data: { status: "QUOTED" },
     });
 
-    // === 5. Log event ===
+    // === 6. Log event ===
     await prisma.event.create({
       data: {
         ticketId: quote.ticketId,

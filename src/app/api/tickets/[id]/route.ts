@@ -121,12 +121,63 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    // Delete related records first
-    await prisma.customerPO.deleteMany({ where: { ticketId: id } });
+    // Block if sent/paid invoices exist
+    const sentInvoices = await prisma.salesInvoice.count({
+      where: { ticketId: id, status: { notIn: ["DRAFT", "VOIDED"] } },
+    });
+    if (sentInvoices > 0) {
+      return Response.json({ error: "Cannot delete — ticket has sent/paid invoices." }, { status: 409 });
+    }
+
+    const lineIds = (await prisma.ticketLine.findMany({ where: { ticketId: id }, select: { id: true } })).map(l => l.id);
+    const invoiceIds = (await prisma.salesInvoice.findMany({ where: { ticketId: id }, select: { id: true } })).map(i => i.id);
+    const quoteIds = (await prisma.quote.findMany({ where: { ticketId: id }, select: { id: true } })).map(q => q.id);
+    const poIds = (await prisma.procurementOrder.findMany({ where: { ticketId: id }, select: { id: true } })).map(p => p.id);
+    const custPoIds = (await prisma.customerPO.findMany({ where: { ticketId: id }, select: { id: true } })).map(p => p.id);
+    const packIds = (await prisma.evidencePack.findMany({ where: { ticketId: id }, select: { id: true } })).map(p => p.id);
+
+    // Clean up in dependency order
+    if (invoiceIds.length) {
+      await prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: { in: invoiceIds } } });
+      await prisma.customerPOAllocation.deleteMany({ where: { salesInvoiceId: { in: invoiceIds } } });
+      await prisma.payment.deleteMany({ where: { salesInvoiceId: { in: invoiceIds } } });
+    }
+    await prisma.salesInvoice.deleteMany({ where: { ticketId: id } });
+
+    if (poIds.length) {
+      await prisma.costAllocation.deleteMany({ where: { supplierBillLine: undefined, ticketLineId: { in: lineIds } } }).catch(() => {});
+      await prisma.procurementOrderLine.deleteMany({ where: { procurementOrderId: { in: poIds } } });
+    }
+    await prisma.procurementOrder.deleteMany({ where: { ticketId: id } });
+
+    if (lineIds.length) {
+      await prisma.costAllocation.deleteMany({ where: { ticketLineId: { in: lineIds } } });
+      await prisma.stockUsage.deleteMany({ where: { ticketLineId: { in: lineIds } } });
+    }
+    await prisma.absorbedCostAllocation.deleteMany({ where: { ticketId: id } });
+
+    if (quoteIds.length) {
+      await prisma.quoteLine.deleteMany({ where: { quoteId: { in: quoteIds } } });
+    }
     await prisma.quote.deleteMany({ where: { ticketId: id } });
-    await prisma.ticketLine.deleteMany({ where: { ticketId: id } });
+
+    if (custPoIds.length) {
+      await prisma.labourDrawdown.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
+      await prisma.materialsDrawdown.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
+      await prisma.customerPOLine.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
+    }
+    await prisma.customerPO.deleteMany({ where: { ticketId: id } });
+
+    if (packIds.length) {
+      await prisma.evidencePackItem.deleteMany({ where: { evidencePackId: { in: packIds } } });
+    }
+    await prisma.evidencePack.deleteMany({ where: { ticketId: id } });
+    await prisma.evidenceFragment.deleteMany({ where: { ticketId: id } });
+    await prisma.task.deleteMany({ where: { ticketId: id } });
     await prisma.event.deleteMany({ where: { ticketId: id } });
+    await prisma.ticketLine.deleteMany({ where: { ticketId: id } });
     await prisma.ticket.delete({ where: { id } });
+
     return Response.json({ deleted: true });
   } catch (error) {
     console.error("Failed to delete ticket:", error);

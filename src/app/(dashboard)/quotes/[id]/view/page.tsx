@@ -82,12 +82,19 @@ export default async function QuoteViewPage({
             </tr>
           </thead>
           <tbody>
-            {quote.lines.map((line, i) => (
+            {(() => {
+              const distinctSections = new Set(quote.lines.map(l => l.ticketLine?.sectionLabel).filter(Boolean));
+              const hasMultipleSections = distinctSections.size > 1;
+              const firstSection = quote.lines[0]?.ticketLine?.sectionLabel;
+              return quote.lines.map((line, i) => {
+              const prevSection = i > 0 ? quote.lines[i - 1].ticketLine?.sectionLabel : null;
+              const showSection = hasMultipleSections && line.ticketLine?.sectionLabel && line.ticketLine.sectionLabel !== prevSection && line.ticketLine.sectionLabel !== firstSection;
+              return (
               <Fragment key={line.id}>
-                {line.ticketLine?.sectionLabel && (
+                {showSection && (
                   <tr className="border-t-2 border-gray-400">
                     <td colSpan={5} className="py-2 px-2 text-xs font-bold uppercase tracking-widest text-gray-500 bg-gray-50">
-                      {line.ticketLine.sectionLabel}
+                      {line.ticketLine!.sectionLabel}
                     </td>
                   </tr>
                 )}
@@ -99,7 +106,9 @@ export default async function QuoteViewPage({
                 <td className="py-3 text-sm text-right tabular-nums font-medium">{fmt(line.lineTotal)}</td>
               </tr>
               </Fragment>
-            ))}
+              );
+            });
+            })()}
           </tbody>
         </table>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Upload, FileText, ExternalLink, Package, Pencil, Trash2 } from "lucide-react";
 import { OrderReconciliation } from "./order-reconciliation";
@@ -108,7 +108,11 @@ type AbsorbedCostItem = {
 };
 
 type SupplierOption = { id: string; name: string };
-type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null };
+type StockUsageInfo = {
+  id: string; qtyUsed: Decimal; costPerUnit: Decimal; totalCost: Decimal; stockItemId: string;
+  stockItem?: { id: string; description: string; supplierName: string | null; originBillNo: string | null; sourceType: string; originTicketTitle: string | null };
+};
+type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[] };
 type StockItemOption = { id: string; description: string; productCode: string | null; qtyOnHand: Decimal; unit: string; costPerUnit: Decimal; supplierName: string | null; sourceType: string; originBillNo: string | null; originTicketTitle: string | null };
 
 type Props = {
@@ -149,7 +153,8 @@ export function TicketProcurementTab({
   const [editPOId, setEditPOId] = useState<string | null>(null);
   const [editPOSubmitting, setEditPOSubmitting] = useState(false);
   const [deliveryNoteOpen, setDeliveryNoteOpen] = useState(false);
-  const [deliveryItems, setDeliveryItems] = useState<Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL"; qtyDelivered: number; qtyTotal: number }>>({});
+  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().split("T")[0]);
+  const [deliveryItems, setDeliveryItems] = useState<Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL" | "DIRECT"; qtyDelivered: number; qtyTotal: number }>>({});
   const [absorbedOpen, setAbsorbedOpen] = useState(false);
   const [absorbedSubmitting, setAbsorbedSubmitting] = useState(false);
   const [stockPickerLine, setStockPickerLine] = useState<string | null>(null);
@@ -185,7 +190,16 @@ export function TicketProcurementTab({
     }
   }
 
-  // Lines needing purchase (not yet in a PO)
+  // Calculate stock usage per line
+  function stockQtyUsed(line: TicketLineOption): number {
+    if (!line.stockUsages?.length) return 0;
+    return line.stockUsages.reduce((sum, su) => sum + Number(su.qtyUsed?.toString() || 0), 0);
+  }
+  function remainingQty(line: TicketLineOption): number {
+    return Math.max(0, Number(line.qty?.toString() || 0) - stockQtyUsed(line));
+  }
+
+  // Lines needing purchase (not yet in a PO, and still have remaining qty to order)
   const poLineIds = new Set(
     procurementOrders.flatMap((po) => po.lines.map((l) => l.ticketLine?.id).filter(Boolean))
   );
@@ -193,6 +207,43 @@ export function TicketProcurementTab({
     (l) => !poLineIds.has(l.id) && l.status !== "ORDERED" && l.status !== "FROM_STOCK" && l.status !== "INVOICED" && l.status !== "CLOSED"
   );
   const showChecklist = needsPurchase.length > 0 && ["APPROVED", "QUOTED", "ORDERED"].includes(ticketStatus);
+
+  // Auto-detect stock matches for lines needing purchase
+  function normalizeDesc(s: string): string {
+    return s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  const stockMatches = useMemo(() => {
+    if (!stockItems.length || !needsPurchase.length) return [];
+    const matches: Array<{ lineId: string; lineDesc: string; lineQty: number; lineUnit: string; stockId: string; stockDesc: string; stockQty: number; stockUnit: string; stockCost: number; sourceType: string }> = [];
+    for (const line of needsPurchase) {
+      const remaining = remainingQty(line);
+      if (remaining <= 0) continue;
+      const normLine = normalizeDesc(line.description);
+      for (const si of stockItems) {
+        const normStock = normalizeDesc(si.description);
+        // Match if one contains the other, or if key tokens overlap significantly
+        const lineTokens = normLine.split(" ").filter((t: string) => t.length > 1);
+        const stockTokens = normStock.split(" ").filter((t: string) => t.length > 1);
+        const overlap = lineTokens.filter((t: string) => stockTokens.includes(t)).length;
+        const matchScore = lineTokens.length > 0 ? overlap / lineTokens.length : 0;
+        if (matchScore >= 0.7 || normLine.includes(normStock) || normStock.includes(normLine)) {
+          matches.push({
+            lineId: line.id,
+            lineDesc: line.description,
+            lineQty: remaining,
+            lineUnit: line.unit,
+            stockId: si.id,
+            stockDesc: si.description,
+            stockQty: Number(si.qtyOnHand?.toString() || 0),
+            stockUnit: si.unit,
+            stockCost: Number(si.costPerUnit?.toString() || 0),
+            sourceType: si.sourceType,
+          });
+        }
+      }
+    }
+    return matches;
+  }, [stockItems, needsPurchase]);
 
   async function handleMarkOrdered(lineId: string) {
     setOrderedLines((prev) => new Set([...prev, lineId]));
@@ -232,13 +283,27 @@ export function TicketProcurementTab({
     setStockPickerSubmitting(true);
     try {
       const ticketLine = ticketLines.find((l) => l.id === stockPickerLine);
-      const qty = stockPickerQty || (ticketLine ? Number(ticketLine.qty?.toString() || 1) : 1);
+      const qtyToUse = Number(stockPickerQty) || (ticketLine ? Number(ticketLine.qty?.toString() || 1) : 1);
       const res = await fetch(`/api/stock/${stockPickerItemId}/use`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketLineId: stockPickerLine, qtyUsed: Number(qty) }),
+        body: JSON.stringify({ ticketLineId: stockPickerLine, qtyUsed: qtyToUse }),
       });
       if (res.ok) {
+        // Check if stock now fully covers the line
+        if (ticketLine) {
+          const lineQty = Number(ticketLine.qty?.toString() || 0);
+          const alreadyUsed = stockQtyUsed(ticketLine);
+          const totalUsed = alreadyUsed + qtyToUse;
+          if (totalUsed >= lineQty) {
+            // Fully covered from stock — mark line
+            await fetch(`/api/ticket-lines/${stockPickerLine}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "FROM_STOCK" }),
+            });
+          }
+        }
         setStockPickerLine(null);
         setStockPickerItemId("");
         setStockPickerQty("");
@@ -358,22 +423,24 @@ export function TicketProcurementTab({
   }
 
   function printDeliveryNote() {
-    const rows = ticketLines.map((line) => {
+    const rows = ticketLines.map((line, i) => {
       const item = deliveryItems[line.id] || { status: "DELIVERED", qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
       const backQty = item.qtyTotal - item.qtyDelivered;
-      const sectionRow = line.sectionLabel
+      const prevSection = i > 0 ? ticketLines[i - 1].sectionLabel : null;
+      const sectionRow = line.sectionLabel && line.sectionLabel !== prevSection
         ? `<tr><td colspan="6" style="background:#eee;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:1px;padding:8px">${line.sectionLabel}</td></tr>`
         : "";
 
       if (item.status === "NOT_ORDERED") return "";
 
       const statusLabel = item.status === "DELIVERED" ? "✓ Delivered" :
+        item.status === "DIRECT" ? "↗ Direct from Supplier" :
         item.status === "PARTIAL" ? `✓ ${item.qtyDelivered} delivered / ${backQty} back order` :
         item.status === "BACK_ORDER" ? "⏳ Back Order" : "";
-      const color = item.status === "DELIVERED" ? "#000" : item.status === "PARTIAL" ? "#FF6600" : "#FF6600";
+      const color = item.status === "DELIVERED" ? "#000" : item.status === "DIRECT" ? "#3399FF" : item.status === "PARTIAL" ? "#FF6600" : "#FF6600";
 
       return `${sectionRow}<tr>
-        <td style="width:24px;text-align:center">${item.status === "BACK_ORDER" ? "☐" : "☑"}</td>
+        <td style="width:24px;text-align:center">${item.status === "BACK_ORDER" ? "☐" : item.status === "DIRECT" ? "↗" : "☑"}</td>
         <td>${line.description}</td>
         <td style="text-align:right">${item.qtyDelivered > 0 ? item.qtyDelivered : "—"}</td>
         <td style="text-align:right;color:#FF6600">${backQty > 0 ? backQty : ""}</td>
@@ -383,6 +450,7 @@ export function TicketProcurementTab({
     }).join("");
 
     const deliveredCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "DELIVERED").length;
+    const directCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "DIRECT").length;
     const partialCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "PARTIAL").length;
     const backOrderCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "BACK_ORDER").length;
 
@@ -404,13 +472,14 @@ export function TicketProcurementTab({
       <div class="sub">Delivery Note</div>
       <hr />
       <div class="ref">${ticketTitle}</div>
-      <div class="meta">Date: ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</div>
+      <div class="meta">Date: ${new Date(deliveryDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</div>
       <table>
         <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Delivered</th><th style="text-align:right;color:#FF6600">Back Order</th><th>Unit</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="summary">
         <div><b>Delivered:</b> ${deliveredCount}</div>
+        ${directCount > 0 ? `<div><b>Direct:</b> ${directCount}</div>` : ""}
         <div><b>Partial:</b> ${partialCount}</div>
         <div><b>Back Order:</b> ${backOrderCount}</div>
         <div><b>Total Lines:</b> ${ticketLines.length}</div>
@@ -427,7 +496,8 @@ export function TicketProcurementTab({
 
   function handlePrint() {
     const rows = needsPurchase.map((line, i) => {
-      const sectionRow = line.sectionLabel
+      const prevSection = i > 0 ? needsPurchase[i - 1].sectionLabel : null;
+      const sectionRow = line.sectionLabel && line.sectionLabel !== prevSection
         ? `<tr><td colspan="5" style="background:#eee;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:1px;padding:8px">${line.sectionLabel}</td></tr>`
         : "";
       return `${sectionRow}<tr>
@@ -581,10 +651,20 @@ export function TicketProcurementTab({
             <SheetTitle>Delivery Note</SheetTitle>
             <SheetDescription>Mark each item as delivered or back order, then print.</SheetDescription>
           </SheetHeader>
+          <div className="flex items-center gap-2 px-4 mb-3">
+            <Label className="text-xs text-[#888888]">Delivery Date:</Label>
+            <Input
+              type="date"
+              value={deliveryDate}
+              onChange={(e) => setDeliveryDate(e.target.value)}
+              className="w-40 h-7 text-xs"
+            />
+          </div>
           <div className="flex flex-col gap-1 px-4 flex-1 overflow-y-auto max-h-[70vh]">
             {ticketLines.map((line) => {
               const item = deliveryItems[line.id] || { status: "DELIVERED", qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
               const bgColor = item.status === "DELIVERED" ? "bg-[#00CC66]/10 border-[#00CC66]/30"
+                : item.status === "DIRECT" ? "bg-[#3399FF]/10 border-[#3399FF]/30"
                 : item.status === "PARTIAL" ? "bg-[#FF9900]/10 border-[#FF9900]/30"
                 : item.status === "BACK_ORDER" ? "bg-[#FF3333]/10 border-[#FF3333]/30"
                 : "bg-[#333333]/10 border-[#333333] opacity-50";
@@ -607,6 +687,10 @@ export function TicketProcurementTab({
                       className={`h-5 text-[9px] px-2 ${item.status === "BACK_ORDER" ? "bg-[#FF3333] text-white" : ""}`}
                       onClick={() => setDeliveryItems((prev) => ({ ...prev, [line.id]: { ...item, status: "BACK_ORDER", qtyDelivered: 0 } }))}
                     >B/O</Button>
+                    <Button size="sm" variant={item.status === "DIRECT" ? "default" : "outline"}
+                      className={`h-5 text-[9px] px-2 ${item.status === "DIRECT" ? "bg-[#3399FF] text-white" : ""}`}
+                      onClick={() => setDeliveryItems((prev) => ({ ...prev, [line.id]: { ...item, status: "DIRECT", qtyDelivered: item.qtyTotal } }))}
+                    >Direct</Button>
                     {item.status === "PARTIAL" && (
                       <Input
                         type="number"
@@ -642,6 +726,55 @@ export function TicketProcurementTab({
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* Stock Suggestions Banner */}
+      {showChecklist && stockMatches.length > 0 && (
+        <div className="border border-[#FF6600]/40 bg-[#FF6600]/10 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Package className="size-5 text-[#FF6600]" />
+            <h3 className="text-[11px] uppercase tracking-widest text-[#FF6600] font-bold">
+              Stock Available — {stockMatches.length} match{stockMatches.length !== 1 ? "es" : ""} found
+            </h3>
+          </div>
+          <p className="text-xs text-[#CCCCCC]">
+            These holding items match lines on this order. Allocate from stock to reduce purchasing.
+          </p>
+          <div className="space-y-2">
+            {stockMatches.map((m) => {
+              const canFullyCover = m.stockQty >= m.lineQty;
+              return (
+                <div key={`${m.lineId}-${m.stockId}`} className="flex items-center justify-between border border-[#333333] bg-[#1A1A1A] px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-[#E0E0E0]">{m.lineDesc}</div>
+                    <div className="text-[10px] text-[#888888] mt-0.5">
+                      Need {m.lineQty} {m.lineUnit} &middot; Stock: <span className="text-[#FF6600] font-medium">{m.stockDesc}</span> — {m.stockQty} {m.stockUnit} @ £{m.stockCost.toFixed(2)}
+                    </div>
+                    <div className="text-[10px] mt-0.5">
+                      {canFullyCover ? (
+                        <span className="text-[#00CC66]">Full coverage from stock</span>
+                      ) : (
+                        <span className="text-[#FF9900]">Partial — {m.stockQty} from stock, order {m.lineQty - m.stockQty}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-[#FF6600] text-black hover:bg-[#CC5500] ml-3 shrink-0"
+                    onClick={() => {
+                      setStockPickerLine(m.lineId);
+                      setStockPickerItemId(m.stockId);
+                      setStockPickerQty(String(Math.min(m.stockQty, m.lineQty)));
+                    }}
+                  >
+                    <Package className="size-3.5 mr-1" />
+                    Allocate
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {showChecklist && (
         <div className="space-y-3">
@@ -702,11 +835,14 @@ export function TicketProcurementTab({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {needsPurchase.map((line) => {
+                {needsPurchase.map((line, i) => {
                   const done = orderedLines.has(line.id);
+                  const prevSection = i > 0 ? needsPurchase[i - 1].sectionLabel : null;
+                  const firstSec = ticketLines[0]?.sectionLabel;
+                  const showSection = line.sectionLabel && line.sectionLabel !== prevSection && line.sectionLabel !== firstSec;
                   return (
                     <React.Fragment key={line.id}>
-                      {line.sectionLabel && (
+                      {showSection && (
                         <TableRow className="bg-[#252525] border-t-2 border-[#555555]">
                           <TableCell colSpan={6} className="py-2 px-3">
                             <span className="text-[11px] uppercase tracking-widest font-bold text-[#FF9900]">
@@ -724,8 +860,22 @@ export function TicketProcurementTab({
                             className="accent-[#3399FF]"
                           />
                         </TableCell>
-                        <TableCell className="text-sm font-medium">{line.description}</TableCell>
-                        <TableCell className="text-right tabular-nums text-sm">{dec(line.qty)}</TableCell>
+                        <TableCell className="text-sm font-medium">
+                          {line.description}
+                          {stockQtyUsed(line) > 0 && (
+                            <span className="text-[10px] text-[#FF6600] ml-2">
+                              ({stockQtyUsed(line)} from stock)
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {stockQtyUsed(line) > 0 ? (
+                            <span>
+                              <span className="text-[#FF9900]">{remainingQty(line)}</span>
+                              <span className="text-[10px] text-[#888888]">/{dec(line.qty)}</span>
+                            </span>
+                          ) : dec(line.qty)}
+                        </TableCell>
                         <TableCell className="text-xs text-[#888888]">{line.unit}</TableCell>
                         <TableCell className="text-right tabular-nums text-sm">{dec(line.expectedCostUnit)}</TableCell>
                         <TableCell className="print-hidden">
@@ -745,7 +895,7 @@ export function TicketProcurementTab({
                                 className="h-6 text-[10px] bg-[#222222] border-[#FF6600]/30 text-[#FF6600] hover:bg-[#FF6600]/10"
                                 onClick={() => {
                                   setStockPickerLine(line.id);
-                                  setStockPickerQty(String(Number(line.qty?.toString() || 1)));
+                                  setStockPickerQty(String(remainingQty(line) || Number(line.qty?.toString() || 1)));
                                 }}
                               >
                                 <Package className="size-3 mr-0.5" />
@@ -820,53 +970,110 @@ export function TicketProcurementTab({
         );
       })()}
 
-      {/* From Stock Items */}
+      {/* From Stock Items — with full allocation details */}
       {(() => {
         const fromStock = ticketLines.filter(
           (l) => l.status === "FROM_STOCK" && !poLineIds.has(l.id)
         );
-        if (fromStock.length === 0) return null;
+        // Also include lines with partial stock allocation (still in purchase list but have usages)
+        const partialStock = ticketLines.filter(
+          (l) => l.status !== "FROM_STOCK" && (l.stockUsages?.length || 0) > 0
+        );
+        const allStockLines = [...fromStock, ...partialStock];
+        if (allStockLines.length === 0) return null;
+
+        const totalStockCost = allStockLines.reduce((sum, l) => {
+          return sum + (l.stockUsages || []).reduce((s, su) => s + Number(su.totalCost?.toString() || 0), 0);
+        }, 0);
+
         return (
           <div className="space-y-3">
             <h3 className="text-[11px] uppercase tracking-widest text-[#FF6600] font-bold">
-              From Stock — {fromStock.length} items
+              From Stock — {allStockLines.length} items &middot; £{dec(totalStockCost)} allocated
             </h3>
             <div className="border border-[#FF6600]/20 bg-[#FF6600]/5">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead>Line Item</TableHead>
+                    <TableHead className="text-right">Qty Used</TableHead>
                     <TableHead>Unit</TableHead>
-                    <TableHead className="text-right">Est. Cost</TableHead>
+                    <TableHead className="text-right">Cost/Unit</TableHead>
+                    <TableHead className="text-right">Total Cost</TableHead>
                     <TableHead>Source</TableHead>
                     <TableHead className="w-16 print-hidden"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {fromStock.map((line) => (
-                    <TableRow key={line.id}>
-                      <TableCell className="text-sm">{line.description}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{dec(line.qty)}</TableCell>
-                      <TableCell className="text-xs text-[#888888]">{line.unit}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{dec(line.expectedCostUnit)}</TableCell>
-                      <TableCell>
-                        <Badge className="text-[9px] bg-[#FF6600]/15 text-[#FF6600]">
-                          {line.supplierName || "Stock"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="print-hidden">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 text-[10px] text-[#FF9900] hover:text-[#FF6600] border-[#333333]"
-                          onClick={() => handleUndoOrdered(line.id)}
-                        >
-                          Undo
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {allStockLines.map((line) => {
+                    const usages = line.stockUsages || [];
+                    if (usages.length === 0) {
+                      // Line marked FROM_STOCK but no usage records yet
+                      return (
+                        <TableRow key={line.id}>
+                          <TableCell className="text-sm font-medium">{line.description}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">{dec(line.qty)}</TableCell>
+                          <TableCell className="text-xs text-[#888888]">{line.unit}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">{dec(line.expectedCostUnit)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">—</TableCell>
+                          <TableCell>
+                            <Badge className="text-[9px] bg-[#FF6600]/15 text-[#FF6600]">Stock</Badge>
+                          </TableCell>
+                          <TableCell className="print-hidden">
+                            <Button size="sm" variant="outline" className="h-6 text-[10px] text-[#FF9900] hover:text-[#FF6600] border-[#333333]" onClick={() => handleUndoOrdered(line.id)}>
+                              Undo
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+                    // One row per stock usage with full details
+                    return usages.map((su, idx) => {
+                      const si = su.stockItem;
+                      const sourceLabel = si?.sourceType === "RETURN" ? "Return" : si?.sourceType === "MOQ_EXCESS" ? "MOQ Excess" : si?.sourceType || "Stock";
+                      return (
+                        <TableRow key={su.id} className={idx > 0 ? "border-t border-[#333333]/30" : ""}>
+                          {idx === 0 && (
+                            <TableCell className="text-sm font-medium" rowSpan={usages.length}>
+                              {line.description}
+                              {line.status !== "FROM_STOCK" && (
+                                <div className="text-[10px] text-[#FF9900] mt-0.5">Partial — {remainingQty(line)} still to order</div>
+                              )}
+                            </TableCell>
+                          )}
+                          <TableCell className="text-right tabular-nums text-sm">{dec(su.qtyUsed)}</TableCell>
+                          <TableCell className="text-xs text-[#888888]">{line.unit}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">{dec(su.costPerUnit)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-medium">{dec(su.totalCost)}</TableCell>
+                          <TableCell>
+                            <div>
+                              <Badge className={`text-[9px] ${si?.sourceType === "RETURN" ? "bg-[#3399FF]/15 text-[#3399FF]" : "bg-[#FF9900]/15 text-[#FF9900]"}`}>
+                                {sourceLabel}
+                              </Badge>
+                              {si?.supplierName && (
+                                <div className="text-[10px] text-[#888888] mt-0.5">{si.supplierName}</div>
+                              )}
+                              {si?.originBillNo && (
+                                <div className="text-[10px] text-[#666666]">{si.originBillNo}</div>
+                              )}
+                              {si?.originTicketTitle && (
+                                <div className="text-[10px] text-[#555555]">From: {si.originTicketTitle}</div>
+                              )}
+                            </div>
+                          </TableCell>
+                          {idx === 0 && (
+                            <TableCell className="print-hidden" rowSpan={usages.length}>
+                              {line.status === "FROM_STOCK" && (
+                                <Button size="sm" variant="outline" className="h-6 text-[10px] text-[#FF9900] hover:text-[#FF6600] border-[#333333]" onClick={() => handleUndoOrdered(line.id)}>
+                                  Undo
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    });
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -893,6 +1100,11 @@ export function TicketProcurementTab({
                   <p className="text-xs text-[#888888] mt-1">
                     Required: {dec(line.qty)} {line.unit} &middot; Est. cost: £{dec(line.expectedCostUnit)}/unit
                   </p>
+                  {stockQtyUsed(line) > 0 && (
+                    <p className="text-xs text-[#FF6600] mt-1">
+                      {stockQtyUsed(line)} already from stock &middot; {remainingQty(line)} remaining
+                    </p>
+                  )}
                 </div>
               );
             })()}

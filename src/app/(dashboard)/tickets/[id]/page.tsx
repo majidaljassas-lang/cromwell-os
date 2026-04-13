@@ -18,6 +18,12 @@ export default async function TicketDetailPage({
       lines: {
         include: {
           payingCustomer: true,
+          stockUsages: {
+            select: {
+              id: true, qtyUsed: true, costPerUnit: true, totalCost: true, stockItemId: true,
+              stockItem: { select: { id: true, description: true, supplierName: true, originBillNo: true, sourceType: true, originTicketTitle: true } },
+            },
+          },
         },
         orderBy: { createdAt: "asc" },
       },
@@ -89,6 +95,12 @@ export default async function TicketDetailPage({
     orderBy: { createdAt: "desc" },
   });
 
+  // Fetch holding stock items for procurement
+  const stockItems = await prisma.stockItem.findMany({
+    where: { outcome: "HOLDING", isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+
   // Fetch sites and commercial links for PO creation
   const sites = await prisma.site.findMany({
     where: { isActive: true },
@@ -121,6 +133,7 @@ export default async function TicketDetailPage({
         salesInvoices={s(salesInvoices)}
         sites={s(sites)}
         commercialLinks={s(commercialLinks)}
+        stockItems={s(stockItems)}
       />
     </div>
   );

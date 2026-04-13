@@ -15,6 +15,7 @@ import {
   Download,
   Clock,
   Bell,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -402,12 +403,13 @@ export function InvoicesView({
               <TableHead>PO No</TableHead>
               <TableHead className="text-right">Total Sell</TableHead>
               <TableHead>PO Match</TableHead>
+              <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 11 : 10} className="text-center py-8 text-[#888888]">
+                <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 12 : 11} className="text-center py-8 text-[#888888]">
                   {activeTab === "OVERDUE_CHASE" ? "No overdue invoices." : "No invoices found."}
                 </TableCell>
               </TableRow>
@@ -478,11 +480,33 @@ export function InvoicesView({
                           <AlertTriangle className="size-4 text-[#FF9900]" />
                         )}
                       </TableCell>
+                      <TableCell>
+                        {(inv.status === "DRAFT" || inv.status === "VOIDED") && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 w-6 p-0 text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!confirm(`Delete ${inv.invoiceNo || "this draft invoice"}?`)) return;
+                              const res = await fetch(`/api/sales-invoices/${inv.id}`, { method: "DELETE" });
+                              if (res.ok) {
+                                router.refresh();
+                              } else {
+                                const err = await res.json().catch(() => null);
+                                alert(err?.error || "Failed to delete");
+                              }
+                            }}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
 
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 11 : 10} className="bg-[#1A1A1A] p-4">
+                        <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 12 : 11} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
                             {/* Overdue chase info */}
                             {days !== null && days > 0 && (
@@ -677,24 +701,23 @@ export function InvoicesView({
                                 </Button>
                               )}
 
-                              {/* PDF buttons (placeholder) */}
+                              {/* PDF buttons */}
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={(e) => { e.stopPropagation(); }}
-                                disabled
-                              >
-                                <FileText className="size-4 mr-1" />
-                                View PDF
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => { e.stopPropagation(); }}
-                                disabled
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const res = await fetch(`/api/sales-invoices/${inv.id}/generate-pdf`, { method: "POST" });
+                                  if (res.ok) {
+                                    window.open(`/api/sales-invoices/${inv.id}/generate-pdf`, "_blank");
+                                  } else {
+                                    const err = await res.json().catch(() => null);
+                                    alert(err?.error || "PDF generation failed");
+                                  }
+                                }}
                               >
                                 <Download className="size-4 mr-1" />
-                                Download PDF
+                                Generate PDF
                               </Button>
                             </div>
                           </div>

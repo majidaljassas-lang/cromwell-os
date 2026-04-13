@@ -32,8 +32,11 @@ function buildHtml(quote: {
     day: "numeric", month: "long", year: "numeric",
   });
 
+  const firstSection = quote.lines[0]?.ticketLine?.sectionLabel;
+
   const lineRows = quote.lines.map((line, i) => {
-    const sectionHeader = line.ticketLine?.sectionLabel
+    const prevSection = i > 0 ? quote.lines[i - 1].ticketLine?.sectionLabel : null;
+    const sectionHeader = line.ticketLine?.sectionLabel && line.ticketLine.sectionLabel !== prevSection && line.ticketLine.sectionLabel !== firstSection
       ? `<tr style="border-top:2px solid #555"><td colspan="5" style="padding:10px 10px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#555;background:#f5f5f5">${line.ticketLine.sectionLabel}</td></tr>`
       : "";
     return `${sectionHeader}<tr style="border-bottom:1px solid #eee">

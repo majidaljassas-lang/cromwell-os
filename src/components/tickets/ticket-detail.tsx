@@ -12,6 +12,7 @@ import {
   ChevronRight,
   FileText,
   FileDown,
+  Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -412,7 +413,12 @@ function InlineLineRow({
       const res = await fetch(`/api/ticket-lines/${line.id}`, {
         method: "DELETE",
       });
-      if (res.ok) onDelete();
+      if (res.ok) {
+        onDelete();
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || "Failed to delete line");
+      }
     } finally {
       setDeleting(false);
     }
@@ -629,6 +635,7 @@ export function TicketDetail({
   salesInvoices = [],
   sites = [],
   commercialLinks = [],
+  stockItems = [],
 }: {
   ticket: TicketData;
   quotes?: QuoteData[];
@@ -642,6 +649,7 @@ export function TicketDetail({
   salesInvoices?: any[];
   sites?: SiteOption[];
   commercialLinks?: CommercialLinkOption[];
+  stockItems?: any[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState<{
@@ -1821,9 +1829,11 @@ export function TicketDetail({
                 ) : (
                   activeLines.map((line, idx) => {
                     const prevLine = idx > 0 ? activeLines[idx - 1] : null;
+                    const firstSection = activeLines[0]?.sectionLabel;
                     const showSectionHeader =
                       !!line.sectionLabel &&
-                      line.sectionLabel !== prevLine?.sectionLabel;
+                      line.sectionLabel !== prevLine?.sectionLabel &&
+                      line.sectionLabel !== firstSection;
                     return (
                     <React.Fragment key={line.id}>
                       {showSectionHeader && (
@@ -2081,6 +2091,7 @@ export function TicketDetail({
             costAllocations={costAllocations}
             absorbedCosts={absorbedCostAllocations}
             suppliers={suppliers}
+            stockItems={stockItems}
             ticketLines={ticket.lines.map((l) => ({
               id: l.id,
               description: l.description,
@@ -2090,6 +2101,7 @@ export function TicketDetail({
               status: l.status,
               sectionLabel: l.sectionLabel,
               supplierName: l.supplierName,
+              stockUsages: (l as any).stockUsages || [],
             }))}
           />
         </TabsContent>

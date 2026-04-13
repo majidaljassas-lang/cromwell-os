@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, ChevronDown, ChevronRight, Send, CheckCircle, ExternalLink, FileText, Trash2, Undo2, PenLine } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Send, CheckCircle, ExternalLink, FileText, Trash2, Undo2, PenLine, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -216,6 +216,32 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
     if (!confirm(`Delete quote ${quoteNo}? This cannot be undone.`)) return;
     await fetch(`/api/quotes/${quoteId}`, { method: "DELETE" });
     router.refresh();
+  }
+
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+
+  async function handleGenerateInvoice(quote: QuoteData) {
+    if (!confirm(`Generate invoice from ${quote.quoteNo}?`)) return;
+    setCreatingInvoice(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/generate-invoice-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: quote.customer.id,
+          invoiceType: "STANDARD",
+          notes: `From quote ${quote.quoteNo} v${quote.versionNo}`,
+        }),
+      });
+      if (res.ok) {
+        router.refresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to create invoice");
+      }
+    } finally {
+      setCreatingInvoice(false);
+    }
   }
 
   async function updateStatus(quoteId: string, status: string) {
@@ -432,15 +458,27 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
                           </Button>
                         )}
                         {!isSuperseded && quote.status === "APPROVED" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-[#00CC66] hover:text-[#00AA55] border-[#333333]"
-                            onClick={() => openPOSheet(quote.id)}
-                          >
-                            <FileText className="size-3.5 mr-1" />
-                            Enter PO
-                          </Button>
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-[#00CC66] hover:text-[#00AA55] border-[#333333]"
+                              onClick={() => openPOSheet(quote.id)}
+                            >
+                              <FileText className="size-3.5 mr-1" />
+                              Enter PO
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="bg-[#00CC66] text-black hover:bg-[#00AA55] border-[#00CC66] font-bold"
+                              onClick={() => handleGenerateInvoice(quote)}
+                              disabled={creatingInvoice}
+                            >
+                              <Receipt className="size-3.5 mr-1" />
+                              {creatingInvoice ? "Creating..." : "Invoice"}
+                            </Button>
+                          </>
                         )}
                         {!isSuperseded && (quote.status === "SENT" || quote.status === "APPROVED") && (
                           <Button

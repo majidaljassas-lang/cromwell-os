@@ -11,7 +11,13 @@ export default async function StockPage() {
       usages: {
         select: {
           qtyUsed: true,
-          ticketLine: { select: { id: true, description: true, ticketId: true } },
+          totalCost: true,
+          ticketLine: {
+            select: {
+              id: true, description: true, ticketId: true,
+              ticket: { select: { id: true, title: true } },
+            },
+          },
         },
       },
     },

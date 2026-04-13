@@ -145,19 +145,25 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    // Check for downstream dependencies before deleting
-    const deps = await prisma.costAllocation.count({ where: { ticketLineId: id } });
+    // Check for hard dependencies that block deletion
     const invoiceLines = await prisma.salesInvoiceLine.count({ where: { ticketLineId: id } });
 
-    if (deps > 0 || invoiceLines > 0) {
+    if (invoiceLines > 0) {
       return Response.json({
-        error: "Cannot delete — line has cost allocations or invoice lines. Remove those first.",
-        costAllocations: deps,
+        error: "Cannot delete — line has invoice lines. Remove those first.",
         invoiceLines,
       }, { status: 409 });
     }
 
-    await prisma.ticketLine.delete({ where: { id } });
+    // Clean up soft dependencies before deleting
+    await prisma.$transaction([
+      prisma.costAllocation.deleteMany({ where: { ticketLineId: id } }),
+      prisma.stockUsage.deleteMany({ where: { ticketLineId: id } }),
+      prisma.quoteLine.deleteMany({ where: { ticketLineId: id } }),
+      prisma.procurementOrderLine.updateMany({ where: { ticketLineId: id }, data: { ticketLineId: null } }),
+      prisma.ticketLine.delete({ where: { id } }),
+    ]);
+
     return Response.json({ deleted: true, id });
   } catch (error) {
     console.error("Failed to delete ticket line:", error);
