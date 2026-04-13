@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -11,6 +11,8 @@ import {
   ArrowRightLeft,
   Undo2,
   Warehouse,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -327,6 +329,108 @@ function SupplierBillsTab({
     { description: "", qty: "1", unitCost: "0", lineTotal: "0" },
   ]);
 
+  // PDF upload state
+  const [parsing, setParsing] = useState(false);
+  const [parseMessage, setParseMessage] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePdfUpload = useCallback(async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setParseMessage("Only PDF files are supported.");
+      return;
+    }
+
+    setParsing(true);
+    setParseMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/supplier-bills/parse-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setParseMessage(data.error || "Failed to parse PDF.");
+        return;
+      }
+
+      const { parsed } = data;
+      if (!parsed) {
+        setParseMessage("Could not extract data from PDF.");
+        return;
+      }
+
+      // Auto-fill form fields from parsed data
+      const form = document.querySelector<HTMLFormElement>(
+        'form[data-bill-form]'
+      );
+      if (form) {
+        if (parsed.billNo) {
+          const billNoInput = form.querySelector<HTMLInputElement>('#billNo');
+          if (billNoInput) {
+            // Set value via native setter to trigger React state
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            )?.set;
+            nativeInputValueSetter?.call(billNoInput, parsed.billNo);
+            billNoInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+        if (parsed.billDate) {
+          const dateInput = form.querySelector<HTMLInputElement>('#billDate');
+          if (dateInput) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            )?.set;
+            nativeInputValueSetter?.call(dateInput, parsed.billDate);
+            dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+        if (parsed.grandTotal !== null) {
+          const totalInput = form.querySelector<HTMLInputElement>('#totalCost');
+          if (totalInput) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            )?.set;
+            nativeInputValueSetter?.call(totalInput, String(parsed.grandTotal));
+            totalInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      }
+
+      // Auto-fill line items
+      if (parsed.lines && parsed.lines.length > 0) {
+        setBillLines(
+          parsed.lines.map((l: { description: string; qty: number; unitCost: number; lineTotal: number }) => ({
+            description: l.description,
+            qty: String(l.qty),
+            unitCost: String(l.unitCost),
+            lineTotal: String(l.lineTotal),
+          }))
+        );
+        setParseMessage(`Parsed ${parsed.lines.length} line${parsed.lines.length === 1 ? '' : 's'} from PDF.`);
+      } else {
+        setParseMessage(
+          parsed.billNo
+            ? "Extracted header info but no line items. Add lines manually."
+            : "Could not extract structured data. Enter details manually."
+        );
+      }
+    } catch {
+      setParseMessage("Failed to upload PDF. Please try again.");
+    } finally {
+      setParsing(false);
+      // Reset file input so re-uploading the same file triggers change
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, []);
+
   function updateBillLine(
     idx: number,
     field: string,
@@ -391,6 +495,7 @@ function SupplierBillsTab({
         setBillLines([
           { description: "", qty: "1", unitCost: "0", lineTotal: "0" },
         ]);
+        setParseMessage(null);
         setSheetOpen(false);
         router.refresh();
       }
@@ -427,9 +532,67 @@ function SupplierBillsTab({
               </SheetDescription>
             </SheetHeader>
             <form
+              data-bill-form
               onSubmit={handleImportBill}
               className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto"
             >
+              {/* ── PDF Upload Zone ── */}
+              <div
+                className={`relative border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                  dragOver
+                    ? "border-primary bg-primary/5"
+                    : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                }`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handlePdfUpload(file);
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handlePdfUpload(file);
+                  }}
+                />
+                {parsing ? (
+                  <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    Parsing PDF...
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="w-full flex flex-col items-center gap-1.5 py-1 cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="size-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      Drop a supplier bill PDF here, or click to browse
+                    </span>
+                  </button>
+                )}
+                {parseMessage && (
+                  <p className={`text-xs mt-2 ${
+                    parseMessage.startsWith("Parsed")
+                      ? "text-emerald-600"
+                      : "text-amber-600"
+                  }`}>
+                    {parseMessage}
+                  </p>
+                )}
+              </div>
+
               <div className="space-y-1.5">
                 <Label>Supplier *</Label>
                 <Select
