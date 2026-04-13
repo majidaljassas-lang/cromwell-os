@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, Image } from "lucide-react";
+import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, Image, ShoppingCart, Package, Hash } from "lucide-react";
 import { ReconciliationPanel } from "./reconciliation-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,104 @@ type BacklogCase = {
       customer: { id: string; name: string };
     }[];
   } | null;
+};
+
+// Order thread types
+type OrderInvoiceMatch = {
+  id: string;
+  matchConfidence: number | null;
+  matchMethod: string | null;
+  invoiceLine: {
+    id: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    productDescription: string;
+    normalizedProduct: string;
+    qty: number;
+    unit: string;
+    rate: number | null;
+    amount: number | null;
+    billingConfidence: string;
+    documentId: string | null;
+    document: {
+      id: string;
+      invoiceNumber: string | null;
+      invoiceDate: string | null;
+      totalAmount: number | null;
+      parseStatus: string;
+    } | null;
+  };
+};
+
+type OrderTicketLine = {
+  id: string;
+  caseId: string;
+  orderThreadId: string | null;
+  sourceMessageId: string | null;
+  date: string;
+  sender: string;
+  rawText: string;
+  normalizedProduct: string;
+  requestedQty: number;
+  requestedUnit: string;
+  notes: string | null;
+  status: string;
+  invoiceMatches: OrderInvoiceMatch[];
+};
+
+type OrderThread = {
+  id: string;
+  caseId: string;
+  label: string;
+  description: string | null;
+  messageIds: string[];
+  orderLines: OrderTicketLine[];
+};
+
+type OrderMessage = {
+  id: string;
+  sourceId: string;
+  parsedTimestamp: string;
+  sender: string;
+  rawText: string;
+  hasMedia: boolean;
+  mediaType: string | null;
+  messageType: string;
+  hasAttachment: boolean;
+};
+
+type OrderInvoiceDoc = {
+  id: string;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  totalAmount: number | null;
+  parseStatus: string;
+  lines: Array<{
+    id: string;
+    productDescription: string;
+    normalizedProduct: string;
+    qty: number;
+    unit: string;
+    rate: number | null;
+    amount: number | null;
+  }>;
+};
+
+type OrderStats = {
+  totalThreads: number;
+  totalLines: number;
+  invoicedCount: number;
+  unmatchedCount: number;
+  exceptionCount: number;
+  messageLinkedCount: number;
+  invoicedPct: number;
+};
+
+const ORDER_LINE_STATUS_COLORS: Record<string, string> = {
+  INVOICED: "text-[#00CC66] bg-[#00CC66]/10",
+  UNMATCHED: "text-[#FF3333] bg-[#FF3333]/10",
+  EXCEPTION: "text-[#FF9900] bg-[#FF9900]/10",
+  MESSAGE_LINKED: "text-[#888888] bg-[#333333]",
 };
 
 const MSG_TYPES = ["UNCLASSIFIED", "ORDER", "FOLLOW-UP", "DUPLICATE", "CONFIRMATION", "DELIVERY", "OTHER"];
@@ -658,6 +756,70 @@ export function BacklogCaseView({
     }
     setRunningMatch(false);
   }
+  // Orders tab state
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [orderThreads, setOrderThreads] = useState<OrderThread[]>([]);
+  const [orderMessages, setOrderMessages] = useState<Record<string, OrderMessage>>({});
+  const [orderSourceMap, setOrderSourceMap] = useState<Record<string, { label: string; sourceType: string }>>({});
+  const [orderInvoiceDocs, setOrderInvoiceDocs] = useState<Record<string, OrderInvoiceDoc>>({});
+  const [orderOrphanLines, setOrderOrphanLines] = useState<OrderTicketLine[]>([]);
+  const [orderStats, setOrderStats] = useState<OrderStats>({ totalThreads: 0, totalLines: 0, invoicedCount: 0, unmatchedCount: 0, exceptionCount: 0, messageLinkedCount: 0, invoicedPct: 0 });
+  const [expandedThreadIds, setExpandedThreadIds] = useState<Set<string>>(new Set());
+
+  async function loadOrderThreads() {
+    if (ordersLoaded) return;
+    setOrdersLoading(true);
+    try {
+      const res = await fetch(`/api/backlog/cases/${backlogCase.id}/orders`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrderThreads(data.threads);
+        setOrderMessages(data.messages);
+        setOrderSourceMap(data.sourceMap);
+        setOrderInvoiceDocs(data.invoiceDocs);
+        setOrderOrphanLines(data.orphanLines);
+        setOrderStats(data.stats);
+        setOrdersLoaded(true);
+      }
+    } catch (err) {
+      console.error("Failed to load order threads:", err);
+    }
+    setOrdersLoading(false);
+  }
+
+  function toggleThread(threadId: string) {
+    setExpandedThreadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+  }
+
+  function getThreadStatusSummary(thread: OrderThread) {
+    const lines = thread.orderLines;
+    const total = lines.length;
+    const invoiced = lines.filter((l) => l.status === "INVOICED").length;
+    const unmatched = lines.filter((l) => l.status === "UNMATCHED").length;
+    const exception = lines.filter((l) => l.status === "EXCEPTION").length;
+
+    if (exception > 0) return { text: `${total} lines — ${invoiced} invoiced, ${exception} exceptions`, color: "text-[#FF9900]", icon: "warn" };
+    if (unmatched > 0) return { text: `${total} lines — ${invoiced} invoiced, ${unmatched} gaps`, color: "text-[#FF9900]", icon: "warn" };
+    if (invoiced === total && total > 0) return { text: `${total} lines — ${invoiced} invoiced`, color: "text-[#00CC66]", icon: "ok" };
+    return { text: `${total} lines — ${invoiced} invoiced`, color: "text-[#888888]", icon: "none" };
+  }
+
+  function getThreadInvoiceNumbers(thread: OrderThread): string[] {
+    const nums = new Set<string>();
+    for (const line of thread.orderLines) {
+      for (const match of line.invoiceMatches) {
+        if (match.invoiceLine.invoiceNumber) nums.add(match.invoiceLine.invoiceNumber);
+      }
+    }
+    return [...nums];
+  }
+
   const [editingMsgText, setEditingMsgText] = useState("");
 
   async function saveMessageEdit() {
@@ -849,6 +1011,7 @@ export function BacklogCaseView({
         <TabsList>
           <TabsTrigger value="timeline">Timeline ({filtered.length})</TabsTrigger>
           <TabsTrigger value="sources">Sources ({allSources.length})</TabsTrigger>
+          <TabsTrigger value="orders" onClick={() => { if (!ordersLoaded) loadOrderThreads(); }}>Orders ({orderStats.totalThreads})</TabsTrigger>
           <TabsTrigger value="invoices" onClick={() => { if (invoiceDocs.length === 0) loadInvoiceDocs(); }}>Invoices ({invoiceDocs.length})</TabsTrigger>
           <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
         </TabsList>
@@ -1151,6 +1314,390 @@ export function BacklogCaseView({
               ))}
             </div>
           ))}
+        </TabsContent>
+
+        {/* ORDERS TAB */}
+        <TabsContent value="orders" className="mt-4 space-y-4">
+          {ordersLoading && (
+            <div className="flex items-center justify-center gap-2 text-[#888888] py-8">
+              <Loader2 className="size-4 animate-spin" /> Loading order threads...
+            </div>
+          )}
+
+          {!ordersLoading && ordersLoaded && (
+            <>
+              {/* Summary Stats */}
+              <div className="grid grid-cols-6 gap-3">
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><ShoppingCart className="size-4 text-[#FF6600]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">THREADS</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">{orderStats.totalThreads}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><Package className="size-4 text-[#3399FF]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">TOTAL LINES</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">{orderStats.totalLines}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><CheckCircle2 className="size-4 text-[#00CC66]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">INVOICED</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#00CC66] mt-1">{orderStats.invoicedCount}</div>
+                  <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.invoicedPct}% of total</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF3333]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">UNMATCHED</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#FF3333] mt-1">{orderStats.unmatchedCount}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF9900]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">EXCEPTIONS</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#FF9900] mt-1">{orderStats.exceptionCount}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><Hash className="size-4 text-[#888888]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">MSG LINKED</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#888888] mt-1">{orderStats.messageLinkedCount}</div>
+                </div>
+              </div>
+
+              {/* Thread Cards */}
+              {orderThreads.length === 0 && orderOrphanLines.length === 0 && (
+                <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+                  No order threads found for this case. Run order reconstruction first.
+                </div>
+              )}
+
+              {orderThreads.map((thread) => {
+                const isExpanded = expandedThreadIds.has(thread.id);
+                const statusSummary = getThreadStatusSummary(thread);
+                const invoiceNums = getThreadInvoiceNumbers(thread);
+
+                // Collect unique invoice documents for this thread
+                const threadDocIds = new Set<string>();
+                for (const line of thread.orderLines) {
+                  for (const match of line.invoiceMatches) {
+                    if (match.invoiceLine.documentId) threadDocIds.add(match.invoiceLine.documentId);
+                  }
+                }
+                const threadDocs = [...threadDocIds].map((id) => orderInvoiceDocs[id]).filter(Boolean);
+
+                return (
+                  <div key={thread.id} className="border border-[#333333] bg-[#1A1A1A]">
+                    {/* Thread Header */}
+                    <div
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#222222] transition-colors"
+                      onClick={() => toggleThread(thread.id)}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        {isExpanded ? <ChevronDown className="size-4 text-[#888888] shrink-0" /> : <ChevronRight className="size-4 text-[#888888] shrink-0" />}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-[#E0E0E0]">{thread.label}</span>
+                            <span className={`text-[10px] bb-mono ${statusSummary.color}`}>
+                              {statusSummary.text}
+                              {statusSummary.icon === "ok" && " \u2705"}
+                              {statusSummary.icon === "warn" && " \u26A0\uFE0F"}
+                            </span>
+                          </div>
+                          {thread.description && (
+                            <div className="text-[9px] text-[#666666] mt-0.5 truncate">{thread.description}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {invoiceNums.map((inv) => (
+                          <Badge key={inv} className="text-[8px] px-1.5 py-0.5 text-[#3399FF] bg-[#3399FF]/10">{inv}</Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Expanded Content */}
+                    {isExpanded && (
+                      <div className="border-t border-[#333333]">
+                        {/* Section A: Source Messages */}
+                        <div className="px-4 py-3 space-y-2 bg-[#151515]">
+                          <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold flex items-center gap-2">
+                            <MessageSquare className="size-3.5" /> SOURCE MESSAGES ({thread.messageIds.length})
+                          </div>
+                          {thread.messageIds.length === 0 ? (
+                            <div className="text-[9px] text-[#666666] italic">No linked messages</div>
+                          ) : (
+                            <div className="border border-[#2A2A2A] bg-[#1A1A1A]">
+                              {thread.messageIds
+                                .map((mid) => orderMessages[mid])
+                                .filter(Boolean)
+                                .sort((a, b) => new Date(a.parsedTimestamp).getTime() - new Date(b.parsedTimestamp).getTime())
+                                .map((msg) => {
+                                  const srcLabel = orderSourceMap[msg.sourceId]?.label || "";
+                                  // Color coding based on message type
+                                  const msgBgClass =
+                                    msg.messageType === "ORDER" ? "border-l-2 border-l-[#FF6600]" :
+                                    msg.messageType === "CONFIRMATION" ? "border-l-2 border-l-[#00CC66]" :
+                                    msg.messageType === "DELIVERY" ? "border-l-2 border-l-[#9966FF]" :
+                                    (msg.rawText.toLowerCase().includes("wrong") || msg.rawText.toLowerCase().includes("issue") || msg.rawText.toLowerCase().includes("problem") || msg.rawText.toLowerCase().includes("damaged"))
+                                      ? "border-l-2 border-l-[#FF3333]"
+                                      : "";
+
+                                  return (
+                                    <div key={msg.id} className={`px-3 py-2 border-b border-[#2A2A2A] last:border-b-0 ${msgBgClass}`}>
+                                      <div className="flex items-center gap-2 mb-0.5">
+                                        <span className="text-[9px] bb-mono text-[#666666]">
+                                          {new Date(msg.parsedTimestamp).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                        </span>
+                                        <span className="text-[10px] font-bold text-[#3399FF]">{msg.sender}</span>
+                                        <span className="text-[8px] text-[#555555]">{srcLabel}</span>
+                                        {msg.hasMedia && msg.mediaType?.startsWith("image") && (
+                                          <Badge className="text-[7px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">IMAGE</Badge>
+                                        )}
+                                        {msg.hasMedia && (msg.mediaType === "audio" || msg.mediaType?.startsWith("audio")) && (
+                                          <Badge className="text-[7px] px-1 py-0 text-[#AA66FF] bg-[#AA66FF]/10">VOICE</Badge>
+                                        )}
+                                        {msg.hasAttachment && !msg.hasMedia && (
+                                          <Paperclip className="size-2.5 text-[#FF9900]" />
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-[#E0E0E0] whitespace-pre-wrap">{msg.rawText}</div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Section B: Extracted Line Items */}
+                        <div className="px-4 py-3 space-y-2 border-t border-[#333333]">
+                          <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold flex items-center gap-2">
+                            <Package className="size-3.5" /> EXTRACTED LINE ITEMS ({thread.orderLines.length})
+                          </div>
+                          {thread.orderLines.length === 0 ? (
+                            <div className="text-[9px] text-[#666666] italic">No extracted line items</div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333]">
+                                    <th className="text-left px-2 py-1.5 w-8">#</th>
+                                    <th className="text-left px-2 py-1.5">Description</th>
+                                    <th className="text-left px-2 py-1.5 w-36">Product</th>
+                                    <th className="text-right px-2 py-1.5 w-14">Qty</th>
+                                    <th className="text-left px-2 py-1.5 w-12">Unit</th>
+                                    <th className="text-left px-2 py-1.5 w-24">Status</th>
+                                    <th className="text-left px-2 py-1.5 w-28">Invoice Ref</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {thread.orderLines.map((line, idx) => {
+                                    const isFromImage = line.sourceMessageId ? (() => {
+                                      const srcMsg = orderMessages[line.sourceMessageId];
+                                      return srcMsg?.hasMedia && srcMsg?.mediaType?.startsWith("image");
+                                    })() : false;
+                                    const invoiceRefs = line.invoiceMatches.map((m) => m.invoiceLine.invoiceNumber).filter(Boolean);
+
+                                    return (
+                                      <tr key={line.id} className="border-b border-[#2A2A2A] hover:bg-[#1E1E1E]">
+                                        <td className="px-2 py-1.5 text-[#666666] bb-mono">{idx + 1}</td>
+                                        <td className="px-2 py-1.5">
+                                          <div className="text-[#E0E0E0]">{line.rawText}</div>
+                                          {line.notes && <div className="text-[9px] text-[#888888] mt-0.5 italic">{line.notes}</div>}
+                                          {isFromImage && (
+                                            <Badge className="text-[7px] px-1 py-0 mt-0.5 text-[#FF9900] bg-[#FF9900]/10">[From image -- NEEDS REVIEW]</Badge>
+                                          )}
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          <Badge className={`text-[7px] px-1 py-0 ${
+                                            line.normalizedProduct !== "UNKNOWN" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF3333] bg-[#FF3333]/10"
+                                          }`}>
+                                            {line.normalizedProduct}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(line.requestedQty)}</td>
+                                        <td className="px-2 py-1.5 text-[#888888]">{line.requestedUnit}</td>
+                                        <td className="px-2 py-1.5">
+                                          <Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${ORDER_LINE_STATUS_COLORS[line.status] || "text-[#888888] bg-[#333333]"}`}>
+                                            {line.status}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          {invoiceRefs.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {[...new Set(invoiceRefs)].map((ref) => (
+                                                <Badge key={ref} className="text-[7px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">{ref}</Badge>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-[9px] text-[#555555]">--</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Section C: Invoice Match */}
+                        {threadDocs.length > 0 && (
+                          <div className="px-4 py-3 space-y-3 border-t border-[#333333] bg-[#151515]">
+                            <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold flex items-center gap-2">
+                              <FileText className="size-3.5" /> INVOICE MATCH
+                            </div>
+                            {threadDocs.map((doc) => {
+                              // Get the invoice lines that matched this thread's order lines
+                              const matchedInvoiceLineIds = new Set<string>();
+                              for (const orderLine of thread.orderLines) {
+                                for (const m of orderLine.invoiceMatches) {
+                                  if (m.invoiceLine.documentId === doc.id) {
+                                    matchedInvoiceLineIds.add(m.invoiceLine.id);
+                                  }
+                                }
+                              }
+
+                              return (
+                                <div key={doc.id} className="border border-[#333333] bg-[#1A1A1A] p-3 space-y-3">
+                                  {/* Invoice header */}
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                      <div>
+                                        <span className="text-[9px] text-[#888888] uppercase tracking-widest">Invoice #</span>
+                                        <div className="text-sm text-[#E0E0E0] font-bold">{doc.invoiceNumber || "--"}</div>
+                                      </div>
+                                      <div>
+                                        <span className="text-[9px] text-[#888888] uppercase tracking-widest">Date</span>
+                                        <div className="text-xs text-[#E0E0E0]">{doc.invoiceDate ? new Date(doc.invoiceDate).toLocaleDateString("en-GB") : "--"}</div>
+                                      </div>
+                                      <div>
+                                        <span className="text-[9px] text-[#888888] uppercase tracking-widest">Total</span>
+                                        <div className="text-xs text-[#E0E0E0] font-bold bb-mono">
+                                          {doc.totalAmount != null ? `\u00A3${Number(doc.totalAmount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "--"}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${
+                                      doc.parseStatus === "PARSED" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF9900] bg-[#FF9900]/10"
+                                    }`}>
+                                      {doc.parseStatus}
+                                    </Badge>
+                                  </div>
+
+                                  {/* Side by side: Order Lines vs Invoice Lines */}
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {/* Order Lines */}
+                                    <div>
+                                      <div className="text-[8px] uppercase tracking-widest text-[#888888] mb-1 font-bold">ORDER LINES</div>
+                                      <div className="border border-[#2A2A2A] bg-[#151515]">
+                                        {thread.orderLines
+                                          .filter((ol) => ol.invoiceMatches.some((m) => m.invoiceLine.documentId === doc.id))
+                                          .map((ol) => (
+                                            <div key={ol.id} className="px-2 py-1.5 border-b border-[#2A2A2A] last:border-b-0 text-[10px]">
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-[#E0E0E0] truncate">{ol.normalizedProduct}</span>
+                                                <span className="bb-mono text-[#E0E0E0] shrink-0 ml-2">{Number(ol.requestedQty)} {ol.requestedUnit}</span>
+                                              </div>
+                                              <Badge className={`text-[6px] mt-0.5 px-1 py-0 ${ORDER_LINE_STATUS_COLORS[ol.status] || "text-[#888888] bg-[#333333]"}`}>
+                                                {ol.status}
+                                              </Badge>
+                                            </div>
+                                          ))}
+                                        {thread.orderLines.filter((ol) => ol.invoiceMatches.some((m) => m.invoiceLine.documentId === doc.id)).length === 0 && (
+                                          <div className="px-2 py-2 text-[9px] text-[#555555] italic">No matched order lines</div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Invoice Lines */}
+                                    <div>
+                                      <div className="text-[8px] uppercase tracking-widest text-[#888888] mb-1 font-bold">INVOICE LINES</div>
+                                      <div className="border border-[#2A2A2A] bg-[#151515]">
+                                        {doc.lines.map((il) => {
+                                          const isMatched = matchedInvoiceLineIds.has(il.id);
+                                          return (
+                                            <div key={il.id} className={`px-2 py-1.5 border-b border-[#2A2A2A] last:border-b-0 text-[10px] ${isMatched ? "border-l-2 border-l-[#00CC66]" : "border-l-2 border-l-[#FF3333]"}`}>
+                                              <div className="flex items-center justify-between">
+                                                <span className={`truncate ${isMatched ? "text-[#E0E0E0]" : "text-[#FF3333]"}`}>{il.normalizedProduct || il.productDescription}</span>
+                                                <span className="bb-mono text-[#E0E0E0] shrink-0 ml-2">{Number(il.qty)} {il.unit}</span>
+                                              </div>
+                                              {il.amount != null && (
+                                                <span className="text-[9px] bb-mono text-[#888888]">{`\u00A3${Number(il.amount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`}</span>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                        {doc.lines.length === 0 && (
+                                          <div className="px-2 py-2 text-[9px] text-[#555555] italic">No invoice lines</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Orphan lines (not assigned to any thread) */}
+              {orderOrphanLines.length > 0 && (
+                <div className="border border-[#FF9900]/30 bg-[#1A1A1A]">
+                  <div className="px-4 py-3 flex items-center gap-2">
+                    <AlertCircle className="size-4 text-[#FF9900]" />
+                    <span className="text-sm font-bold text-[#FF9900]">Unassigned Lines ({orderOrphanLines.length})</span>
+                    <span className="text-[9px] text-[#888888]">These lines are not linked to any order thread</span>
+                  </div>
+                  <div className="border-t border-[#333333] px-4 py-3">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333]">
+                            <th className="text-left px-2 py-1.5 w-8">#</th>
+                            <th className="text-left px-2 py-1.5">Description</th>
+                            <th className="text-left px-2 py-1.5 w-36">Product</th>
+                            <th className="text-right px-2 py-1.5 w-14">Qty</th>
+                            <th className="text-left px-2 py-1.5 w-12">Unit</th>
+                            <th className="text-left px-2 py-1.5 w-24">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orderOrphanLines.map((line, idx) => (
+                            <tr key={line.id} className="border-b border-[#2A2A2A] hover:bg-[#1E1E1E]">
+                              <td className="px-2 py-1.5 text-[#666666] bb-mono">{idx + 1}</td>
+                              <td className="px-2 py-1.5">
+                                <div className="text-[#E0E0E0]">{line.rawText}</div>
+                                {line.notes && <div className="text-[9px] text-[#888888] mt-0.5 italic">{line.notes}</div>}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <Badge className={`text-[7px] px-1 py-0 ${
+                                  line.normalizedProduct !== "UNKNOWN" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF3333] bg-[#FF3333]/10"
+                                }`}>
+                                  {line.normalizedProduct}
+                                </Badge>
+                              </td>
+                              <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(line.requestedQty)}</td>
+                              <td className="px-2 py-1.5 text-[#888888]">{line.requestedUnit}</td>
+                              <td className="px-2 py-1.5">
+                                <Badge className={`text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 ${ORDER_LINE_STATUS_COLORS[line.status] || "text-[#888888] bg-[#333333]"}`}>
+                                  {line.status}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {!ordersLoading && !ordersLoaded && (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center space-y-3">
+              <ShoppingCart className="size-8 text-[#FF6600] mx-auto" />
+              <div className="text-sm text-[#E0E0E0]">Order Threads</div>
+              <div className="text-[9px] text-[#666666]">Click to load reconstructed order threads with line items and invoice reconciliation.</div>
+              <Button onClick={loadOrderThreads} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">Load Orders</Button>
+            </div>
+          )}
         </TabsContent>
 
         {/* INVOICES TAB */}
