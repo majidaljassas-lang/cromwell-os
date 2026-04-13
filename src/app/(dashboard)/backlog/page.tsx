@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 export default async function BacklogPage() {
   const cases = await prisma.backlogCase.findMany({
     include: {
+      customer: { select: { id: true, name: true } },
+      site: { select: { id: true, siteName: true } },
       sourceGroups: {
         include: {
           sources: { select: { id: true, messageCount: true, label: true, sourceType: true, dateFrom: true, dateTo: true } },
@@ -15,6 +17,9 @@ export default async function BacklogPage() {
     orderBy: { createdAt: "desc" },
   });
 
+  const customers = await prisma.customer.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+  const sites = await prisma.site.findMany({ where: { isActive: true }, orderBy: { siteName: "asc" }, select: { id: true, siteName: true } });
+
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
@@ -22,7 +27,7 @@ export default async function BacklogPage() {
       <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">
         BACKLOG RECONSTRUCTION
       </h1>
-      <BacklogCaseList cases={s(cases)} />
+      <BacklogCaseList cases={s(cases)} customers={s(customers)} sites={s(sites)} />
     </div>
   );
 }

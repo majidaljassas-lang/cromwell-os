@@ -149,6 +149,7 @@ model Customer {
   ticketsAsPayer         Ticket[]             @relation("PayingCustomer")
   ticketLinesAsPayer     TicketLine[]         @relation("TicketLinePayingCustomer")
   salesCreditNotes       SalesCreditNote[]
+  backlogCases           BacklogCase[]
 
   @@index([name])
 }
@@ -1549,6 +1550,7 @@ model BacklogCase {
   id           String               @id @default(uuid())
   name         String
   description  String?
+  customerId   String?
   siteId       String?
   siteRef      String?
   status       String               @default("ACTIVE")
@@ -1556,10 +1558,12 @@ model BacklogCase {
   dateTo       DateTime?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
+  customer     Customer?            @relation(fields: [customerId], references: [id])
   site         Site?                @relation(fields: [siteId], references: [id])
   sourceGroups BacklogSourceGroup[]
 
   @@index([name])
+  @@index([customerId])
 }
 
 model BacklogSourceGroup {

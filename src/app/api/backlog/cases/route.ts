@@ -21,11 +21,19 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, description, siteRef, dateFrom, dateTo } = body;
+    const { name, description, siteRef, customerId, siteId, dateFrom, dateTo } = body;
     if (!name) return Response.json({ error: "name required" }, { status: 400 });
 
     const c = await prisma.backlogCase.create({
-      data: { name, description, siteRef, dateFrom: dateFrom ? new Date(dateFrom) : undefined, dateTo: dateTo ? new Date(dateTo) : undefined },
+      data: {
+        name,
+        description,
+        siteRef,
+        customerId: customerId || undefined,
+        siteId: siteId || undefined,
+        dateFrom: dateFrom ? new Date(dateFrom) : undefined,
+        dateTo: dateTo ? new Date(dateTo) : undefined,
+      },
     });
     return Response.json(c, { status: 201 });
   } catch (error) {
