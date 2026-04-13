@@ -1519,6 +1519,7 @@ model ExtractedLineCandidate {
   extractedProduct   String?
   extractedSize      String?
   extractedSpec      String?
+  extractedUnitCost  Decimal?        @db.Decimal(14, 4)
   suggestedLineType  String?
   confidence         Decimal?        @db.Decimal(5, 2)
   status             String          @default("PENDING")

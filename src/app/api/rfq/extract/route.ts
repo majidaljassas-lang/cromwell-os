@@ -33,6 +33,7 @@ export async function POST(request: Request) {
             extractedProduct: c.product,
             extractedSize: c.size,
             extractedSpec: c.spec,
+            extractedUnitCost: c.unitCost,
             suggestedLineType: c.lineType,
             confidence: c.confidence,
             status: "PENDING",

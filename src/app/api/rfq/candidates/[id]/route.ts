@@ -9,7 +9,7 @@ export async function PATCH(
   try {
     const body = await request.json();
     const allowed: Record<string, unknown> = {};
-    for (const f of ["extractedQty", "extractedUnit", "extractedProduct", "extractedSize", "extractedSpec", "suggestedLineType", "status", "groupLabel", "mergedIntoId"]) {
+    for (const f of ["extractedQty", "extractedUnit", "extractedProduct", "extractedSize", "extractedSpec", "extractedUnitCost", "suggestedLineType", "status", "groupLabel", "mergedIntoId"]) {
       if (body[f] !== undefined) allowed[f] = body[f];
     }
     const updated = await prisma.extractedLineCandidate.update({ where: { id }, data: allowed });

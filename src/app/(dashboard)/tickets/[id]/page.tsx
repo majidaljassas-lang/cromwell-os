@@ -91,7 +91,14 @@ export default async function TicketDetailPage({
   });
   const salesInvoices = await prisma.salesInvoice.findMany({
     where: { ticketId: id },
-    include: { lines: true, customer: true, poAllocations: true },
+    include: {
+      lines: {
+        include: { ticketLine: { select: { createdAt: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+      customer: true,
+      poAllocations: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 

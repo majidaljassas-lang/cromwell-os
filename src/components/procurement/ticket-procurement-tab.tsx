@@ -206,7 +206,7 @@ export function TicketProcurementTab({
   const needsPurchase = ticketLines.filter(
     (l) => !poLineIds.has(l.id) && l.status !== "ORDERED" && l.status !== "FROM_STOCK" && l.status !== "INVOICED" && l.status !== "CLOSED"
   );
-  const showChecklist = needsPurchase.length > 0 && ["APPROVED", "QUOTED", "ORDERED"].includes(ticketStatus);
+  const showChecklist = needsPurchase.length > 0 && !["CLOSED", "CANCELLED"].includes(ticketStatus);
 
   // Auto-detect stock matches for lines needing purchase
   function normalizeDesc(s: string): string {
