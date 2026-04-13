@@ -9,9 +9,14 @@
  * - DELIVERY_UPDATE → link to ticket, log delivery event
  * - DISPUTE → link to ticket, create task
  * - PAYMENT → log payment received
+ * - BILL_DOCUMENT → extract PDF text, parse bill, match supplier, create SupplierBill + AP journal
  */
 
 import { prisma } from "@/lib/prisma";
+import { parseBillText } from "@/lib/ingestion/bill-parser";
+import { processBill } from "@/lib/finance/bill-processor";
+import fs from "fs";
+import path from "path";
 
 interface ActionResult {
   eventId: string;
@@ -55,6 +60,9 @@ export async function processClassifiedEvents(): Promise<ActionResult[]> {
           break;
         case "DISPUTE":
           results.push(await handleDispute(event.id, subject, text, fromEmail, fromName));
+          break;
+        case "BILL_DOCUMENT":
+          results.push(await handleBillDocument(event.id, subject, text, fromEmail, fromName, data));
           break;
         case "OUTLOOK_SENT":
           // Sent emails — just link to ticket if possible, no action needed
@@ -349,6 +357,271 @@ async function handleSentEmail(eventId: string, subject: string, text: string, f
     action: "SENT_EMAIL",
     success: true,
     details: `ticket: ${ticketId ? "linked" : "dismissed"}`,
+  };
+}
+
+// ─── Supplier Matching ─────────────────────────────────────────────────────
+
+/**
+ * Match an email sender to a known supplier.
+ *
+ * Checks email domain, fromName, and subject against the Supplier table.
+ * Also handles known aliases (e.g. verdis/fwhipkin → F W Hipkin).
+ *
+ * Returns { supplierId, supplierName } or null if no match found.
+ */
+async function matchSupplierFromEmail(
+  fromEmail: string,
+  fromName: string,
+  subject: string
+): Promise<{ supplierId: string; supplierName: string } | null> {
+  const domain = (fromEmail.split("@")[1] || "").toLowerCase();
+  const domainBase = domain.replace(/\.(co\.uk|com|org|net|ltd|uk)$/g, "").replace(/\./g, " ");
+  const combined = `${fromName} ${subject} ${domainBase}`.toLowerCase();
+
+  // Known alias mappings — domain fragments → canonical supplier name fragments
+  const ALIASES: Record<string, string[]> = {
+    "f w hipkin": ["verdis", "fwhipkin", "hipkin"],
+    "wolseley": ["wolseley", "plumb center", "plumbcenter"],
+    "city plumbing": ["cityplumbing", "city plumbing"],
+    "graham": ["?"/* placeholder — add real patterns as discovered */],
+  };
+
+  const suppliers = await prisma.supplier.findMany({ select: { id: true, name: true, email: true } });
+
+  // Strategy 1: Direct match on supplier email domain
+  if (domain) {
+    for (const s of suppliers) {
+      if (s.email && s.email.toLowerCase().includes(domain)) {
+        return { supplierId: s.id, supplierName: s.name };
+      }
+    }
+  }
+
+  // Strategy 2: Supplier name words appear in domain/fromName/subject
+  for (const s of suppliers) {
+    const nameWords = s.name.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const matchCount = nameWords.filter(
+      (w) => combined.includes(w) || domainBase.includes(w)
+    ).length;
+    // Need at least 2 word hits, or 1 hit if the supplier name is a single word
+    if (matchCount >= 2 || (matchCount >= 1 && nameWords.length <= 2)) {
+      return { supplierId: s.id, supplierName: s.name };
+    }
+  }
+
+  // Strategy 3: Known aliases
+  for (const [canonicalFragment, aliases] of Object.entries(ALIASES)) {
+    const aliasHit = aliases.some(
+      (a) => combined.includes(a) || domainBase.includes(a)
+    );
+    if (aliasHit) {
+      const supplier = suppliers.find((s) =>
+        s.name.toLowerCase().includes(canonicalFragment)
+      );
+      if (supplier) {
+        return { supplierId: supplier.id, supplierName: supplier.name };
+      }
+    }
+  }
+
+  // Strategy 4: Domain base directly matches a supplier name (fuzzy)
+  if (domainBase.length >= 3) {
+    for (const s of suppliers) {
+      const lowerName = s.name.toLowerCase();
+      if (lowerName.includes(domainBase) || domainBase.includes(lowerName.split(" ")[0])) {
+        return { supplierId: s.id, supplierName: s.name };
+      }
+    }
+  }
+
+  return null;
+}
+
+// ─── Bill Document Handler ─────────────────────────────────────────────────
+
+async function handleBillDocument(
+  eventId: string,
+  subject: string,
+  text: string,
+  fromEmail: string,
+  fromName: string,
+  structuredData: Record<string, any>
+): Promise<ActionResult> {
+  // The extractedText from ParsedMessage already contains PDF text (appended
+  // by processEmailAttachments during Outlook sync or backfill). The text
+  // variable passed in is that extractedText. We also check for on-disk
+  // PDF files saved under public/email-attachments/.
+
+  let pdfText = "";
+
+  // Option A: The extractedText already includes attachment text markers
+  // (the Outlook sync appends "--- filename.pdf ---\n<text>" blocks).
+  const attachmentMarker = text.indexOf("--- ");
+  if (attachmentMarker !== -1) {
+    pdfText = text.substring(attachmentMarker);
+  }
+
+  // Option B: If no embedded PDF text, try reading from disk.
+  // The backfill route saves files as <eventId-prefix>_<filename>.pdf
+  // under public/email-attachments/.
+  if (!pdfText) {
+    const attachDir = path.join(process.cwd(), "public", "email-attachments");
+    const eventPrefix = eventId.slice(0, 8);
+    try {
+      if (fs.existsSync(attachDir)) {
+        const files = fs.readdirSync(attachDir);
+        const pdfs = files.filter(
+          (f) => f.startsWith(eventPrefix) && f.toLowerCase().endsWith(".pdf")
+        );
+        for (const pdfFile of pdfs) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const pdfParse = require("pdf-parse/lib/pdf-parse");
+            const buffer = fs.readFileSync(path.join(attachDir, pdfFile));
+            const parsed = await pdfParse(buffer);
+            pdfText += `\n--- ${pdfFile} ---\n${parsed.text || ""}`;
+          } catch (pdfErr) {
+            console.warn(`[auto-action] PDF parse failed for ${pdfFile}:`, pdfErr);
+          }
+        }
+      }
+    } catch {
+      // Disk read failed — continue with what we have
+    }
+  }
+
+  // If we still have no PDF text, fall back to the full extractedText body
+  // (the classifier saw bill keywords in the body itself).
+  const billText = pdfText || text;
+
+  if (!billText.trim()) {
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: { status: "NEEDS_REVIEW", errorMessage: "BILL_DOCUMENT classified but no text extractable" },
+    });
+    return {
+      eventId,
+      action: "BILL_DOCUMENT",
+      success: false,
+      details: "No extractable text found for bill",
+    };
+  }
+
+  // Parse the bill text
+  const parsed = parseBillText(billText);
+
+  if (parsed.lines.length === 0 && !parsed.billNo) {
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: { status: "NEEDS_REVIEW", errorMessage: "Bill text parsed but no lines or bill number found" },
+    });
+    return {
+      eventId,
+      action: "BILL_DOCUMENT",
+      success: false,
+      details: "Bill parser returned no lines and no bill number",
+    };
+  }
+
+  // Match supplier from email
+  const supplierMatch = await matchSupplierFromEmail(fromEmail, fromName, subject);
+
+  if (!supplierMatch) {
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: {
+        status: "NEEDS_REVIEW",
+        errorMessage: `No supplier match for ${fromName} <${fromEmail}>. Bill: ${parsed.billNo || "unknown"}`,
+      },
+    });
+    return {
+      eventId,
+      action: "BILL_DOCUMENT",
+      success: false,
+      details: `No supplier match for ${fromEmail}. Parsed billNo: ${parsed.billNo || "unknown"}, ${parsed.lines.length} lines`,
+    };
+  }
+
+  // Idempotency — check if bill already exists for this supplier + billNo
+  const billNo = parsed.billNo || `AUTO-${eventId.slice(0, 8)}`;
+  const existingBill = await prisma.supplierBill.findFirst({
+    where: { supplierId: supplierMatch.supplierId, billNo },
+  });
+
+  if (existingBill) {
+    // Already processed — just mark as actioned
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: { status: "ACTIONED" },
+    });
+    return {
+      eventId,
+      action: "BILL_DOCUMENT",
+      success: true,
+      details: `Bill ${billNo} already exists (${existingBill.id}) for ${supplierMatch.supplierName} — skipped duplicate`,
+    };
+  }
+
+  // Create the SupplierBill + lines
+  const totalCost = parsed.grandTotal ?? parsed.lines.reduce((sum, l) => sum + l.lineTotal, 0);
+  const billDate = parsed.billDate ? new Date(parsed.billDate) : new Date();
+
+  const bill = await prisma.$transaction(async (tx) => {
+    const created = await tx.supplierBill.create({
+      data: {
+        supplierId: supplierMatch.supplierId,
+        billNo,
+        billDate,
+        status: "PENDING",
+        totalCost,
+        sourceAttachmentRef: `ingestion:${eventId}`,
+      },
+    });
+
+    if (parsed.lines.length > 0) {
+      await tx.supplierBillLine.createMany({
+        data: parsed.lines.map((line) => ({
+          supplierBillId: created.id,
+          description: line.description,
+          productCode: line.productCode,
+          qty: line.qty,
+          unitCost: line.unitCost,
+          lineTotal: line.lineTotal,
+          vatAmount: line.vatAmount,
+          costClassification: "BILLABLE" as const,
+          allocationStatus: "UNALLOCATED" as const,
+        })),
+      });
+    }
+
+    return created;
+  });
+
+  // Run the bill processor (AP journal + auto-match to ticket lines)
+  let processingDetails = "";
+  try {
+    const result = await processBill(bill.id);
+    processingDetails = `journal: ${result.journalEntryId ? "created" : "skipped"}, matched: ${result.matchSummary.matched}/${result.matchSummary.totalLines} lines`;
+    if (result.errors.length > 0) {
+      processingDetails += `, warnings: ${result.errors.join("; ")}`;
+    }
+  } catch (procErr) {
+    processingDetails = `processBill error: ${procErr instanceof Error ? procErr.message : "unknown"}`;
+    console.error(`[auto-action] processBill failed for ${bill.id}:`, procErr);
+  }
+
+  // Mark event as actioned
+  await prisma.ingestionEvent.update({
+    where: { id: eventId },
+    data: { status: "ACTIONED" },
+  });
+
+  return {
+    eventId,
+    action: "BILL_DOCUMENT",
+    success: true,
+    details: `Bill ${billNo} created (${bill.id}) for ${supplierMatch.supplierName}. ${parsed.lines.length} lines, total £${totalCost.toFixed(2)}. ${processingDetails}`,
   };
 }
 

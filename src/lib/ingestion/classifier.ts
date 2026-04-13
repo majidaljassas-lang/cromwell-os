@@ -55,6 +55,14 @@ const PO_KEYWORDS = [
   "purchase order", "po number", "po no", "po ref", "po:", "p.o.",
 ];
 
+const BILL_KEYWORDS = [
+  "invoice attached", "please find attached invoice", "invoice number",
+  "invoice no", "inv no", "amount due", "payment terms", "net total",
+  "total inc vat", "total incl vat", "grand total", "balance due",
+  "remittance advice", "statement of account", "tax invoice",
+  "vat invoice", "proforma invoice",
+];
+
 const ABSORBED_KEYWORDS = [
   "courier", "dhl", "delivery charge", "carriage", "fuel",
   "rush", "express", "same day", "next day delivery",
@@ -75,6 +83,10 @@ export function classifyMessage(text: string): {
     classification = "PO_DOCUMENT";
     confidence = 80;
     reasons.push("Contains PO reference keywords");
+  } else if (matchesKeywords(lower, BILL_KEYWORDS)) {
+    classification = "BILL_DOCUMENT";
+    confidence = 80;
+    reasons.push("Contains supplier bill/invoice keywords");
   } else if (matchesKeywords(lower, APPROVAL_KEYWORDS)) {
     classification = "APPROVAL";
     confidence = 75;

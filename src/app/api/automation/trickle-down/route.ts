@@ -19,6 +19,7 @@ const BASE =
 type StepKey =
   | "backfillAttachments"
   | "ackMatcher"
+  | "processBills"
   | "monitorThreads"
   | "aiShadow"
   | "autoProgress"
@@ -101,6 +102,13 @@ export async function POST() {
     "ackMatcher",
     "/api/automation/ack-matcher"
   );
+  // processBills runs after ackMatcher so attachment text is available.
+  // It picks up CLASSIFIED BILL_DOCUMENT events, parses the PDF text,
+  // matches the supplier, creates SupplierBill + AP journal + line matching.
+  const processBills = await runStep(
+    "processBills",
+    "/api/automation/process-bills"
+  );
   // monitorThreads runs next so any newly-extracted lines feed into the rest
   // of the chain (auto-progress, evidence, tasks).
   const monitorThreads = await runStep(
@@ -130,7 +138,7 @@ export async function POST() {
     "/api/automation/match-bills"
   );
 
-  const steps = [backfillAttachments, ackMatcher, monitorThreads, aiShadow, autoProgress, buildEvidence, generateTasks, matchBills];
+  const steps = [backfillAttachments, ackMatcher, processBills, monitorThreads, aiShadow, autoProgress, buildEvidence, generateTasks, matchBills];
   const allOk = steps.every((s) => s.ok);
 
   return Response.json(
@@ -142,6 +150,7 @@ export async function POST() {
       summary: {
         backfillAttachments: backfillAttachments.result,
         ackMatcher: ackMatcher.result,
+        processBills: processBills.result,
         monitorThreads: monitorThreads.result,
         aiShadow: aiShadow.result,
         autoProgress: autoProgress.result,
