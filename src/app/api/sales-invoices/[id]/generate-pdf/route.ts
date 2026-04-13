@@ -32,8 +32,12 @@ function buildHtml(invoice: {
   const invoiceDate = invoice.issuedAt ? new Date(invoice.issuedAt) : new Date();
   const dateStr = invoiceDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   const dueDate = new Date(invoiceDate);
-  dueDate.setDate(dueDate.getDate() + 30);
-  const dueDateStr = dueDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  if (invoice.invoiceType !== "PROFORMA") {
+    dueDate.setDate(dueDate.getDate() + 30);
+  }
+  const dueDateStr = invoice.invoiceType === "PROFORMA"
+    ? "On Receipt"
+    : dueDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   const title = invoice.invoiceType === "PROFORMA" ? "Proforma Invoice" : "Invoice";
 
@@ -104,7 +108,7 @@ function buildHtml(invoice: {
   <div style="text-align:right;font-size:11px;line-height:1.8">
     <div><span style="color:#888">Date:</span> ${dateStr}</div>
     <div><span style="color:#888">Due:</span> ${dueDateStr}</div>
-    <div><span style="color:#888">Terms:</span> Net 30</div>
+    <div><span style="color:#888">Terms:</span> ${invoice.invoiceType === "PROFORMA" ? "Pro-Forma" : "Net 30"}</div>
     ${invoice.poNo ? `<div><span style="color:#888">PO:</span> <strong>${invoice.poNo}</strong></div>` : ""}
     ${invoice.site ? `<div><span style="color:#888">Site:</span> ${invoice.site.siteName}</div>` : ""}
   </div>

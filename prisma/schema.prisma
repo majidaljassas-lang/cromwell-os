@@ -148,6 +148,7 @@ model Customer {
   supplierBillLines      SupplierBillLine[]
   ticketsAsPayer         Ticket[]             @relation("PayingCustomer")
   ticketLinesAsPayer     TicketLine[]         @relation("TicketLinePayingCustomer")
+  salesCreditNotes       SalesCreditNote[]
 
   @@index([name])
 }
@@ -546,6 +547,11 @@ model TicketLine {
   tasks                 Task[]
   payingCustomer        Customer                 @relation("TicketLinePayingCustomer", fields: [payingCustomerId], references: [id])
   requestedByContact    Contact?                 @relation("TicketLineRequestedBy", fields: [requestedByContactId], references: [id])
+  parentLineId          String?
+  parentLine            TicketLine?              @relation("BOMComponents", fields: [parentLineId], references: [id])
+  components            TicketLine[]             @relation("BOMComponents")
+  isBomParent           Boolean                  @default(false)
+
   siteCommercialLink    SiteCommercialLink?      @relation(fields: [siteCommercialLinkId], references: [id])
   site                  Site?                    @relation(fields: [siteId], references: [id])
   supplier              Supplier?                @relation("TicketLineSupplier", fields: [supplierId], references: [id])
@@ -555,6 +561,7 @@ model TicketLine {
   @@index([ticketId])
   @@index([status])
   @@index([payingCustomerId])
+  @@index([parentLineId])
 }
 
 model SalesBundle {
@@ -716,6 +723,7 @@ model Supplier {
   supplierBills     SupplierBill[]
   options           SupplierOption[]
   ticketLines       TicketLine[]       @relation("TicketLineSupplier")
+  paymentsMade      PaymentMade[]
 
   @@index([name])
 }
@@ -782,9 +790,10 @@ model SupplierBill {
   sourceAttachmentRef String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
-  ingestionLinks      IngestionLink[]
-  supplier            Supplier           @relation(fields: [supplierId], references: [id])
-  lines               SupplierBillLine[]
+  ingestionLinks         IngestionLink[]
+  supplier               Supplier           @relation(fields: [supplierId], references: [id])
+  lines                  SupplierBillLine[]
+  paymentAllocations     PaymentMadeAllocation[]
 
   @@index([billNo])
 }
@@ -1073,6 +1082,7 @@ model SalesInvoice {
   ticket               Ticket                 @relation(fields: [ticketId], references: [id])
   lines                SalesInvoiceLine[]
   sitePackItems        SitePackItem[]
+  salesCreditNotes     SalesCreditNote[]
 
   @@index([invoiceNo])
   @@index([status])
@@ -2619,4 +2629,209 @@ enum InboundEventType {
   MEDIA_DOCUMENT
   PHONE_CALL
   MANUAL_NOTE
+}
+
+// ─── Financial Architecture ──────────────────────────────────────────────────
+
+model ChartOfAccount {
+  id              String           @id @default(uuid())
+  accountCode     String           @unique
+  accountName     String
+  accountType     String           // ASSET, LIABILITY, EQUITY, INCOME, EXPENSE
+  accountSubType  String?          // BANK, CURRENT_ASSET, FIXED_ASSET, CURRENT_LIABILITY, EQUITY, REVENUE, COST_OF_GOODS_SOLD, OPERATING_EXPENSE
+  parentId        String?
+  description     String?
+  isSystemAccount Boolean          @default(false)
+  isActive        Boolean          @default(true)
+  openingBalance  Decimal          @default(0) @db.Decimal(14, 2)
+  currentBalance  Decimal          @default(0) @db.Decimal(14, 2)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  parent          ChartOfAccount?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children        ChartOfAccount[] @relation("AccountHierarchy")
+  journalLines    JournalLine[]
+  bankAccount     BankAccount?
+
+  @@index([accountType])
+  @@index([accountCode])
+}
+
+model TaxRate {
+  id              String   @id @default(uuid())
+  name            String
+  rate            Decimal  @db.Decimal(5, 2)
+  taxType         String   // OUTPUT, INPUT, NONE
+  isDefault       Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  hmrcBoxNumber   Int?
+  createdAt       DateTime @default(now())
+
+  @@index([taxType])
+}
+
+model JournalEntry {
+  id              String        @id @default(uuid())
+  entryDate       DateTime
+  reference       String?
+  description     String
+  sourceType      String        // SALES_INVOICE, SUPPLIER_BILL, PAYMENT_RECEIVED, PAYMENT_MADE, BANK_TRANSFER, MANUAL_JOURNAL, OPENING_BALANCE, VAT_PAYMENT, SALES_CREDIT_NOTE, SUPPLIER_CREDIT_NOTE
+  sourceId        String?
+  isAdjustment    Boolean       @default(false)
+  isReversed      Boolean       @default(false)
+  reversedById    String?
+  status          String        @default("POSTED") // DRAFT, POSTED, REVERSED
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  lines           JournalLine[]
+
+  @@index([sourceType, sourceId])
+  @@index([entryDate])
+  @@index([reference])
+}
+
+model JournalLine {
+  id              String         @id @default(uuid())
+  journalEntryId  String
+  accountId       String
+  description     String?
+  debit           Decimal        @default(0) @db.Decimal(14, 2)
+  credit          Decimal        @default(0) @db.Decimal(14, 2)
+  journalEntry    JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account         ChartOfAccount @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model BankAccount {
+  id              String            @id @default(uuid())
+  accountId       String            @unique
+  bankName        String
+  accountName     String
+  accountNumber   String
+  sortCode        String
+  currency        String            @default("GBP")
+  currentBalance  Decimal           @default(0) @db.Decimal(14, 2)
+  isDefault       Boolean           @default(false)
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  account         ChartOfAccount    @relation(fields: [accountId], references: [id])
+  transactions    BankTransaction[]
+
+  @@index([accountNumber])
+}
+
+model BankTransaction {
+  id                    String   @id @default(uuid())
+  bankAccountId         String
+  transactionDate       DateTime
+  amount                Decimal  @db.Decimal(14, 2)
+  transactionType       String   // DEPOSIT, WITHDRAWAL, TRANSFER, BANK_CHARGE, INTEREST
+  description           String
+  reference             String?
+  fitId                 String?
+  runningBalance        Decimal? @db.Decimal(14, 2)
+  reconciliationStatus  String   @default("UNRECONCILED") // UNRECONCILED, MATCHED, RECONCILED, EXCLUDED
+  matchedPaymentId      String?
+  matchedJournalId      String?
+  notes                 String?
+  importedAt            DateTime?
+  reconciledAt          DateTime?
+  createdAt             DateTime @default(now())
+  bankAccount           BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  @@unique([bankAccountId, fitId])
+  @@index([transactionDate])
+  @@index([reconciliationStatus])
+  @@index([bankAccountId])
+}
+
+model PaymentMade {
+  id              String       @id @default(uuid())
+  supplierId      String
+  bankAccountId   String?
+  paymentDate     DateTime
+  amount          Decimal      @db.Decimal(14, 2)
+  paymentMethod   String?
+  reference       String?
+  notes           String?
+  journalEntryId  String?      @unique
+  createdAt       DateTime     @default(now())
+  supplier        Supplier     @relation(fields: [supplierId], references: [id])
+  allocations     PaymentMadeAllocation[]
+
+  @@index([supplierId])
+  @@index([paymentDate])
+}
+
+model PaymentMadeAllocation {
+  id              String       @id @default(uuid())
+  paymentMadeId   String
+  supplierBillId  String
+  amount          Decimal      @db.Decimal(14, 2)
+  paymentMade     PaymentMade  @relation(fields: [paymentMadeId], references: [id], onDelete: Cascade)
+  supplierBill    SupplierBill @relation(fields: [supplierBillId], references: [id])
+
+  @@index([paymentMadeId])
+  @@index([supplierBillId])
+}
+
+model SalesCreditNote {
+  id              String                @id @default(uuid())
+  creditNoteNo    String?
+  customerId      String
+  salesInvoiceId  String?
+  issueDate       DateTime
+  reason          String?
+  subtotal        Decimal               @db.Decimal(14, 2)
+  vatAmount       Decimal               @db.Decimal(14, 2)
+  total           Decimal               @db.Decimal(14, 2)
+  status          String                @default("DRAFT")
+  journalEntryId  String?               @unique
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  customer        Customer              @relation(fields: [customerId], references: [id])
+  salesInvoice    SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
+  lines           SalesCreditNoteLine[]
+
+  @@index([creditNoteNo])
+  @@index([customerId])
+}
+
+model SalesCreditNoteLine {
+  id                String          @id @default(uuid())
+  salesCreditNoteId String
+  description       String
+  qty               Decimal         @db.Decimal(14, 4)
+  unitPrice         Decimal         @db.Decimal(14, 4)
+  lineTotal         Decimal         @db.Decimal(14, 2)
+  vatAmount         Decimal?        @db.Decimal(14, 2)
+  salesCreditNote   SalesCreditNote @relation(fields: [salesCreditNoteId], references: [id], onDelete: Cascade)
+
+  @@index([salesCreditNoteId])
+}
+
+model VATReturn {
+  id              String   @id @default(uuid())
+  periodStart     DateTime
+  periodEnd       DateTime
+  status          String   @default("DRAFT") // DRAFT, CALCULATED, SUBMITTED, ACCEPTED
+  box1            Decimal  @default(0) @db.Decimal(14, 2)
+  box2            Decimal  @default(0) @db.Decimal(14, 2)
+  box3            Decimal  @default(0) @db.Decimal(14, 2)
+  box4            Decimal  @default(0) @db.Decimal(14, 2)
+  box5            Decimal  @default(0) @db.Decimal(14, 2)
+  box6            Decimal  @default(0) @db.Decimal(14, 2)
+  box7            Decimal  @default(0) @db.Decimal(14, 2)
+  box8            Decimal  @default(0) @db.Decimal(14, 2)
+  box9            Decimal  @default(0) @db.Decimal(14, 2)
+  submittedAt     DateTime?
+  hmrcRef         String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([periodStart, periodEnd])
+  @@index([status])
 }

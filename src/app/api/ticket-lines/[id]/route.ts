@@ -156,7 +156,15 @@ export async function DELETE(
     }
 
     // Clean up soft dependencies before deleting
+    // Also clean up BOM component lines if this is a BOM parent
     await prisma.$transaction([
+      // Clean up dependencies on component lines (if BOM parent)
+      prisma.costAllocation.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
+      prisma.stockUsage.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
+      prisma.quoteLine.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
+      prisma.procurementOrderLine.updateMany({ where: { ticketLine: { parentLineId: id } }, data: { ticketLineId: null } }),
+      prisma.ticketLine.deleteMany({ where: { parentLineId: id } }),
+      // Clean up dependencies on the parent line itself
       prisma.costAllocation.deleteMany({ where: { ticketLineId: id } }),
       prisma.stockUsage.deleteMany({ where: { ticketLineId: id } }),
       prisma.quoteLine.deleteMany({ where: { ticketLineId: id } }),

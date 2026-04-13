@@ -9,6 +9,7 @@ import {
   FileText,
   Package,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ const PAYMENT_TERMS_OPTIONS = [
   "Pro Forma",
   "Cash",
   "EOM",
+  "End of Next Month",
 ] as const;
 
 type RecentOrder = {
@@ -351,13 +353,14 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
               <TableHead className="text-right">Credits</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Account Ref</TableHead>
+              <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {suppliers.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-8 text-[#888888]"
                 >
                   No suppliers yet. Add your first supplier.
@@ -420,12 +423,32 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                     <TableCell className="text-[#888888] text-xs">
                       {s.accountRef || "\u2014"}
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0 text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete supplier "${s.name}"?`)) return;
+                          const res = await fetch(`/api/suppliers/${s.id}`, { method: "DELETE" });
+                          if (res.ok) {
+                            router.refresh();
+                          } else {
+                            const err = await res.json().catch(() => null);
+                            alert(err?.error || "Failed to delete supplier");
+                          }
+                        }}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
 
                   {/* Expanded detail row */}
                   {expandedId === s.id && (
                     <TableRow key={`${s.id}-detail`} className="bg-[#111111]">
-                      <TableCell colSpan={8} className="p-0">
+                      <TableCell colSpan={9} className="p-0">
                         <SupplierDetail
                           supplier={s}
                           onEdit={() => openEditSheet(s)}

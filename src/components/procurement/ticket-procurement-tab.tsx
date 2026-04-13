@@ -112,7 +112,7 @@ type StockUsageInfo = {
   id: string; qtyUsed: Decimal; costPerUnit: Decimal; totalCost: Decimal; stockItemId: string;
   stockItem?: { id: string; description: string; supplierName: string | null; originBillNo: string | null; sourceType: string; originTicketTitle: string | null };
 };
-type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[] };
+type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[]; isBomParent?: boolean; parentLineId?: string | null };
 type StockItemOption = { id: string; description: string; productCode: string | null; qtyOnHand: Decimal; unit: string; costPerUnit: Decimal; supplierName: string | null; sourceType: string; originBillNo: string | null; originTicketTitle: string | null };
 
 type Props = {
@@ -204,7 +204,7 @@ export function TicketProcurementTab({
     procurementOrders.flatMap((po) => po.lines.map((l) => l.ticketLine?.id).filter(Boolean))
   );
   const needsPurchase = ticketLines.filter(
-    (l) => !poLineIds.has(l.id) && l.status !== "ORDERED" && l.status !== "FROM_STOCK" && l.status !== "INVOICED" && l.status !== "CLOSED"
+    (l) => !poLineIds.has(l.id) && l.status !== "ORDERED" && l.status !== "FROM_STOCK" && l.status !== "INVOICED" && l.status !== "CLOSED" && !l.isBomParent
   );
   const showChecklist = needsPurchase.length > 0 && !["CLOSED", "CANCELLED"].includes(ticketStatus);
 

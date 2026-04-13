@@ -50,10 +50,11 @@ export async function POST(
     });
     const versionNo = (latestQuote?.versionNo ?? 0) + 1;
 
-    // Get ticket lines — filter by selected lineIds if provided
+    // Get ticket lines — filter by selected lineIds if provided, exclude BOM children
     const ticketLines = await prisma.ticketLine.findMany({
       where: {
         ticketId: id,
+        parentLineId: null,
         ...(lineIds && lineIds.length > 0 ? { id: { in: lineIds } } : {}),
       },
     });

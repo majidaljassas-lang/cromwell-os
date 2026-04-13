@@ -18,7 +18,10 @@ export async function POST(
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: {
-        lines: { orderBy: { createdAt: "asc" } },
+        lines: {
+          where: { parentLineId: null },
+          orderBy: { createdAt: "asc" },
+        },
         payingCustomer: true,
         site: true,
         siteCommercialLink: true,

@@ -13,6 +13,7 @@ import {
   FileText,
   FileDown,
   Package,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,6 +126,17 @@ const NUM_CLS = `${INPUT_CLS} w-20 text-right tabular-nums`;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+type BOMComponent = {
+  id: string;
+  description: string;
+  qty: Decimal;
+  unit: string;
+  expectedCostUnit: Decimal;
+  expectedCostTotal: Decimal;
+  supplierName: string | null;
+  status: string;
+};
+
 type TicketLine = {
   id: string;
   lineType: string;
@@ -149,6 +161,9 @@ type TicketLine = {
   status: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
+  parentLineId?: string | null;
+  isBomParent?: boolean;
+  components?: BOMComponent[];
 };
 
 type EvidenceFragment = {
@@ -277,6 +292,7 @@ function InlineLineRow({
   onDelete: () => void;
   supplierLookup: Record<string, string>;
 }) {
+  const router = useRouter();
   const [desc, setDesc] = useState("");
   const [supplierVal, setSupplierVal] = useState("");
   const [qtyVal, setQtyVal] = useState("");
@@ -285,6 +301,10 @@ function InlineLineRow({
   const [marginPctVal, setMarginPctVal] = useState("");
   const [mounted, setMounted] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [bomExpanded, setBomExpanded] = useState(false);
+  const [bomSheetOpen, setBomSheetOpen] = useState(false);
+  const [bomComponents, setBomComponents] = useState<Array<{ description: string; qty: string; unit: string; expectedCostUnit: string; supplierName: string }>>([]);
+  const [bomSaving, setBomSaving] = useState(false);
 
   useEffect(() => {
     setDesc(line.description);
@@ -424,6 +444,101 @@ function InlineLineRow({
     }
   }
 
+  // ── BOM helpers ──
+  function openBomSheet() {
+    if (line.isBomParent && line.components && line.components.length > 0) {
+      setBomComponents(
+        line.components.map((c) => ({
+          description: c.description,
+          qty: String(Number(c.qty)),
+          unit: c.unit || "EA",
+          expectedCostUnit: String(Number(c.expectedCostUnit || 0)),
+          supplierName: c.supplierName || "",
+        }))
+      );
+    } else {
+      setBomComponents([
+        {
+          description: line.description,
+          qty: String(Number(line.qty || 1)),
+          unit: line.unit || "EA",
+          expectedCostUnit: costVal || "",
+          supplierName: supplierVal || "",
+        },
+      ]);
+    }
+    setBomSheetOpen(true);
+  }
+
+  function addBomRow() {
+    setBomComponents((prev) => [
+      ...prev,
+      { description: "", qty: "1", unit: "EA", expectedCostUnit: "", supplierName: "" },
+    ]);
+  }
+
+  function removeBomRow(idx: number) {
+    setBomComponents((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateBomRow(idx: number, field: string, value: string) {
+    setBomComponents((prev) =>
+      prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row))
+    );
+  }
+
+  async function saveBom() {
+    const valid = bomComponents.filter((c) => c.description.trim());
+    if (valid.length === 0) return;
+    setBomSaving(true);
+    try {
+      const res = await fetch(`/api/ticket-lines/${line.id}/bom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          components: valid.map((c) => ({
+            description: c.description.trim(),
+            qty: Number(c.qty) || 1,
+            unit: c.unit || "EA",
+            expectedCostUnit: Number(c.expectedCostUnit) || 0,
+            supplierName: c.supplierName.trim() || undefined,
+          })),
+        }),
+      });
+      if (res.ok) {
+        setBomSheetOpen(false);
+        setBomExpanded(true);
+        router.refresh();
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || "Failed to save BOM");
+      }
+    } finally {
+      setBomSaving(false);
+    }
+  }
+
+  async function deleteBom() {
+    if (!confirm("Remove all BOM components from this line?")) return;
+    setBomSaving(true);
+    try {
+      const res = await fetch(`/api/ticket-lines/${line.id}/bom`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setBomExpanded(false);
+        router.refresh();
+      }
+    } finally {
+      setBomSaving(false);
+    }
+  }
+
+  const bomCostTotal = bomComponents.reduce(
+    (s, c) => s + Number(c.qty || 0) * Number(c.expectedCostUnit || 0),
+    0
+  );
+
   if (!mounted) {
     return (
       <TableRow className="hover:bg-[#1E1E1E]">
@@ -463,6 +578,7 @@ function InlineLineRow({
   }
 
   return (
+    <>
     <TableRow
       key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
       className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${selected ? "bg-[#FF6600]/5" : ""}`}
@@ -476,13 +592,20 @@ function InlineLineRow({
         />
       </TableCell>
       <TableCell className="p-0 max-w-[250px]">
-        <input
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-          onBlur={onBlurDesc}
-          onKeyDown={kd}
-          className={`${INPUT_CLS} w-full font-medium`}
-        />
+        <div className="flex items-center gap-1">
+          <input
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            onBlur={onBlurDesc}
+            onKeyDown={kd}
+            className={`${INPUT_CLS} w-full font-medium`}
+          />
+          {line.isBomParent && (
+            <span className="text-[8px] font-bold text-[#3399FF] bg-[#3399FF]/10 px-1 py-0.5 tracking-wider shrink-0">
+              BOM
+            </span>
+          )}
+        </div>
       </TableCell>
       <TableCell className="p-0 max-w-[100px]">
         <input
@@ -506,7 +629,16 @@ function InlineLineRow({
         />
       </TableCell>
       <TableCell className="text-[#888888] text-[10px] p-1">
-        {line.unit}
+        <select
+          value={line.unit}
+          onChange={(e) => saveField("unit", e.target.value)}
+          className="bg-transparent text-[10px] text-[#888888] border-none outline-none cursor-pointer hover:text-[#E0E0E0] appearance-none w-full"
+          style={{ WebkitAppearance: "none" }}
+        >
+          {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL"].map(u => (
+            <option key={u} value={u} className="bg-[#1A1A1A] text-[#E0E0E0]">{u}</option>
+          ))}
+        </select>
       </TableCell>
       <TableCell className="p-0">
         <input
@@ -550,17 +682,178 @@ function InlineLineRow({
           {line.status.replace(/_/g, " ")}
         </Badge>
       </TableCell>
-      <TableCell className="p-1 w-8">
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          className="p-1 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
-          title="Delete line"
-        >
-          <Trash2 className="size-3" />
-        </button>
+      <TableCell className="p-1 w-16">
+        <div className="flex items-center gap-0.5">
+          {line.isBomParent && (
+            <button
+              onClick={() => setBomExpanded(!bomExpanded)}
+              className="p-0.5 text-[#3399FF] hover:text-[#66BBFF] transition-colors"
+              title={bomExpanded ? "Collapse BOM" : "Expand BOM"}
+            >
+              {bomExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+            </button>
+          )}
+          <button
+            onClick={openBomSheet}
+            className={`p-0.5 transition-colors ${line.isBomParent ? "text-[#3399FF] hover:text-[#66BBFF]" : "text-[#666666] hover:text-[#3399FF]"}`}
+            title={line.isBomParent ? "Edit BOM" : "Add BOM"}
+          >
+            <Layers className="size-3" />
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="p-0.5 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
+            title="Delete line"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </div>
+        {/* BOM Sheet */}
+        <Sheet open={bomSheetOpen} onOpenChange={setBomSheetOpen}>
+          <SheetContent side="right" className="w-[520px] bg-[#1A1A1A] border-[#333333] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle className="text-[#E0E0E0]">
+                {line.isBomParent ? "Edit" : "Create"} Bill of Materials
+              </SheetTitle>
+              <SheetDescription className="text-[#888888]">
+                Parent: {line.description} x {Number(line.qty)}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="mt-4 space-y-3">
+              {bomComponents.map((comp, idx) => (
+                <div key={idx} className="border border-[#333333] p-2 space-y-2 bg-[#222222]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase text-[#888888] tracking-wider font-bold">
+                      Component {idx + 1}
+                    </span>
+                    {bomComponents.length > 1 && (
+                      <button
+                        onClick={() => removeBomRow(idx)}
+                        className="text-[#666666] hover:text-[#FF3333] text-[10px]"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="Description"
+                    value={comp.description}
+                    onChange={(e) => updateBomRow(idx, "description", e.target.value)}
+                    className="h-7 text-xs bg-[#1A1A1A] border-[#444444] text-[#E0E0E0]"
+                  />
+                  <div className="grid grid-cols-4 gap-2">
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Qty</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={comp.qty}
+                        onChange={(e) => updateBomRow(idx, "qty", e.target.value)}
+                        className="h-7 text-xs bg-[#1A1A1A] border-[#444444] text-[#E0E0E0] text-right"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Unit</Label>
+                      <select
+                        value={comp.unit}
+                        onChange={(e) => updateBomRow(idx, "unit", e.target.value)}
+                        className="h-7 w-full text-xs bg-[#1A1A1A] border border-[#444444] text-[#E0E0E0] px-1"
+                      >
+                        {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL"].map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Cost/Unit</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={comp.expectedCostUnit}
+                        onChange={(e) => updateBomRow(idx, "expectedCostUnit", e.target.value)}
+                        className="h-7 text-xs bg-[#1A1A1A] border-[#444444] text-[#E0E0E0] text-right"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Supplier</Label>
+                      <Input
+                        value={comp.supplierName}
+                        onChange={(e) => updateBomRow(idx, "supplierName", e.target.value)}
+                        className="h-7 text-xs bg-[#1A1A1A] border-[#444444] text-[#E0E0E0]"
+                        placeholder="--"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-right text-[10px] text-[#888888]">
+                    Line total: {"\u00A3"}{(Number(comp.qty || 0) * Number(comp.expectedCostUnit || 0)).toFixed(2)}
+                  </div>
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addBomRow}
+                className="w-full border-dashed border-[#555555] text-[#888888] hover:text-[#E0E0E0] h-7 text-xs"
+              >
+                <Plus className="size-3 mr-1" /> Add Component
+              </Button>
+              <div className="border-t border-[#333333] pt-2 mt-2 flex items-center justify-between">
+                <span className="text-xs text-[#888888]">
+                  BOM Cost Total: <span className="text-[#E0E0E0] font-bold">{"\u00A3"}{bomCostTotal.toFixed(2)}</span>
+                </span>
+              </div>
+            </div>
+            <SheetFooter className="mt-4 gap-2">
+              {line.isBomParent && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={deleteBom}
+                  disabled={bomSaving}
+                  className="border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10"
+                >
+                  Remove BOM
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={saveBom}
+                disabled={bomSaving || bomComponents.filter((c) => c.description.trim()).length === 0}
+                className="bg-[#FF6600] hover:bg-[#FF8833] text-white"
+              >
+                {bomSaving ? "Saving..." : "Save BOM"}
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
       </TableCell>
     </TableRow>
+    {/* BOM Component Rows */}
+    {bomExpanded && line.isBomParent && line.components && line.components.map((comp) => (
+      <TableRow key={comp.id} className="bg-[#151515] hover:bg-[#1A1A1A]">
+        <TableCell className="p-1 w-8" />
+        <TableCell className="p-1 max-w-[250px] pl-6">
+          <span className="text-[10px] text-[#3399FF] mr-1">{"\u2514"}</span>
+          <span className="text-xs text-[#AAAAAA]">{comp.description}</span>
+        </TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">{comp.supplierName || "\u2014"}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs text-[#AAAAAA] p-1">{dec(comp.qty)}</TableCell>
+        <TableCell className="text-[10px] text-[#888888] p-1">{comp.unit}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs text-[#AAAAAA] p-1">{dec(comp.expectedCostUnit)}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs text-[#666666] p-1">{"\u2014"}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs text-[#666666] p-1">{"\u2014"}</TableCell>
+        <TableCell className="text-right text-[10px] text-[#666666] p-1">{"\u2014"}</TableCell>
+        <TableCell className="p-1">
+          <Badge className="text-[8px] uppercase tracking-wider font-bold px-1 py-0 text-[#888888] bg-[#2A2A2A]">
+            {comp.status.replace(/_/g, " ")}
+          </Badge>
+        </TableCell>
+        <TableCell className="p-1 w-16" />
+      </TableRow>
+    ))}
+    </>
   );
 }
 
@@ -673,9 +966,9 @@ export function TicketDetail({
     refreshSummary();
   }, [refreshSummary]);
 
-  // Filter lines: only show ACTIVE statuses (exclude RAW and MERGED)
+  // Filter lines: only show ACTIVE statuses (exclude RAW, MERGED, and BOM children)
   const activeLines = ticket.lines.filter(
-    (l) => l.status !== "RAW" && l.status !== "MERGED"
+    (l) => l.status !== "RAW" && l.status !== "MERGED" && !l.parentLineId
   );
 
   // ── Line selection for Convert to Invoice ──
@@ -2102,6 +2395,8 @@ export function TicketDetail({
               sectionLabel: l.sectionLabel,
               supplierName: l.supplierName,
               stockUsages: (l as any).stockUsages || [],
+              isBomParent: l.isBomParent || false,
+              parentLineId: l.parentLineId || null,
             }))}
           />
         </TabsContent>
