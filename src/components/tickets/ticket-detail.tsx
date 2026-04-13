@@ -454,6 +454,7 @@ function InlineLineRow({
           unit: c.unit || "EA",
           expectedCostUnit: String(Number(c.expectedCostUnit || 0)),
           supplierName: c.supplierName || "",
+          stockItemId: "",
         }))
       );
     } else {
@@ -464,6 +465,7 @@ function InlineLineRow({
           unit: line.unit || "EA",
           expectedCostUnit: costVal || "",
           supplierName: supplierVal || "",
+          stockItemId: "",
         },
       ]);
     }
@@ -473,7 +475,7 @@ function InlineLineRow({
   function addBomRow() {
     setBomComponents((prev) => [
       ...prev,
-      { description: "", qty: "1", unit: "EA", expectedCostUnit: "", supplierName: "" },
+      { description: "", qty: "1", unit: "EA", expectedCostUnit: "", supplierName: "", stockItemId: "" },
     ]);
   }
 
@@ -502,6 +504,7 @@ function InlineLineRow({
             unit: c.unit || "EA",
             expectedCostUnit: Number(c.expectedCostUnit) || 0,
             supplierName: c.supplierName.trim() || undefined,
+            stockItemId: c.stockItemId || undefined,
           })),
         }),
       });
@@ -727,14 +730,39 @@ function InlineLineRow({
                     <span className="text-[10px] uppercase text-[#888888] tracking-wider font-bold">
                       Component {idx + 1}
                     </span>
-                    {bomComponents.length > 1 && (
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => removeBomRow(idx)}
-                        className="text-[#666666] hover:text-[#FF3333] text-[10px]"
+                        onClick={async () => {
+                          const res = await fetch("/api/stock?outcome=HOLDING");
+                          if (!res.ok) return;
+                          const items = await res.json();
+                          if (items.length === 0) { alert("No stock items in holding"); return; }
+                          const options = items.map((s: any) => `${s.description} (${Number(s.qtyOnHand)} ${s.unit} @ £${Number(s.costPerUnit).toFixed(2)}) — ${s.supplierName || "unknown"}`);
+                          const picked = prompt("Pick stock item (enter number):\n\n" + options.map((o: string, i: number) => `${i + 1}. ${o}`).join("\n"));
+                          if (!picked) return;
+                          const idx2 = parseInt(picked) - 1;
+                          if (idx2 >= 0 && idx2 < items.length) {
+                            const si = items[idx2];
+                            updateBomRow(idx, "description", si.description);
+                            updateBomRow(idx, "expectedCostUnit", String(Number(si.costPerUnit)));
+                            updateBomRow(idx, "supplierName", si.supplierName || "");
+                            updateBomRow(idx, "unit", si.unit || "EA");
+                            updateBomRow(idx, "stockItemId", si.id);
+                          }
+                        }}
+                        className="text-[#FF6600] hover:text-[#FF8833] text-[10px] font-bold"
                       >
-                        Remove
+                        From Stock
                       </button>
-                    )}
+                      {bomComponents.length > 1 && (
+                        <button
+                          onClick={() => removeBomRow(idx)}
+                          className="text-[#666666] hover:text-[#FF3333] text-[10px]"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <Input
                     placeholder="Description"
@@ -2397,6 +2425,7 @@ export function TicketDetail({
               stockUsages: (l as any).stockUsages || [],
               isBomParent: l.isBomParent || false,
               parentLineId: l.parentLineId || null,
+              parentDescription: l.parentLineId ? ticket.lines.find((p) => p.id === l.parentLineId)?.description || null : null,
             }))}
           />
         </TabsContent>

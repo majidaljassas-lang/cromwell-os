@@ -13,7 +13,7 @@ export default async function QuotePage({
   const quote = await prisma.quote.findUnique({
     where: { id },
     include: {
-      lines: { include: { ticketLine: true } },
+      lines: { include: { ticketLine: { include: { components: { orderBy: { createdAt: "asc" } } } } } },
       customer: true,
       ticket: {
         include: {

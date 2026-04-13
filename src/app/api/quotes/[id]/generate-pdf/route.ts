@@ -39,13 +39,25 @@ function buildHtml(quote: {
     const sectionHeader = line.ticketLine?.sectionLabel && line.ticketLine.sectionLabel !== prevSection && line.ticketLine.sectionLabel !== firstSection
       ? `<tr style="border-top:2px solid #555"><td colspan="5" style="padding:10px 10px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#555;background:#f5f5f5">${line.ticketLine.sectionLabel}</td></tr>`
       : "";
-    return `${sectionHeader}<tr style="border-bottom:1px solid #eee">
+    const components = (line.ticketLine as any)?.components || [];
+    const isBom = (line.ticketLine as any)?.isBomParent && components.length > 0;
+    const bomRows = isBom ? components.map((c: any) =>
+      `<tr style="background:#fafafa">
+        <td style="padding:3px 10px"></td>
+        <td style="padding:3px 10px 3px 30px;font-size:11px;color:#888">\u2514 ${c.description}</td>
+        <td style="padding:3px 10px;text-align:center;font-size:11px;color:#888">${Number(c.qty)} ${c.unit || "EA"}</td>
+        <td style="padding:3px 10px"></td>
+        <td style="padding:3px 10px"></td>
+      </tr>`
+    ).join("") : "";
+
+    return `${sectionHeader}<tr style="border-bottom:${isBom ? "none" : "1px solid #eee"}">
       <td style="padding:12px 10px;color:#999;font-size:13px">${i + 1}</td>
       <td style="padding:12px 10px;font-size:13px;font-weight:500">${line.description}</td>
       <td style="padding:12px 10px;text-align:center;font-size:13px">${Number(line.qty)} ${line.ticketLine?.unit || "LOT"}</td>
       <td style="padding:12px 10px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${fmt(line.unitPrice)}</td>
       <td style="padding:12px 10px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;font-weight:600">${fmt(line.lineTotal)}</td>
-    </tr>`;
+    </tr>${bomRows}`;
   }).join("");
 
   return `<!DOCTYPE html>
@@ -153,7 +165,7 @@ export async function POST(
     const quote = await prisma.quote.findUnique({
       where: { id },
       include: {
-        lines: { include: { ticketLine: { select: { unit: true, sectionLabel: true } } } },
+        lines: { include: { ticketLine: { select: { unit: true, sectionLabel: true, isBomParent: true, components: { select: { description: true, qty: true, unit: true, expectedCostUnit: true, supplierName: true }, orderBy: { createdAt: "asc" } } } } } },
         customer: true,
         site: true,
         ticket: { select: { title: true } },

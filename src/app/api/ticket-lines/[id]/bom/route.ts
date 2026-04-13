@@ -69,10 +69,21 @@ export async function POST(
       );
     }
 
-    // Delete any existing components first
-    await prisma.ticketLine.deleteMany({
+    // Delete any existing components — clean up dependencies first
+    const existingComponentIds = (await prisma.ticketLine.findMany({
       where: { parentLineId: id },
-    });
+      select: { id: true },
+    })).map(c => c.id);
+
+    if (existingComponentIds.length > 0) {
+      await prisma.$transaction([
+        prisma.costAllocation.deleteMany({ where: { ticketLineId: { in: existingComponentIds } } }),
+        prisma.stockUsage.deleteMany({ where: { ticketLineId: { in: existingComponentIds } } }),
+        prisma.quoteLine.deleteMany({ where: { ticketLineId: { in: existingComponentIds } } }),
+        prisma.procurementOrderLine.updateMany({ where: { ticketLineId: { in: existingComponentIds } }, data: { ticketLineId: null } }),
+        prisma.ticketLine.deleteMany({ where: { parentLineId: id } }),
+      ]);
+    }
 
     // Calculate parent cost total from component costs
     let parentCostTotal = 0;
@@ -112,7 +123,7 @@ export async function POST(
           }
         }
 
-        await tx.ticketLine.create({
+        const childLine = await tx.ticketLine.create({
           data: {
             ticketId: parent.ticketId,
             parentLineId: id,
@@ -126,11 +137,39 @@ export async function POST(
             siteId: parent.siteId,
             siteCommercialLinkId: parent.siteCommercialLinkId,
             sectionLabel: parent.sectionLabel,
-            status: "CAPTURED",
+            status: comp.stockItemId ? "FROM_STOCK" : "CAPTURED",
             supplierId,
             supplierName,
           },
         });
+
+        // If sourced from stock, allocate and deduct
+        if (comp.stockItemId) {
+          const stockItem = await tx.stockItem.findUnique({ where: { id: comp.stockItemId } });
+          if (stockItem) {
+            const costPerUnit = Number(stockItem.costPerUnit);
+            await tx.stockUsage.create({
+              data: {
+                stockItemId: comp.stockItemId,
+                ticketLineId: childLine.id,
+                qtyUsed: compQty,
+                costPerUnit,
+                totalCost: costPerUnit * compQty,
+                notes: `BOM component for ${parent.sectionLabel || "ticket"} line`,
+              },
+            });
+            // Deduct from stock
+            const newQty = Number(stockItem.qtyOnHand) - compQty;
+            await tx.stockItem.update({
+              where: { id: comp.stockItemId },
+              data: {
+                qtyOnHand: Math.max(0, newQty),
+                outcome: newQty <= 0 ? "ALLOCATED" : "HOLDING",
+                outcomeDate: newQty <= 0 ? new Date() : undefined,
+              },
+            });
+          }
+        }
       }
 
       // Update parent: mark as BOM parent and update cost

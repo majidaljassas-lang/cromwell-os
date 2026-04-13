@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Send, FileText, Eye, Download, CheckCircle, XCircle } from "lucide-react";
@@ -16,6 +16,17 @@ import {
   TableFooter,
 } from "@/components/ui/table";
 
+type BomComponent = {
+  id: string;
+  description: string;
+  qty: number;
+  unit: string;
+  expectedCostUnit: number | null;
+  expectedCostTotal: number | null;
+  supplierName: string | null;
+  status: string;
+};
+
 type QuoteLine = {
   id: string;
   description: string;
@@ -27,6 +38,8 @@ type QuoteLine = {
     expectedCostUnit: number | null;
     expectedCostTotal: number | null;
     unit: string;
+    isBomParent?: boolean;
+    components?: BomComponent[];
   } | null;
 };
 
@@ -268,19 +281,46 @@ export function QuoteBuilder({ quote }: { quote: Quote & { pdfFileName?: string;
             {quote.lines.map((line, i) => {
               const cost = line.ticketLine?.id ? costMap[line.ticketLine.id] ?? 0 : 0;
               const lineMargin = Number(line.lineTotal) - cost;
+              const isBom = line.ticketLine?.isBomParent && line.ticketLine?.components?.length;
+              const components = line.ticketLine?.components || [];
               return (
-                <TableRow key={line.id}>
-                  <TableCell className="text-[#666666] text-xs">{i + 1}</TableCell>
-                  <TableCell className="font-medium">{line.description}</TableCell>
-                  <TableCell className="text-[#888888] text-[10px]">{line.ticketLine?.unit || "LOT"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{Number(line.qty)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(line.unitPrice)}</TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">{fmt(line.lineTotal)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-[#888888]">{fmt(cost)}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    <span className={lineMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>{fmt(lineMargin)}</span>
-                  </TableCell>
-                </TableRow>
+                <React.Fragment key={line.id}>
+                  <TableRow className={isBom ? "border-b-0" : ""}>
+                    <TableCell className="text-[#666666] text-xs">{i + 1}</TableCell>
+                    <TableCell className="font-medium">
+                      {line.description}
+                      {isBom && <span className="ml-2 text-[8px] text-[#3399FF] border border-[#3399FF]/30 px-1 py-0.5 rounded">BOM</span>}
+                    </TableCell>
+                    <TableCell className="text-[#888888] text-[10px]">{line.ticketLine?.unit || "LOT"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{Number(line.qty)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(line.unitPrice)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">{fmt(line.lineTotal)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-[#888888]">{fmt(cost)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <span className={lineMargin >= 0 ? "text-[#00CC66]" : "text-[#FF3333]"}>{fmt(lineMargin)}</span>
+                    </TableCell>
+                  </TableRow>
+                  {isBom && components.map((comp) => (
+                    <TableRow key={comp.id} className="bg-[#151515]">
+                      <TableCell />
+                      <TableCell className="text-xs text-[#AAAAAA] pl-6">
+                        <span className="text-[#3399FF] mr-1">{"\u2514"}</span>
+                        {comp.description}
+                        {comp.supplierName && <span className="text-[10px] text-[#888888] ml-2">({comp.supplierName})</span>}
+                      </TableCell>
+                      <TableCell className="text-[#888888] text-[10px]">{comp.unit}</TableCell>
+                      <TableCell className="text-right tabular-nums text-[#AAAAAA] text-xs">{Number(comp.qty)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-[#888888] text-xs">{fmt(comp.expectedCostUnit)}</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums text-[#888888] text-xs">{fmt(comp.expectedCostTotal)}</TableCell>
+                      <TableCell>
+                        <span className={`text-[9px] px-1 py-0.5 rounded ${comp.status === "FROM_STOCK" ? "bg-[#FF6600]/15 text-[#FF6600]" : "bg-[#333333] text-[#888888]"}`}>
+                          {comp.status === "FROM_STOCK" ? "STOCK" : comp.status.replace(/_/g, " ")}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </React.Fragment>
               );
             })}
           </TableBody>

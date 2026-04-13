@@ -16,6 +16,7 @@ import {
   BarChart3,
   Archive,
   Scale,
+  Landmark,
 } from "lucide-react";
 
 const navItems = [
@@ -32,6 +33,7 @@ const navItems = [
   { label: "INVOICES", href: "/invoices", icon: Receipt },
   { label: "CASH SALES", href: "/cash-sales", icon: Banknote },
   { label: "REPORTS", href: "/reports", icon: BarChart3 },
+  { label: "FINANCE", href: "/finance", icon: Landmark },
   { label: "BACKLOG", href: "/backlog", icon: Archive },
 ];
 

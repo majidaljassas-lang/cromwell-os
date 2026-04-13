@@ -112,7 +112,7 @@ type StockUsageInfo = {
   id: string; qtyUsed: Decimal; costPerUnit: Decimal; totalCost: Decimal; stockItemId: string;
   stockItem?: { id: string; description: string; supplierName: string | null; originBillNo: string | null; sourceType: string; originTicketTitle: string | null };
 };
-type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[]; isBomParent?: boolean; parentLineId?: string | null };
+type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[]; isBomParent?: boolean; parentLineId?: string | null; parentDescription?: string | null };
 type StockItemOption = { id: string; description: string; productCode: string | null; qtyOnHand: Decimal; unit: string; costPerUnit: Decimal; supplierName: string | null; sourceType: string; originBillNo: string | null; originTicketTitle: string | null };
 
 type Props = {
@@ -247,6 +247,30 @@ export function TicketProcurementTab({
 
   async function handleMarkOrdered(lineId: string) {
     setOrderedLines((prev) => new Set([...prev, lineId]));
+    const line = ticketLines.find(l => l.id === lineId);
+
+    // Auto-create PO if supplier is known
+    if (line?.supplierName) {
+      const sup = suppliers.find(s => s.name.toLowerCase() === line.supplierName!.toLowerCase());
+      const poNo = `PO-${Date.now()}-${line.supplierName.substring(0, 4).toUpperCase().replace(/\s/g, "")}`;
+      await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticketId,
+          supplierId: sup?.id || undefined,
+          poNo,
+          lines: [{
+            ticketLineId: lineId,
+            description: line.description,
+            qty: Number(line.qty?.toString() || 1),
+            unitCost: Number(line.expectedCostUnit?.toString() || 0),
+            lineTotal: Number(line.qty?.toString() || 1) * Number(line.expectedCostUnit?.toString() || 0),
+          }],
+        }),
+      });
+    }
+
     await fetch(`/api/ticket-lines/${lineId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -391,23 +415,73 @@ export function TicketProcurementTab({
   async function handleBulkOrderWithSupplier() {
     if (selectedForPurchase.size === 0) return;
     setBulkProcessing(true);
-    for (const lineId of selectedForPurchase) {
-      const body: Record<string, unknown> = { status: "ORDERED" };
+    try {
+      const selectedLines = needsPurchase.filter(l => selectedForPurchase.has(l.id));
+
+      // If bulk supplier selected, assign it to all lines first
       if (bulkSupplierId) {
         const sup = suppliers.find((s) => s.id === bulkSupplierId);
-        body.supplierId = bulkSupplierId;
-        body.supplierName = sup?.name || "";
+        for (const line of selectedLines) {
+          line.supplierName = sup?.name || null;
+        }
       }
-      await fetch(`/api/ticket-lines/${lineId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+
+      // Group lines by supplier (known suppliers get POs, unknown just get marked)
+      const bySupplier: Record<string, typeof selectedLines> = {};
+      const noSupplier: typeof selectedLines = [];
+      for (const line of selectedLines) {
+        const supName = line.supplierName || (bulkSupplierId ? suppliers.find(s => s.id === bulkSupplierId)?.name : null);
+        if (supName) {
+          if (!bySupplier[supName]) bySupplier[supName] = [];
+          bySupplier[supName].push(line);
+        } else {
+          noSupplier.push(line);
+        }
+      }
+
+      // Create POs grouped by supplier
+      for (const [supplierName, lines] of Object.entries(bySupplier)) {
+        const sup = suppliers.find(s => s.name.toLowerCase() === supplierName.toLowerCase());
+        const poNo = `PO-${Date.now()}-${supplierName.substring(0, 4).toUpperCase().replace(/\s/g, "")}`;
+        await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticketId,
+            supplierId: sup?.id || (bulkSupplierId || undefined),
+            poNo,
+            lines: lines.map(l => ({
+              ticketLineId: l.id,
+              description: l.description,
+              qty: Number(l.qty?.toString() || 1),
+              unitCost: Number(l.expectedCostUnit?.toString() || 0),
+              lineTotal: Number(l.qty?.toString() || 1) * Number(l.expectedCostUnit?.toString() || 0),
+            })),
+          }),
+        });
+      }
+
+      // Mark all selected lines as ORDERED
+      for (const line of selectedLines) {
+        const body: Record<string, unknown> = { status: "ORDERED" };
+        if (bulkSupplierId) {
+          const sup = suppliers.find((s) => s.id === bulkSupplierId);
+          body.supplierId = bulkSupplierId;
+          body.supplierName = sup?.name || "";
+        }
+        await fetch(`/api/ticket-lines/${line.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+
+      setSelectedForPurchase(new Set());
+      setBulkSupplierId("");
+      router.refresh();
+    } finally {
+      setBulkProcessing(false);
     }
-    setBulkProcessing(false);
-    setSelectedForPurchase(new Set());
-    setBulkSupplierId("");
-    router.refresh();
   }
 
   function openDeliveryNote() {
@@ -615,7 +689,7 @@ export function TicketProcurementTab({
     };
 
     try {
-      const res = await fetch("/api/procurement-orders", {
+      const res = await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -797,7 +871,7 @@ export function TicketProcurementTab({
                 </SelectTrigger>
                 <SelectContent>
                   {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id} label={s.name}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -809,6 +883,67 @@ export function TicketProcurementTab({
               >
                 {bulkProcessing ? "Processing..." : bulkSupplierId ? "Mark Ordered from Supplier" : "Mark Ordered"}
               </Button>
+              {(() => {
+                const selectedLines = needsPurchase.filter(l => selectedForPurchase.has(l.id));
+                const withSupplier = selectedLines.filter(l => l.supplierName);
+                const supplierCount = new Set(withSupplier.map(l => l.supplierName)).size;
+                if (withSupplier.length === 0) return null;
+                return (
+                  <Button
+                    size="sm"
+                    className="bg-[#FF6600] text-black hover:bg-[#FF8833] h-7 text-xs font-bold"
+                    disabled={bulkProcessing}
+                    onClick={async () => {
+                      setBulkProcessing(true);
+                      try {
+                        // Group by supplier
+                        const grouped: Record<string, typeof selectedLines> = {};
+                        for (const line of withSupplier) {
+                          const key = line.supplierName!;
+                          if (!grouped[key]) grouped[key] = [];
+                          grouped[key].push(line);
+                        }
+                        for (const [supplierName, lines] of Object.entries(grouped)) {
+                          const sup = suppliers.find(s => s.name.toLowerCase() === supplierName.toLowerCase());
+                          const poNo = `PO-${Date.now()}-${supplierName.substring(0, 3).toUpperCase()}`;
+                          await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              ticketId,
+                              supplierId: sup?.id || undefined,
+                              supplierName: sup ? undefined : supplierName,
+                              poNo,
+                              lines: lines.map(l => ({
+                                ticketLineId: l.id,
+                                description: l.description,
+                                qty: Number(l.qty?.toString() || 1),
+                                unitCost: Number(l.expectedCostUnit?.toString() || 0),
+                                lineTotal: Number(l.qty?.toString() || 1) * Number(l.expectedCostUnit?.toString() || 0),
+                              })),
+                            }),
+                          });
+                          // Mark lines as ordered
+                          for (const line of lines) {
+                            await fetch(`/api/ticket-lines/${line.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ status: "ORDERED" }),
+                            });
+                          }
+                        }
+                        setSelectedForPurchase(new Set());
+                        setBulkSupplierId("");
+                        router.refresh();
+                      } finally {
+                        setBulkProcessing(false);
+                      }
+                    }}
+                  >
+                    Auto PO ({supplierCount} supplier{supplierCount !== 1 ? "s" : ""}, {withSupplier.length} lines)
+                  </Button>
+                );
+              })()}
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={clearPurchaseSelection}>
                 Clear
               </Button>
@@ -851,7 +986,17 @@ export function TicketProcurementTab({
                           </TableCell>
                         </TableRow>
                       )}
-                      <TableRow className={`${selectedForPurchase.has(line.id) ? "bg-[#3399FF]/5" : ""}`}>
+                      {/* BOM parent header for grouped components */}
+                      {line.parentLineId && line.parentDescription && (i === 0 || needsPurchase[i - 1]?.parentLineId !== line.parentLineId) && (
+                        <TableRow className="bg-[#3399FF]/5 border-t border-[#3399FF]/20">
+                          <TableCell colSpan={6} className="py-1.5 px-3">
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-[#3399FF]">
+                              BOM: {line.parentDescription}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      <TableRow className={`${selectedForPurchase.has(line.id) ? "bg-[#3399FF]/5" : ""} ${line.parentLineId ? "bg-[#3399FF]/3" : ""}`}>
                         <TableCell>
                           <input
                             type="checkbox"
@@ -861,6 +1006,7 @@ export function TicketProcurementTab({
                           />
                         </TableCell>
                         <TableCell className="text-sm font-medium">
+                          {line.parentLineId && <span className="text-[#3399FF] mr-1">{"\u2514"}</span>}
                           {line.description}
                           {stockQtyUsed(line) > 0 && (
                             <span className="text-[10px] text-[#FF6600] ml-2">
@@ -1290,7 +1436,7 @@ export function TicketProcurementTab({
                     </SelectTrigger>
                     <SelectContent>
                       {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
+                        <SelectItem key={s.id} value={s.id} label={s.name}>
                           {s.name}
                         </SelectItem>
                       ))}
@@ -1350,7 +1496,7 @@ export function TicketProcurementTab({
                         </SelectTrigger>
                         <SelectContent>
                           {ticketLines.map((tl) => (
-                            <SelectItem key={tl.id} value={tl.id}>
+                            <SelectItem key={tl.id} value={tl.id} label={tl.description}>
                               {tl.description}
                             </SelectItem>
                           ))}
