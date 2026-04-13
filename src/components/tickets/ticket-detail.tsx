@@ -1506,7 +1506,24 @@ export function TicketDetail({
                 Back
               </Button>
             </Link>
-            <h1 className="text-xl font-bold tracking-tight text-[#E0E0E0]">
+            <h1
+              className="text-xl font-bold tracking-tight text-[#E0E0E0] cursor-pointer hover:bg-[#222222] px-1 -mx-1 rounded"
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={(e) => {
+                const newTitle = e.currentTarget.textContent?.trim();
+                if (newTitle && newTitle !== ticket.title) {
+                  fetch(`/api/tickets/${ticket.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: newTitle }),
+                  }).then(() => router.refresh());
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLElement).blur(); }
+              }}
+            >
               {ticket.title}
             </h1>
           </div>
