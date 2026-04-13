@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { BankAccountCard } from "./BankAccountCard";
+import { RecentTransactions } from "./RecentTransactions";
+import { ReconciliationSummary } from "./ReconciliationSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +22,43 @@ export default async function FinancePage() {
 
   const bankAccounts = await prisma.bankAccount.findMany({
     where: { isActive: true },
-    include: { account: true },
+    include: {
+      account: true,
+      _count: { select: { transactions: true } },
+    },
   });
+
+  // Get unreconciled counts per bank account
+  const unreconciledCounts = await prisma.bankTransaction.groupBy({
+    by: ["bankAccountId"],
+    where: { reconciliationStatus: "UNRECONCILED" },
+    _count: true,
+  });
+  const unreconciledMap = new Map(
+    unreconciledCounts.map((u) => [u.bankAccountId, u._count])
+  );
+
+  // Get matched (suggested) counts per bank account
+  const matchedCounts = await prisma.bankTransaction.groupBy({
+    by: ["bankAccountId"],
+    where: { reconciliationStatus: "MATCHED" },
+    _count: true,
+  });
+  const matchedMap = new Map(
+    matchedCounts.map((m) => [m.bankAccountId, m._count])
+  );
+
+  // Get recent transactions across all accounts
+  const recentTransactions = await prisma.bankTransaction.findMany({
+    orderBy: { transactionDate: "desc" },
+    take: 20,
+    include: {
+      bankAccount: { select: { bankName: true, accountName: true } },
+    },
+  });
+
+  // Check if Yapily is configured
+  const yapilyConfigured = !!(process.env.YAPILY_APP_UUID && process.env.YAPILY_APP_SECRET);
 
   // Group accounts by type
   const grouped: Record<string, typeof accounts> = {};
@@ -55,19 +93,52 @@ export default async function FinancePage() {
         <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Bank Accounts</h2>
         <div className="grid grid-cols-3 gap-4">
           {bankAccounts.map((ba) => (
-            <div key={ba.id} className="border border-[#333333] bg-[#1A1A1A] p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-[#888888]">{ba.bankName}</span>
-                <span className="text-[10px] text-[#666666]">{ba.sortCode} / {ba.accountNumber}</span>
-              </div>
-              <div className="text-lg font-bold tabular-nums text-[#E0E0E0]">
-                {"\u00A3"}{fmt(Number(ba.currentBalance))}
-              </div>
-              <div className="text-[10px] text-[#888888] mt-1">{ba.accountName}</div>
-            </div>
+            <BankAccountCard
+              key={ba.id}
+              bankAccount={{
+                id: ba.id,
+                bankName: ba.bankName,
+                accountName: ba.accountName,
+                accountNumber: ba.accountNumber,
+                sortCode: ba.sortCode,
+                currentBalance: Number(ba.currentBalance),
+                lastSyncedAt: ba.lastSyncedAt?.toISOString() || null,
+                yapilyConnected: !!(ba.yapilyConsentToken && ba.yapilyAccountId),
+                transactionCount: ba._count.transactions,
+              }}
+              unreconciledCount={unreconciledMap.get(ba.id) || 0}
+              matchedCount={matchedMap.get(ba.id) || 0}
+              yapilyConfigured={yapilyConfigured}
+            />
           ))}
         </div>
       </div>
+
+      {/* Reconciliation Summary */}
+      <ReconciliationSummary
+        bankAccounts={bankAccounts.map((ba) => ({
+          id: ba.id,
+          bankName: ba.bankName,
+          accountName: ba.accountName,
+        }))}
+      />
+
+      {/* Recent Transactions */}
+      {recentTransactions.length > 0 && (
+        <RecentTransactions
+          transactions={recentTransactions.map((t) => ({
+            id: t.id,
+            transactionDate: t.transactionDate.toISOString(),
+            amount: Number(t.amount),
+            description: t.description,
+            transactionType: t.transactionType,
+            reconciliationStatus: t.reconciliationStatus,
+            runningBalance: t.runningBalance ? Number(t.runningBalance) : null,
+            notes: t.notes,
+            bankName: t.bankAccount.bankName,
+          }))}
+        />
+      )}
 
       {/* Chart of Accounts */}
       <div className="space-y-3">

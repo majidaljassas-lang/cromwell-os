@@ -2704,20 +2704,24 @@ model JournalLine {
 }
 
 model BankAccount {
-  id              String            @id @default(uuid())
-  accountId       String            @unique
-  bankName        String
-  accountName     String
-  accountNumber   String
-  sortCode        String
-  currency        String            @default("GBP")
-  currentBalance  Decimal           @default(0) @db.Decimal(14, 2)
-  isDefault       Boolean           @default(false)
-  isActive        Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  account         ChartOfAccount    @relation(fields: [accountId], references: [id])
-  transactions    BankTransaction[]
+  id                  String            @id @default(uuid())
+  accountId           String            @unique
+  bankName            String
+  accountName         String
+  accountNumber       String
+  sortCode            String
+  currency            String            @default("GBP")
+  currentBalance      Decimal           @default(0) @db.Decimal(14, 2)
+  isDefault           Boolean           @default(false)
+  isActive            Boolean           @default(true)
+  yapilyConsentToken  String?
+  yapilyAccountId     String?
+  yapilyInstitutionId String?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  account             ChartOfAccount    @relation(fields: [accountId], references: [id])
+  transactions        BankTransaction[]
 
   @@index([accountNumber])
 }
@@ -2834,4 +2838,10 @@ model VATReturn {
 
   @@unique([periodStart, periodEnd])
   @@index([status])
+}
+
+model SystemSetting {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
 }

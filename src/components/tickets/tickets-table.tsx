@@ -115,8 +115,45 @@ export function TicketsTable({
   commercialLinks?: CommercialLink[];
 }) {
   const router = useRouter();
+  const [statusFilter, setStatusFilter] = useState<string>("ACTIVE");
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Status groups for quick filters
+  const activeStatuses = ["CAPTURED", "PRICING", "QUOTED", "APPROVED", "ORDERED", "DELIVERED", "COSTED", "PENDING_PO"];
+  const closedStatuses = ["INVOICED", "CLOSED", "VERIFIED", "LOCKED"];
+
+  const filtered = tickets.filter((t) => {
+    // Status filter
+    if (statusFilter === "ACTIVE" && !activeStatuses.includes(t.status)) return false;
+    if (statusFilter === "CLOSED" && !closedStatuses.includes(t.status)) return false;
+    if (statusFilter !== "ALL" && statusFilter !== "ACTIVE" && statusFilter !== "CLOSED" && t.status !== statusFilter) return false;
+    // Search
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.payingCustomer.name.toLowerCase().includes(q) ||
+        (t.site?.siteName || "").toLowerCase().includes(q) ||
+        `t-${t.ticketNo}`.includes(q)
+      );
+    }
+    return true;
+  });
+
+  // Sort: active tickets by status priority, then by most recent
+  const statusOrder: Record<string, number> = {
+    ORDERED: 0, APPROVED: 1, DELIVERED: 2, PRICING: 3, QUOTED: 4,
+    CAPTURED: 5, COSTED: 6, PENDING_PO: 7, INVOICED: 8, CLOSED: 9,
+    RECOVERY: 10, VERIFIED: 11, LOCKED: 12,
+  };
+  const sorted = [...filtered].sort((a, b) => {
+    const sa = statusOrder[a.status] ?? 99;
+    const sb = statusOrder[b.status] ?? 99;
+    if (sa !== sb) return sa - sb;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
 
   const [ticketMode, setTicketMode] = useState<string>("DIRECT_ORDER");
   const [payingCustomerId, setPayingCustomerId] = useState<string>("");
@@ -297,6 +334,49 @@ export function TicketsTable({
         </Sheet>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex items-center gap-3">
+        <Input
+          placeholder="Search tickets..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs h-8 text-xs"
+        />
+        <div className="flex gap-1">
+          {[
+            { value: "ACTIVE", label: "Active", color: "bg-[#FF6600]" },
+            { value: "ORDERED", label: "Ordered", color: "bg-[#FF3333]" },
+            { value: "APPROVED", label: "Approved", color: "bg-[#00CC66]" },
+            { value: "PRICING", label: "Pricing", color: "bg-[#FF9900]" },
+            { value: "QUOTED", label: "Quoted", color: "bg-[#3399FF]" },
+            { value: "INVOICED", label: "Invoiced", color: "bg-[#9966FF]" },
+            { value: "CLOSED", label: "Closed", color: "bg-[#888888]" },
+            { value: "ALL", label: "All", color: "bg-[#888888]" },
+          ].map((f) => (
+            <Button
+              key={f.value}
+              size="sm"
+              variant={statusFilter === f.value ? "default" : "outline"}
+              className={`h-7 text-[10px] ${statusFilter === f.value ? `${f.color} text-black` : ""}`}
+              onClick={() => setStatusFilter(f.value)}
+            >
+              {f.label}
+              {f.value !== "ALL" && f.value !== "ACTIVE" && f.value !== "CLOSED" && (
+                <span className="ml-1 opacity-60">
+                  {tickets.filter(t => t.status === f.value).length}
+                </span>
+              )}
+              {f.value === "ACTIVE" && (
+                <span className="ml-1 opacity-60">
+                  {tickets.filter(t => activeStatuses.includes(t.status)).length}
+                </span>
+              )}
+            </Button>
+          ))}
+        </div>
+        <span className="text-[10px] text-[#888888] ml-auto">{sorted.length} tickets</span>
+      </div>
+
       <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
@@ -313,17 +393,17 @@ export function TicketsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tickets.length === 0 ? (
+            {sorted.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={9}
                   className="text-center py-8 text-[#888888]"
                 >
-                  No tickets found. Create your first ticket to get started.
+                  {search ? "No tickets match your search." : "No tickets found."}
                 </TableCell>
               </TableRow>
             ) : (
-              tickets.map((ticket) => (
+              sorted.map((ticket) => (
                 <TableRow
                   key={ticket.id}
                   className="cursor-pointer hover:bg-[#222222]"
