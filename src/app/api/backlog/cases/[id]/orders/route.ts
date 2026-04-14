@@ -146,8 +146,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     // ========================================================================
     // UNMATCHED INVOICE LINES — invoice lines with no BacklogInvoiceMatch
+    // Split into 3 buckets:
+    //   - offChatOrderLines: no chat candidate ±45d AND not non-product
+    //   - offChatNonProductLines: delivery/carriage/site lines (auto-confirm OK)
+    //   - unmatchedInvoiceLines: there IS a candidate ticket line ±45d
+    //     (still needs review on the unmatched-invoices tab)
+    // Lines already classified (CONFIRMED_OFF_CHAT, NOT_OUR_ORDER, REORDER,
+    // MANUAL_LINKED) are pulled too so the UI can show counts.
     // ========================================================================
-    const unmatchedInvoiceLines = await prisma.backlogInvoiceLine.findMany({
+    const allUnmatchedRaw = await prisma.backlogInvoiceLine.findMany({
       where: {
         caseId,
         invoiceMatches: { none: {} },
@@ -155,6 +162,90 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       include: { document: true },
       orderBy: { invoiceDate: "desc" },
     });
+
+    // Helper: detect non-product invoice lines (delivery / carriage / site refs)
+    function isNonProductLine(desc: string | null): boolean {
+      const s = (desc || "").trim();
+      if (!s) return true;
+      if (/^(delivery|carriage|site delivery|lwb|service charge|shipping)\b/i.test(s)) return true;
+      if (/^(dellow centre|e1 7sa|site)\b/i.test(s)) return true;
+      if (s.length < 4) return true;
+      return false;
+    }
+
+    // Build a candidate-detection lookup: for each unmatched invoice line,
+    // does ANY ticket line for the case share its normalizedProduct within
+    // ±45 days of the invoice date?
+    const allTicketLinesLite = await prisma.backlogTicketLine.findMany({
+      where: { caseId },
+      select: { id: true, normalizedProduct: true, date: true, status: true },
+    });
+    const ticketByProduct: Record<string, { date: Date; status: string }[]> = {};
+    for (const tl of allTicketLinesLite) {
+      const k = (tl.normalizedProduct || "").toUpperCase();
+      if (!ticketByProduct[k]) ticketByProduct[k] = [];
+      ticketByProduct[k].push({ date: tl.date, status: tl.status });
+    }
+    const FORTY_FIVE_DAYS_MS = 45 * 24 * 60 * 60 * 1000;
+    function hasCandidateTicketLine(invDate: Date, normalizedProduct: string): boolean {
+      const arr = ticketByProduct[(normalizedProduct || "").toUpperCase()];
+      if (!arr || arr.length === 0) return false;
+      const t = invDate.getTime();
+      return arr.some((tl) => Math.abs(tl.date.getTime() - t) <= FORTY_FIVE_DAYS_MS);
+    }
+
+    type UnmatchedRow = (typeof allUnmatchedRaw)[number];
+    const offChatOrderLines: UnmatchedRow[] = [];
+    const unmatchedInvoiceLines: UnmatchedRow[] = [];
+
+    for (const il of allUnmatchedRaw) {
+      // Already user-classified — keep it visible in offChat bucket so totals
+      // include CONFIRMED_OFF_CHAT etc.
+      if (il.classification && il.classification !== "OFF_CHAT_ORDER") {
+        offChatOrderLines.push(il);
+        continue;
+      }
+      if (isNonProductLine(il.productDescription)) {
+        // Non-product lines are off-chat by definition (delivery, etc.)
+        offChatOrderLines.push(il);
+        continue;
+      }
+      if (hasCandidateTicketLine(il.invoiceDate, il.normalizedProduct)) {
+        // Has a candidate ticket line — keep on the regular unmatched tab so
+        // the user can manually link.
+        unmatchedInvoiceLines.push(il);
+      } else {
+        // No chat candidate within ±45d → OFF_CHAT_ORDER
+        offChatOrderLines.push(il);
+      }
+    }
+
+    // Money breakdown for off-chat lines
+    let offChatPendingValue = 0;
+    let offChatConfirmedValue = 0;
+    let offChatNotOursValue = 0;
+    let offChatReorderValue = 0;
+    let offChatPendingCount = 0;
+    let offChatConfirmedCount = 0;
+    let offChatNotOursCount = 0;
+    let offChatReorderCount = 0;
+    for (const il of offChatOrderLines) {
+      const amt = il.amount ? Number(il.amount) : 0;
+      const c = il.classification;
+      if (c === "CONFIRMED_OFF_CHAT") {
+        offChatConfirmedValue += amt;
+        offChatConfirmedCount += 1;
+      } else if (c === "NOT_OUR_ORDER") {
+        offChatNotOursValue += amt;
+        offChatNotOursCount += 1;
+      } else if (c === "REORDER" || c === "MANUAL_LINKED") {
+        offChatReorderValue += amt;
+        offChatReorderCount += 1;
+      } else {
+        offChatPendingValue += amt;
+        offChatPendingCount += 1;
+      }
+    }
 
     // ========================================================================
     // IMAGES — messages with hasMedia=true inside the case source pool
@@ -255,13 +346,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       },
     });
 
+    // Build classification lookup so we can split unmatched value cleanly.
+    const classificationById: Record<string, string | null> = {};
+    for (const il of allUnmatchedRaw) classificationById[il.id] = il.classification;
+
     let invoicedValue = 0;
     let unmatchedInvoiceValue = 0;
     const rateByProduct: Record<string, { total: number; count: number }> = {};
     for (const il of allInvoiceLines) {
       const amt = il.amount ? Number(il.amount) : 0;
       if (matchedInvoiceLineIds.has(il.id)) invoicedValue += amt;
-      else unmatchedInvoiceValue += amt;
+      else {
+        // Exclude NOT_OUR_ORDER from the unmatched bucket (they're filtered out)
+        const c = classificationById[il.id];
+        if (c === "NOT_OUR_ORDER") {
+          // skip — not our money to chase
+        } else {
+          unmatchedInvoiceValue += amt;
+        }
+      }
 
       if (il.rate != null) {
         const p = il.normalizedProduct || "UNKNOWN";
@@ -298,6 +401,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       suggestedLines: s(suggestedLines),
       suggestedInvoiceIndex: s(suggestedInvoiceIndex),
       unmatchedInvoiceLines: s(unmatchedInvoiceLines),
+      offChatOrderLines: s(offChatOrderLines),
       imageMessages: s(imageMessages),
       imageContext: s(contextMap),
       caseInfo: {
@@ -315,12 +419,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         unmatchedInvoiceLineCount: unmatchedInvoiceLines.length,
         imageCount: imageMessages.length,
         invoicedPct: totalLines > 0 ? Math.round((invoicedCount / totalLines) * 100) : 0,
+        offChatTotalCount: offChatOrderLines.length,
+        offChatPendingCount,
+        offChatConfirmedCount,
+        offChatNotOursCount,
+        offChatReorderCount,
       },
       money: {
         invoicedValue: Number(invoicedValue.toFixed(2)),
         unmatchedInvoiceValue: Number(unmatchedInvoiceValue.toFixed(2)),
         gapEstimateValue: Number(gapEstimateValue.toFixed(2)),
         gapUnknownLines,
+        offChatPendingValue: Number(offChatPendingValue.toFixed(2)),
+        offChatConfirmedValue: Number(offChatConfirmedValue.toFixed(2)),
+        offChatNotOursValue: Number(offChatNotOursValue.toFixed(2)),
+        offChatReorderValue: Number(offChatReorderValue.toFixed(2)),
       },
     });
   } catch (err) {

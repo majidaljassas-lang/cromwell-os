@@ -1737,6 +1737,9 @@ model BacklogInvoiceLine {
   isBillLinked       Boolean                 @default(false)
   invoiceLineType    String                  @default("MANUAL_INVOICE_LINE")
   billingConfidence  String                  @default("LOW")
+  classification     String?
+  classificationNote String?
+  classifiedAt       DateTime?
   createdAt          DateTime                @default(now())
   document           BacklogInvoiceDocument? @relation(fields: [documentId], references: [id])
   invoiceMatches     BacklogInvoiceMatch[]
@@ -1746,6 +1749,7 @@ model BacklogInvoiceLine {
   @@index([sourceId])
   @@index([normalizedProduct])
   @@index([invoiceNumber])
+  @@index([classification])
 }
 
 model BacklogInvoiceMatch {

@@ -164,6 +164,11 @@ type OrderStats = {
   unmatchedInvoiceLineCount: number;
   imageCount: number;
   invoicedPct: number;
+  offChatTotalCount?: number;
+  offChatPendingCount?: number;
+  offChatConfirmedCount?: number;
+  offChatNotOursCount?: number;
+  offChatReorderCount?: number;
 };
 
 type OrderMoney = {
@@ -171,6 +176,10 @@ type OrderMoney = {
   unmatchedInvoiceValue: number;
   gapEstimateValue: number;
   gapUnknownLines: number;
+  offChatPendingValue?: number;
+  offChatConfirmedValue?: number;
+  offChatNotOursValue?: number;
+  offChatReorderValue?: number;
 };
 
 type SuggestedInvoiceLine = {
@@ -197,6 +206,13 @@ type SuggestedOrderLine = OrderTicketLine & {
 };
 
 type UnmatchedInvoiceLine = SuggestedInvoiceLine;
+
+type OffChatInvoiceLine = SuggestedInvoiceLine & {
+  classification: string | null;
+  classificationNote: string | null;
+  classifiedAt: string | null;
+  customer: string | null;
+};
 
 type ImageMessage = {
   id: string;
@@ -822,12 +838,23 @@ export function BacklogCaseView({
   const [suggestedLines, setSuggestedLines] = useState<SuggestedOrderLine[]>([]);
   const [suggestedInvoiceIndex, setSuggestedInvoiceIndex] = useState<Record<string, SuggestedInvoiceLine[]>>({});
   const [unmatchedInvoiceLines, setUnmatchedInvoiceLines] = useState<UnmatchedInvoiceLine[]>([]);
+  const [offChatLines, setOffChatLines] = useState<OffChatInvoiceLine[]>([]);
   const [imageMessages, setImageMessages] = useState<ImageMessage[]>([]);
   const [imageContext, setImageContext] = useState<Record<string, ImageContext>>({});
   const [expandedThreadIds, setExpandedThreadIds] = useState<Set<string>>(new Set());
 
-  // Orders sub-tab view ("threads" | "gaps" | "review" | "images" | "unmatched-invoices")
-  const [orderSubView, setOrderSubView] = useState<"threads" | "gaps" | "review" | "images" | "unmatched-invoices">("threads");
+  // Orders sub-tab view
+  const [orderSubView, setOrderSubView] = useState<"threads" | "gaps" | "review" | "images" | "unmatched-invoices" | "off-chat">("threads");
+
+  // Off-Chat triage state
+  const [offChatSort, setOffChatSort] = useState<"DATE_DESC" | "AMOUNT_DESC" | "PRODUCT">("DATE_DESC");
+  const [offChatFilter, setOffChatFilter] = useState<"PENDING" | "ALL" | "CONFIRMED" | "NOT_OURS" | "REORDER">("PENDING");
+  const [offChatGroupByMonth, setOffChatGroupByMonth] = useState<boolean>(true);
+  const [offChatLinkOpenId, setOffChatLinkOpenId] = useState<string | null>(null);
+  const [offChatLinkQuery, setOffChatLinkQuery] = useState<string>("");
+  const [offChatNewThreadOpenId, setOffChatNewThreadOpenId] = useState<string | null>(null);
+  const [offChatNewThreadLabel, setOffChatNewThreadLabel] = useState<string>("");
+  const [offChatNewThreadDesc, setOffChatNewThreadDesc] = useState<string>("");
 
   // Thread filters
   const [threadFilter, setThreadFilter] = useState<"ALL" | "HAS_GAPS" | "FULLY_INVOICED" | "HAS_SUGGESTIONS" | "HAS_IMAGES">("ALL");
@@ -861,6 +888,7 @@ export function BacklogCaseView({
         setSuggestedLines(data.suggestedLines || []);
         setSuggestedInvoiceIndex(data.suggestedInvoiceIndex || {});
         setUnmatchedInvoiceLines(data.unmatchedInvoiceLines || []);
+        setOffChatLines(data.offChatOrderLines || []);
         setImageMessages(data.imageMessages || []);
         setImageContext(data.imageContext || {});
         setOrdersLoaded(true);
@@ -930,12 +958,66 @@ export function BacklogCaseView({
         await loadOrderThreads(true);
         setManualLinkInvoiceId(null);
         setManualLinkQuery("");
+        setOffChatLinkOpenId(null);
+        setOffChatLinkQuery("");
       }
     } catch (err) {
       console.error("link failed", err);
     }
     setReviewBusyId(null);
   }
+
+  // ========================================================================
+  // Off-Chat triage actions
+  // ========================================================================
+  async function classifyInvoiceLine(invoiceLineId: string, classification: string | null, note?: string) {
+    setReviewBusyId(invoiceLineId);
+    try {
+      const res = await fetch(`/api/backlog/invoice-lines/${invoiceLineId}/classify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classification, note }),
+      });
+      if (res.ok) {
+        await loadOrderThreads(true);
+      }
+    } catch (err) {
+      console.error("classify failed", err);
+    }
+    setReviewBusyId(null);
+  }
+
+  async function createThreadFromInvoiceLine(invoiceLineId: string, threadLabel: string, threadDescription: string) {
+    if (!threadLabel.trim()) return;
+    setReviewBusyId(invoiceLineId);
+    try {
+      const res = await fetch(`/api/backlog/invoice-lines/${invoiceLineId}/create-thread`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadLabel: threadLabel.trim(),
+          threadDescription: threadDescription.trim(),
+        }),
+      });
+      if (res.ok) {
+        await loadOrderThreads(true);
+        setOffChatNewThreadOpenId(null);
+        setOffChatNewThreadLabel("");
+        setOffChatNewThreadDesc("");
+      }
+    } catch (err) {
+      console.error("create-thread failed", err);
+    }
+    setReviewBusyId(null);
+  }
+
+  // All ticket lines (any status) for the "Link Existing" search on off-chat
+  const allTicketLinesForLink = (() => {
+    const all: OrderTicketLine[] = [];
+    for (const t of orderThreads) for (const l of t.orderLines) all.push(l);
+    for (const l of orderOrphanLines) all.push(l);
+    return all;
+  })();
 
   // ========================================================================
   // Thread filter + sort helpers
@@ -1601,6 +1683,44 @@ export function BacklogCaseView({
                     </div>
                   </div>
                 </div>
+
+                {/* OFF-CHAT BREAKDOWN STRIP */}
+                {(orderStats.offChatTotalCount ?? 0) > 0 && (
+                  <div className="grid grid-cols-4 gap-4 mt-4 pt-3 border-t border-[#333333]">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="size-3 text-[#9966FF]" />
+                        <span className="text-[8px] uppercase tracking-widest text-[#888888]">CONFIRMED OFF-CHAT</span>
+                      </div>
+                      <div className="text-base font-bold bb-mono text-[#9966FF] mt-1">{fmtGBP(orderMoney.offChatConfirmedValue ?? 0)}</div>
+                      <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.offChatConfirmedCount ?? 0} lines</div>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="size-3 text-[#FF9900]" />
+                        <span className="text-[8px] uppercase tracking-widest text-[#888888]">PENDING REVIEW</span>
+                      </div>
+                      <div className="text-base font-bold bb-mono text-[#FF9900] mt-1">{fmtGBP(orderMoney.offChatPendingValue ?? 0)}</div>
+                      <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.offChatPendingCount ?? 0} lines need decision</div>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="size-3 text-[#3399FF]" />
+                        <span className="text-[8px] uppercase tracking-widest text-[#888888]">REORDER / LINKED</span>
+                      </div>
+                      <div className="text-base font-bold bb-mono text-[#3399FF] mt-1">{fmtGBP(orderMoney.offChatReorderValue ?? 0)}</div>
+                      <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.offChatReorderCount ?? 0} lines</div>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="size-3 text-[#666666]" />
+                        <span className="text-[8px] uppercase tracking-widest text-[#888888]">NOT OURS</span>
+                      </div>
+                      <div className="text-base font-bold bb-mono text-[#666666] mt-1">{fmtGBP(orderMoney.offChatNotOursValue ?? 0)}</div>
+                      <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.offChatNotOursCount ?? 0} excluded</div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ============================================================ */}
@@ -1652,6 +1772,7 @@ export function BacklogCaseView({
                   { k: "review", label: "REVIEW", count: orderStats.suggestedCount },
                   { k: "images", label: "IMAGES", count: orderStats.imageCount },
                   { k: "unmatched-invoices", label: "UNMATCHED INVOICES", count: orderStats.unmatchedInvoiceLineCount },
+                  { k: "off-chat", label: "OFF-CHAT", count: (orderStats.offChatPendingCount ?? 0) },
                 ] as const).map((it) => (
                   <button
                     key={it.k}
@@ -2530,6 +2651,402 @@ export function BacklogCaseView({
                   )}
                 </>
               )}
+
+              {/* ============================================================ */}
+              {/* SUB-VIEW: OFF-CHAT TRIAGE */}
+              {/* ============================================================ */}
+              {orderSubView === "off-chat" && (() => {
+                // Filter
+                const filtered = offChatLines.filter((il) => {
+                  const c = il.classification;
+                  if (offChatFilter === "ALL") return true;
+                  if (offChatFilter === "PENDING") return !c || c === "OFF_CHAT_ORDER";
+                  if (offChatFilter === "CONFIRMED") return c === "CONFIRMED_OFF_CHAT";
+                  if (offChatFilter === "NOT_OURS") return c === "NOT_OUR_ORDER";
+                  if (offChatFilter === "REORDER") return c === "REORDER" || c === "MANUAL_LINKED";
+                  return true;
+                });
+
+                // Sort
+                const sorted = [...filtered].sort((a, b) => {
+                  if (offChatSort === "DATE_DESC") return new Date(b.invoiceDate).getTime() - new Date(a.invoiceDate).getTime();
+                  if (offChatSort === "AMOUNT_DESC") return (Number(b.amount ?? 0)) - (Number(a.amount ?? 0));
+                  if (offChatSort === "PRODUCT") return a.normalizedProduct.localeCompare(b.normalizedProduct);
+                  return 0;
+                });
+
+                // Group by month if requested
+                const groups: { key: string; rows: OffChatInvoiceLine[]; total: number }[] = [];
+                if (offChatGroupByMonth) {
+                  const map: Record<string, OffChatInvoiceLine[]> = {};
+                  for (const il of sorted) {
+                    const k = monthBucket(il.invoiceDate);
+                    if (!map[k]) map[k] = [];
+                    map[k].push(il);
+                  }
+                  for (const k of Object.keys(map)) {
+                    const rows = map[k];
+                    const total = rows.reduce((acc, r) => acc + Number(r.amount ?? 0), 0);
+                    groups.push({ key: k, rows, total });
+                  }
+                  // Preserve overall sort: keep group order matching first row position
+                } else {
+                  const total = sorted.reduce((acc, r) => acc + Number(r.amount ?? 0), 0);
+                  groups.push({ key: "All", rows: sorted, total });
+                }
+
+                const classBadge = (c: string | null): { label: string; color: string } => {
+                  if (c === "CONFIRMED_OFF_CHAT") return { label: "CONFIRMED", color: "text-[#9966FF] bg-[#9966FF]/10 border-[#9966FF]/40" };
+                  if (c === "NOT_OUR_ORDER") return { label: "NOT OURS", color: "text-[#666666] bg-[#222222] border-[#444444]" };
+                  if (c === "REORDER") return { label: "REORDER", color: "text-[#3399FF] bg-[#3399FF]/10 border-[#3399FF]/40" };
+                  if (c === "MANUAL_LINKED") return { label: "LINKED", color: "text-[#00CC66] bg-[#00CC66]/10 border-[#00CC66]/40" };
+                  return { label: "PENDING", color: "text-[#FF9900] bg-[#FF9900]/10 border-[#FF9900]/40" };
+                };
+
+                // Debounced-ish search: just substring on rawText/product/sender
+                const linkSearch = (q: string) => {
+                  const s = q.trim().toLowerCase();
+                  const base = allTicketLinesForLink;
+                  if (!s) return base.slice(0, 10);
+                  return base
+                    .filter((t) =>
+                      t.rawText.toLowerCase().includes(s) ||
+                      t.normalizedProduct.toLowerCase().includes(s) ||
+                      t.sender.toLowerCase().includes(s)
+                    )
+                    .slice(0, 10);
+                };
+
+                return (
+                  <>
+                    {/* Headline */}
+                    <div className="border border-[#9966FF]/40 bg-[#1A1A1A] p-3 grid grid-cols-3 gap-3">
+                      <div>
+                        <div className="text-[8px] uppercase tracking-widest text-[#888888]">CONFIRMED OFF-CHAT</div>
+                        <div className="text-lg font-bold bb-mono text-[#9966FF] mt-0.5">{fmtGBP(orderMoney.offChatConfirmedValue ?? 0)}</div>
+                        <div className="text-[9px] text-[#666666] bb-mono">{orderStats.offChatConfirmedCount ?? 0} lines</div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] uppercase tracking-widest text-[#888888]">PENDING REVIEW</div>
+                        <div className="text-lg font-bold bb-mono text-[#FF9900] mt-0.5">{fmtGBP(orderMoney.offChatPendingValue ?? 0)}</div>
+                        <div className="text-[9px] text-[#666666] bb-mono">{orderStats.offChatPendingCount ?? 0} lines</div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] uppercase tracking-widest text-[#888888]">NOT OURS (EXCLUDED)</div>
+                        <div className="text-lg font-bold bb-mono text-[#666666] mt-0.5">{fmtGBP(orderMoney.offChatNotOursValue ?? 0)}</div>
+                        <div className="text-[9px] text-[#666666] bb-mono">{orderStats.offChatNotOursCount ?? 0} lines</div>
+                      </div>
+                    </div>
+
+                    {/* Filter + sort */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] uppercase tracking-widest text-[#888888]">SHOW:</span>
+                        {([
+                          { k: "PENDING", label: `Pending (${orderStats.offChatPendingCount ?? 0})` },
+                          { k: "CONFIRMED", label: `Confirmed (${orderStats.offChatConfirmedCount ?? 0})` },
+                          { k: "REORDER", label: `Reorder/Linked (${orderStats.offChatReorderCount ?? 0})` },
+                          { k: "NOT_OURS", label: `Not Ours (${orderStats.offChatNotOursCount ?? 0})` },
+                          { k: "ALL", label: `All (${orderStats.offChatTotalCount ?? 0})` },
+                        ] as const).map((f) => (
+                          <button
+                            key={f.k}
+                            onClick={() => setOffChatFilter(f.k)}
+                            className={`px-2 py-0.5 text-[9px] border ${
+                              offChatFilter === f.k
+                                ? "bg-[#FF6600] text-black border-[#FF6600]"
+                                : "bg-[#222222] text-[#E0E0E0] border-[#333333] hover:border-[#FF6600]"
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] uppercase tracking-widest text-[#888888]">SORT:</span>
+                        {([
+                          { k: "DATE_DESC", label: "Newest" },
+                          { k: "AMOUNT_DESC", label: "Largest £" },
+                          { k: "PRODUCT", label: "Product" },
+                        ] as const).map((s) => (
+                          <button
+                            key={s.k}
+                            onClick={() => setOffChatSort(s.k)}
+                            className={`px-2 py-0.5 text-[9px] border ${
+                              offChatSort === s.k
+                                ? "bg-[#FF6600] text-black border-[#FF6600]"
+                                : "bg-[#222222] text-[#E0E0E0] border-[#333333] hover:border-[#FF6600]"
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest text-[#888888] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={offChatGroupByMonth}
+                          onChange={(e) => setOffChatGroupByMonth(e.target.checked)}
+                          className="accent-[#FF6600]"
+                        />
+                        GROUP BY MONTH
+                      </label>
+                      <div className="text-[9px] text-[#666666] ml-auto">
+                        Showing {sorted.length} of {offChatLines.length}
+                      </div>
+                    </div>
+
+                    {sorted.length === 0 && (
+                      <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+                        {offChatLines.length === 0
+                          ? "No off-chat invoice lines for this case."
+                          : "No lines match the current filter."}
+                      </div>
+                    )}
+
+                    {/* Groups */}
+                    {groups.map((g) => (
+                      <div key={g.key} className="border border-[#9966FF]/30 bg-[#1A1A1A]">
+                        {offChatGroupByMonth && (
+                          <div className="flex items-center justify-between px-3 py-2 bg-[#151515] border-b border-[#333333]">
+                            <span className="text-[10px] uppercase tracking-widest text-[#9966FF] font-bold">{g.key}</span>
+                            <span className="text-[10px] bb-mono text-[#E0E0E0]">{g.rows.length} lines · {fmtGBP(g.total)}</span>
+                          </div>
+                        )}
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333] bg-[#151515]">
+                                <th className="text-left px-2 py-1.5 w-20">Status</th>
+                                <th className="text-left px-2 py-1.5 w-24">Invoice #</th>
+                                <th className="text-left px-2 py-1.5 w-20">Date</th>
+                                <th className="text-left px-2 py-1.5">Description</th>
+                                <th className="text-left px-2 py-1.5 w-28">Product</th>
+                                <th className="text-right px-2 py-1.5 w-12">Qty</th>
+                                <th className="text-right px-2 py-1.5 w-16">Rate</th>
+                                <th className="text-right px-2 py-1.5 w-20">Amount</th>
+                                <th className="text-left px-2 py-1.5 w-[420px]">Triage</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {g.rows.map((il) => {
+                                const busy = reviewBusyId === il.id;
+                                const linkOpen = offChatLinkOpenId === il.id;
+                                const newOpen = offChatNewThreadOpenId === il.id;
+                                const badge = classBadge(il.classification);
+                                const candidates = linkOpen ? linkSearch(offChatLinkQuery) : [];
+                                return (
+                                  <React.Fragment key={il.id}>
+                                    <tr className="border-b border-[#2A2A2A] hover:bg-[#1E1E1E]">
+                                      <td className="px-2 py-1.5">
+                                        <span className={`text-[8px] px-1.5 py-0.5 border ${badge.color}`}>{badge.label}</span>
+                                      </td>
+                                      <td className="px-2 py-1.5 bb-mono text-[#E0E0E0] font-bold">{il.invoiceNumber}</td>
+                                      <td className="px-2 py-1.5 bb-mono text-[#E0E0E0] whitespace-nowrap">
+                                        {new Date(il.invoiceDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-[#E0E0E0]">{il.productDescription}</td>
+                                      <td className="px-2 py-1.5">
+                                        <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{il.normalizedProduct}</Badge>
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(il.qty)} {il.unit}</td>
+                                      <td className="px-2 py-1.5 text-right bb-mono text-[#888888]">{il.rate != null ? fmtGBP(Number(il.rate)) : "--"}</td>
+                                      <td className="px-2 py-1.5 text-right bb-mono text-[#FF9900] font-bold">{il.amount != null ? fmtGBP(Number(il.amount)) : "--"}</td>
+                                      <td className="px-2 py-1.5">
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          <button
+                                            disabled={busy}
+                                            onClick={() => classifyInvoiceLine(il.id, "CONFIRMED_OFF_CHAT")}
+                                            className="text-[10px] font-bold px-2 py-1 border bg-[#00CC66]/10 text-[#00CC66] border-[#00CC66]/40 hover:bg-[#00CC66] hover:text-black disabled:opacity-50"
+                                            title="Confirm this was a real order placed off-chat (phone/in-person/email)"
+                                          >
+                                            Confirm
+                                          </button>
+                                          <button
+                                            disabled={busy}
+                                            onClick={() => {
+                                              if (linkOpen) { setOffChatLinkOpenId(null); setOffChatLinkQuery(""); }
+                                              else { setOffChatLinkOpenId(il.id); setOffChatNewThreadOpenId(null); setOffChatLinkQuery(""); }
+                                            }}
+                                            className={`text-[10px] font-bold px-2 py-1 border disabled:opacity-50 ${
+                                              linkOpen
+                                                ? "bg-[#3399FF] text-black border-[#3399FF]"
+                                                : "bg-[#3399FF]/10 text-[#3399FF] border-[#3399FF]/40 hover:bg-[#3399FF] hover:text-black"
+                                            }`}
+                                            title="Link to an existing order thread"
+                                          >
+                                            {linkOpen ? "Cancel link" : "Link existing"}
+                                          </button>
+                                          <button
+                                            disabled={busy}
+                                            onClick={() => {
+                                              if (newOpen) { setOffChatNewThreadOpenId(null); setOffChatNewThreadLabel(""); setOffChatNewThreadDesc(""); }
+                                              else {
+                                                setOffChatNewThreadOpenId(il.id);
+                                                setOffChatLinkOpenId(null);
+                                                setOffChatNewThreadLabel(`Off-chat: ${il.normalizedProduct}`);
+                                                setOffChatNewThreadDesc(`From invoice ${il.invoiceNumber} on ${new Date(il.invoiceDate).toLocaleDateString("en-GB")}`);
+                                              }
+                                            }}
+                                            className={`text-[10px] font-bold px-2 py-1 border disabled:opacity-50 ${
+                                              newOpen
+                                                ? "bg-[#FF9900] text-black border-[#FF9900]"
+                                                : "bg-[#FF9900]/10 text-[#FF9900] border-[#FF9900]/40 hover:bg-[#FF9900] hover:text-black"
+                                            }`}
+                                            title="Create a new order thread for this line"
+                                          >
+                                            {newOpen ? "Cancel new" : "New thread"}
+                                          </button>
+                                          <button
+                                            disabled={busy}
+                                            onClick={() => classifyInvoiceLine(il.id, "NOT_OUR_ORDER")}
+                                            className="text-[10px] font-bold px-2 py-1 border bg-[#FF3333]/10 text-[#FF3333] border-[#FF3333]/40 hover:bg-[#FF3333] hover:text-black disabled:opacity-50"
+                                            title="This invoice line shouldn't be on this site"
+                                          >
+                                            Not ours
+                                          </button>
+                                          {il.classification && (
+                                            <button
+                                              disabled={busy}
+                                              onClick={() => classifyInvoiceLine(il.id, null)}
+                                              className="text-[9px] px-1.5 py-1 border bg-[#222222] text-[#888888] border-[#333333] hover:border-[#FF6600] disabled:opacity-50"
+                                              title="Clear classification"
+                                            >
+                                              Reset
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+
+                                    {/* Link existing panel */}
+                                    {linkOpen && (
+                                      <tr className="bg-[#151515]">
+                                        <td colSpan={9} className="px-3 py-3">
+                                          <div className="space-y-2">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[9px] uppercase tracking-widest text-[#888888]">Find ticket line:</span>
+                                              <Input
+                                                autoFocus
+                                                value={offChatLinkQuery}
+                                                onChange={(e) => setOffChatLinkQuery(e.target.value)}
+                                                placeholder="Search by product, text, or sender..."
+                                                className="h-7 text-[10px] bg-[#222222] border-[#333333]"
+                                              />
+                                              <span className="text-[9px] text-[#666666]">Top {candidates.length}</span>
+                                            </div>
+                                            <div className="max-h-60 overflow-y-auto border border-[#333333] bg-[#1A1A1A]">
+                                              {candidates.length === 0 ? (
+                                                <div className="p-2 text-[9px] text-[#666666] italic">
+                                                  No ticket lines match. Try a different term, or create a new thread.
+                                                </div>
+                                              ) : (
+                                                candidates.map((t) => {
+                                                  const thread = threadByLineId[t.id];
+                                                  return (
+                                                    <button
+                                                      key={t.id}
+                                                      disabled={busy}
+                                                      onClick={() => linkInvoiceToTicketLine(il.id, t.id)}
+                                                      className="w-full text-left px-2 py-1.5 border-b border-[#2A2A2A] last:border-b-0 hover:bg-[#222222] disabled:opacity-50"
+                                                    >
+                                                      <div className="flex items-center gap-2 text-[10px]">
+                                                        <span className="bb-mono text-[#666666] whitespace-nowrap">
+                                                          {new Date(t.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                                                        </span>
+                                                        <span className="text-[#3399FF] font-bold whitespace-nowrap">{t.sender}</span>
+                                                        <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{t.normalizedProduct}</Badge>
+                                                        <span className="bb-mono text-[#E0E0E0] whitespace-nowrap">{Number(t.requestedQty)} {t.requestedUnit}</span>
+                                                        {thread && (
+                                                          <span className="text-[9px] text-[#FF6600] whitespace-nowrap">[{thread.label}]</span>
+                                                        )}
+                                                        <span className={`text-[8px] px-1 py-0 border ${ORDER_LINE_STATUS_COLORS[t.status] ?? ""}`}>{t.status}</span>
+                                                        <span className="text-[9px] text-[#888888] truncate flex-1">{t.rawText}</span>
+                                                      </div>
+                                                    </button>
+                                                  );
+                                                })
+                                              )}
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+
+                                    {/* New thread panel */}
+                                    {newOpen && (
+                                      <tr className="bg-[#151515]">
+                                        <td colSpan={9} className="px-3 py-3">
+                                          <div className="space-y-2">
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div>
+                                                <Label className="text-[9px] uppercase tracking-widest text-[#888888]">Thread label</Label>
+                                                <Input
+                                                  autoFocus
+                                                  value={offChatNewThreadLabel}
+                                                  onChange={(e) => setOffChatNewThreadLabel(e.target.value)}
+                                                  placeholder="e.g. Off-chat: 110mm pipe order"
+                                                  className="h-7 text-[10px] bg-[#222222] border-[#333333] mt-1"
+                                                />
+                                              </div>
+                                              <div>
+                                                <Label className="text-[9px] uppercase tracking-widest text-[#888888]">Description (optional)</Label>
+                                                <Input
+                                                  value={offChatNewThreadDesc}
+                                                  onChange={(e) => setOffChatNewThreadDesc(e.target.value)}
+                                                  placeholder="Why this deserves its own thread"
+                                                  className="h-7 text-[10px] bg-[#222222] border-[#333333] mt-1"
+                                                />
+                                              </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <Button
+                                                disabled={busy || !offChatNewThreadLabel.trim()}
+                                                onClick={() => createThreadFromInvoiceLine(il.id, offChatNewThreadLabel, offChatNewThreadDesc)}
+                                                className="h-7 text-[10px] bg-[#FF9900] text-black hover:bg-[#FFAA33]"
+                                              >
+                                                {busy ? <Loader2 className="size-3 animate-spin" /> : "Create thread + link"}
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                onClick={() => { setOffChatNewThreadOpenId(null); setOffChatNewThreadLabel(""); setOffChatNewThreadDesc(""); }}
+                                                className="h-7 text-[10px] text-[#888888] hover:text-[#E0E0E0]"
+                                              >
+                                                Cancel
+                                              </Button>
+                                              <span className="text-[9px] text-[#666666]">
+                                                Creates a new thread, mirrors this invoice line as a ticket line, and links them.
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+
+                                    {/* Note row if classified */}
+                                    {il.classificationNote && !linkOpen && !newOpen && (
+                                      <tr className="bg-[#0F0F0F]">
+                                        <td colSpan={9} className="px-3 py-1 text-[9px] text-[#666666] italic">
+                                          {il.classificationNote}
+                                          {il.classifiedAt && (
+                                            <span className="text-[#444444] ml-2">
+                                              · {new Date(il.classifiedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
+                                            </span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
             </>
           )}
 

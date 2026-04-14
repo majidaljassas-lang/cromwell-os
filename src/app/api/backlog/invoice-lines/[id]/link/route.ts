@@ -48,6 +48,16 @@ export async function POST(
       data: { status: "INVOICED" },
     });
 
+    // Mark the invoice line so it leaves the "pending review" pile
+    await prisma.backlogInvoiceLine.update({
+      where: { id: invoiceLineId },
+      data: {
+        classification: "MANUAL_LINKED",
+        classificationNote: `Linked to ticket line ${ticketLineId}`,
+        classifiedAt: new Date(),
+      },
+    });
+
     return Response.json({ ok: true, match, ticketLine: updated });
   } catch (err) {
     console.error("link-invoice-line failed:", err);

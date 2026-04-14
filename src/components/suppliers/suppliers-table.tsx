@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -368,10 +368,9 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
               </TableRow>
             ) : (
               suppliers.map((s) => (
-                <>
+                <React.Fragment key={s.id}>
                   {/* Main row */}
                   <TableRow
-                    key={s.id}
                     className="cursor-pointer hover:bg-[#222222]"
                     onClick={() => toggleExpand(s.id)}
                   >
@@ -456,7 +455,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </React.Fragment>
               ))
             )}
           </TableBody>
