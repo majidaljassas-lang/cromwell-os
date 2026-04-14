@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Upload, MessageSquare, Clock, Users, Paperclip, Tag, Trash2, Pencil, FileText, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, Image, ShoppingCart, Package, Hash } from "lucide-react";
@@ -160,7 +160,60 @@ type OrderStats = {
   unmatchedCount: number;
   exceptionCount: number;
   messageLinkedCount: number;
+  suggestedCount: number;
+  unmatchedInvoiceLineCount: number;
+  imageCount: number;
   invoicedPct: number;
+};
+
+type OrderMoney = {
+  invoicedValue: number;
+  unmatchedInvoiceValue: number;
+  gapEstimateValue: number;
+  gapUnknownLines: number;
+};
+
+type SuggestedInvoiceLine = {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  productDescription: string;
+  normalizedProduct: string;
+  qty: number;
+  unit: string;
+  rate: number | null;
+  amount: number | null;
+  document: {
+    id: string;
+    invoiceNumber: string | null;
+    invoiceDate: string | null;
+    totalAmount: number | null;
+    parseStatus: string;
+  } | null;
+};
+
+type SuggestedOrderLine = OrderTicketLine & {
+  orderThread: { id: string; label: string } | null;
+};
+
+type UnmatchedInvoiceLine = SuggestedInvoiceLine;
+
+type ImageMessage = {
+  id: string;
+  sourceId: string;
+  lineNumber: number;
+  parsedTimestamp: string;
+  sender: string;
+  rawText: string;
+  hasMedia: boolean;
+  mediaType: string | null;
+  mediaFilename: string | null;
+  mediaNote: string | null;
+};
+
+type ImageContext = {
+  before: ImageMessage[];
+  after: ImageMessage[];
 };
 
 const ORDER_LINE_STATUS_COLORS: Record<string, string> = {
@@ -764,11 +817,35 @@ export function BacklogCaseView({
   const [orderSourceMap, setOrderSourceMap] = useState<Record<string, { label: string; sourceType: string }>>({});
   const [orderInvoiceDocs, setOrderInvoiceDocs] = useState<Record<string, OrderInvoiceDoc>>({});
   const [orderOrphanLines, setOrderOrphanLines] = useState<OrderTicketLine[]>([]);
-  const [orderStats, setOrderStats] = useState<OrderStats>({ totalThreads: 0, totalLines: 0, invoicedCount: 0, unmatchedCount: 0, exceptionCount: 0, messageLinkedCount: 0, invoicedPct: 0 });
+  const [orderStats, setOrderStats] = useState<OrderStats>({ totalThreads: 0, totalLines: 0, invoicedCount: 0, unmatchedCount: 0, exceptionCount: 0, messageLinkedCount: 0, suggestedCount: 0, unmatchedInvoiceLineCount: 0, imageCount: 0, invoicedPct: 0 });
+  const [orderMoney, setOrderMoney] = useState<OrderMoney>({ invoicedValue: 0, unmatchedInvoiceValue: 0, gapEstimateValue: 0, gapUnknownLines: 0 });
+  const [suggestedLines, setSuggestedLines] = useState<SuggestedOrderLine[]>([]);
+  const [suggestedInvoiceIndex, setSuggestedInvoiceIndex] = useState<Record<string, SuggestedInvoiceLine[]>>({});
+  const [unmatchedInvoiceLines, setUnmatchedInvoiceLines] = useState<UnmatchedInvoiceLine[]>([]);
+  const [imageMessages, setImageMessages] = useState<ImageMessage[]>([]);
+  const [imageContext, setImageContext] = useState<Record<string, ImageContext>>({});
   const [expandedThreadIds, setExpandedThreadIds] = useState<Set<string>>(new Set());
 
-  async function loadOrderThreads() {
-    if (ordersLoaded) return;
+  // Orders sub-tab view ("threads" | "gaps" | "review" | "images" | "unmatched-invoices")
+  const [orderSubView, setOrderSubView] = useState<"threads" | "gaps" | "review" | "images" | "unmatched-invoices">("threads");
+
+  // Thread filters
+  const [threadFilter, setThreadFilter] = useState<"ALL" | "HAS_GAPS" | "FULLY_INVOICED" | "HAS_SUGGESTIONS" | "HAS_IMAGES">("ALL");
+  const [threadSort, setThreadSort] = useState<"DATE" | "MOST_LINES" | "MOST_GAPS">("DATE");
+
+  // Gaps filters
+  const [gapsSourceFilter, setGapsSourceFilter] = useState<string>("ALL");
+  const [gapsGroupByMonth, setGapsGroupByMonth] = useState<boolean>(true);
+
+  // Unmatched-invoices manual link state
+  const [manualLinkInvoiceId, setManualLinkInvoiceId] = useState<string | null>(null);
+  const [manualLinkQuery, setManualLinkQuery] = useState<string>("");
+
+  // Review action state
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null);
+
+  async function loadOrderThreads(force = false) {
+    if (ordersLoaded && !force) return;
     setOrdersLoading(true);
     try {
       const res = await fetch(`/api/backlog/cases/${backlogCase.id}/orders`);
@@ -780,6 +857,12 @@ export function BacklogCaseView({
         setOrderInvoiceDocs(data.invoiceDocs);
         setOrderOrphanLines(data.orphanLines);
         setOrderStats(data.stats);
+        setOrderMoney(data.money || { invoicedValue: 0, unmatchedInvoiceValue: 0, gapEstimateValue: 0, gapUnknownLines: 0 });
+        setSuggestedLines(data.suggestedLines || []);
+        setSuggestedInvoiceIndex(data.suggestedInvoiceIndex || {});
+        setUnmatchedInvoiceLines(data.unmatchedInvoiceLines || []);
+        setImageMessages(data.imageMessages || []);
+        setImageContext(data.imageContext || {});
         setOrdersLoaded(true);
       }
     } catch (err) {
@@ -787,6 +870,158 @@ export function BacklogCaseView({
     }
     setOrdersLoading(false);
   }
+
+  // ========================================================================
+  // Review actions
+  // ========================================================================
+  function parseSuggestedInvoiceNumber(notes: string | null): string | null {
+    if (!notes) return null;
+    const m = /Possible match:\s*(INV[-\s]?[A-Za-z0-9\-_]+)/i.exec(notes);
+    return m ? m[1].replace(/\s+/g, "").toUpperCase() : null;
+  }
+
+  function findSuggestedInvoiceLines(notes: string | null): SuggestedInvoiceLine[] {
+    const key = parseSuggestedInvoiceNumber(notes);
+    if (!key) return [];
+    return suggestedInvoiceIndex[key] || [];
+  }
+
+  async function approveSuggestedMatch(ticketLineId: string, invoiceLineId: string) {
+    setReviewBusyId(ticketLineId);
+    try {
+      const res = await fetch(`/api/backlog/lines/${ticketLineId}/approve-match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceLineId }),
+      });
+      if (res.ok) {
+        await loadOrderThreads(true);
+      }
+    } catch (err) {
+      console.error("approve failed", err);
+    }
+    setReviewBusyId(null);
+  }
+
+  async function rejectSuggestedMatch(ticketLineId: string) {
+    setReviewBusyId(ticketLineId);
+    try {
+      const res = await fetch(`/api/backlog/lines/${ticketLineId}/reject-match`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await loadOrderThreads(true);
+      }
+    } catch (err) {
+      console.error("reject failed", err);
+    }
+    setReviewBusyId(null);
+  }
+
+  async function linkInvoiceToTicketLine(invoiceLineId: string, ticketLineId: string) {
+    setReviewBusyId(invoiceLineId);
+    try {
+      const res = await fetch(`/api/backlog/invoice-lines/${invoiceLineId}/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketLineId }),
+      });
+      if (res.ok) {
+        await loadOrderThreads(true);
+        setManualLinkInvoiceId(null);
+        setManualLinkQuery("");
+      }
+    } catch (err) {
+      console.error("link failed", err);
+    }
+    setReviewBusyId(null);
+  }
+
+  // ========================================================================
+  // Thread filter + sort helpers
+  // ========================================================================
+  function threadHasGaps(t: OrderThread): boolean {
+    return t.orderLines.some((l) => l.status === "UNMATCHED");
+  }
+  function threadHasSuggestions(t: OrderThread): boolean {
+    return t.orderLines.some((l) => l.notes && /Possible match: INV/i.test(l.notes));
+  }
+  function threadHasImages(t: OrderThread): boolean {
+    return t.messageIds.some((id) => {
+      const m = orderMessages[id];
+      return !!(m && m.hasMedia && m.mediaType && m.mediaType.startsWith("image"));
+    });
+  }
+  function threadIsFullyInvoiced(t: OrderThread): boolean {
+    if (t.orderLines.length === 0) return false;
+    return t.orderLines.every((l) => l.status === "INVOICED");
+  }
+  function threadEarliestDate(t: OrderThread): number {
+    if (t.orderLines.length === 0) return 0;
+    const times = t.orderLines.map((l) => new Date(l.date).getTime()).filter((n) => !isNaN(n));
+    return times.length > 0 ? Math.min(...times) : 0;
+  }
+  function threadGapCount(t: OrderThread): number {
+    return t.orderLines.filter((l) => l.status === "UNMATCHED").length;
+  }
+
+  const filteredSortedThreads = (() => {
+    const filtered = orderThreads.filter((t) => {
+      if (threadFilter === "ALL") return true;
+      if (threadFilter === "HAS_GAPS") return threadHasGaps(t);
+      if (threadFilter === "FULLY_INVOICED") return threadIsFullyInvoiced(t);
+      if (threadFilter === "HAS_SUGGESTIONS") return threadHasSuggestions(t);
+      if (threadFilter === "HAS_IMAGES") return threadHasImages(t);
+      return true;
+    });
+    return [...filtered].sort((a, b) => {
+      if (threadSort === "DATE") return threadEarliestDate(a) - threadEarliestDate(b);
+      if (threadSort === "MOST_LINES") return b.orderLines.length - a.orderLines.length;
+      if (threadSort === "MOST_GAPS") return threadGapCount(b) - threadGapCount(a);
+      return 0;
+    });
+  })();
+
+  // All UNMATCHED ticket lines across everything (for Gaps view)
+  const allUnmatchedLines: OrderTicketLine[] = (() => {
+    const all: OrderTicketLine[] = [];
+    for (const t of orderThreads) {
+      for (const l of t.orderLines) if (l.status === "UNMATCHED") all.push(l);
+    }
+    for (const l of orderOrphanLines) if (l.status === "UNMATCHED") all.push(l);
+    return all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  })();
+
+  // Thread lookup for gaps view (ticket line -> thread)
+  const threadByLineId: Record<string, { id: string; label: string }> = (() => {
+    const map: Record<string, { id: string; label: string }> = {};
+    for (const t of orderThreads) {
+      for (const l of t.orderLines) map[l.id] = { id: t.id, label: t.label };
+    }
+    return map;
+  })();
+
+  // Source label lookup for a ticket line (via sourceMessageId)
+  function lineSourceLabel(line: OrderTicketLine): string {
+    if (!line.sourceMessageId) return "";
+    const msg = orderMessages[line.sourceMessageId];
+    if (!msg) return "";
+    return orderSourceMap[msg.sourceId]?.label || "";
+  }
+
+  function lineSourceId(line: OrderTicketLine): string | null {
+    if (!line.sourceMessageId) return null;
+    const msg = orderMessages[line.sourceMessageId];
+    return msg ? msg.sourceId : null;
+  }
+
+  function monthBucket(dateStr: string): string {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  }
+
+  // GBP formatter
+  const fmtGBP = (n: number) => `\u00A3${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   function toggleThread(threadId: string) {
     setExpandedThreadIds((prev) => {
@@ -1326,8 +1561,52 @@ export function BacklogCaseView({
 
           {!ordersLoading && ordersLoaded && (
             <>
-              {/* Summary Stats */}
-              <div className="grid grid-cols-6 gap-3">
+              {/* ============================================================ */}
+              {/* MONEY ON THE TABLE — headline card */}
+              {/* ============================================================ */}
+              <div className="border border-[#FF6600]/40 bg-[#1A1A1A] p-4">
+                <div className="text-[10px] uppercase tracking-[0.3em] text-[#FF6600] font-bold mb-3">
+                  MONEY ON THE TABLE
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 text-[#00CC66]" />
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">INVOICED</span>
+                    </div>
+                    <div className="text-2xl font-bold bb-mono text-[#00CC66] mt-1">{fmtGBP(orderMoney.invoicedValue)}</div>
+                    <div className="text-[9px] text-[#666666] bb-mono mt-0.5">
+                      Sum of matched invoice line amounts
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="size-4 text-[#FF9900]" />
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">UNMATCHED INVOICES</span>
+                    </div>
+                    <div className="text-2xl font-bold bb-mono text-[#FF9900] mt-1">{fmtGBP(orderMoney.unmatchedInvoiceValue)}</div>
+                    <div className="text-[9px] text-[#666666] bb-mono mt-0.5">
+                      {orderStats.unmatchedInvoiceLineCount} invoice lines need review
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="size-4 text-[#FF3333]" />
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">GAP ESTIMATE</span>
+                    </div>
+                    <div className="text-2xl font-bold bb-mono text-[#FF3333] mt-1">{fmtGBP(orderMoney.gapEstimateValue)}</div>
+                    <div className="text-[9px] text-[#666666] bb-mono mt-0.5">
+                      {orderStats.unmatchedCount} unmatched order lines
+                      {orderMoney.gapUnknownLines > 0 && ` · ${orderMoney.gapUnknownLines} unknown`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ============================================================ */}
+              {/* COUNT STATS */}
+              {/* ============================================================ */}
+              <div className="grid grid-cols-8 gap-3">
                 <div className="border border-[#333333] bg-[#1A1A1A] p-3">
                   <div className="flex items-center gap-2"><ShoppingCart className="size-4 text-[#FF6600]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">THREADS</span></div>
                   <div className="text-lg font-bold bb-mono text-[#E0E0E0] mt-1">{orderStats.totalThreads}</div>
@@ -1342,27 +1621,114 @@ export function BacklogCaseView({
                   <div className="text-[9px] text-[#666666] bb-mono mt-0.5">{orderStats.invoicedPct}% of total</div>
                 </div>
                 <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF3333]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">UNMATCHED</span></div>
+                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF3333]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">GAPS</span></div>
                   <div className="text-lg font-bold bb-mono text-[#FF3333] mt-1">{orderStats.unmatchedCount}</div>
                 </div>
                 <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF9900]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">EXCEPTIONS</span></div>
-                  <div className="text-lg font-bold bb-mono text-[#FF9900] mt-1">{orderStats.exceptionCount}</div>
+                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#9966FF]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">EXCEPTIONS</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#9966FF] mt-1">{orderStats.exceptionCount}</div>
                 </div>
                 <div className="border border-[#333333] bg-[#1A1A1A] p-3">
-                  <div className="flex items-center gap-2"><Hash className="size-4 text-[#888888]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">MSG LINKED</span></div>
-                  <div className="text-lg font-bold bb-mono text-[#888888] mt-1">{orderStats.messageLinkedCount}</div>
+                  <div className="flex items-center gap-2"><AlertCircle className="size-4 text-[#FF9900]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">SUGGESTED</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#FF9900] mt-1">{orderStats.suggestedCount}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><Image className="size-4 text-[#AA66FF]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">IMAGES</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#AA66FF] mt-1">{orderStats.imageCount}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="flex items-center gap-2"><FileText className="size-4 text-[#FF9900]" /><span className="text-[9px] uppercase tracking-widest text-[#888888]">UNMATCHED INV</span></div>
+                  <div className="text-lg font-bold bb-mono text-[#FF9900] mt-1">{orderStats.unmatchedInvoiceLineCount}</div>
                 </div>
               </div>
 
-              {/* Thread Cards */}
-              {orderThreads.length === 0 && orderOrphanLines.length === 0 && (
-                <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
-                  No order threads found for this case. Run order reconstruction first.
-                </div>
-              )}
+              {/* ============================================================ */}
+              {/* SUB-NAV */}
+              {/* ============================================================ */}
+              <div className="flex gap-1 border-b border-[#333333]">
+                {([
+                  { k: "threads", label: "THREADS", count: orderStats.totalThreads },
+                  { k: "gaps", label: "GAPS", count: allUnmatchedLines.length },
+                  { k: "review", label: "REVIEW", count: orderStats.suggestedCount },
+                  { k: "images", label: "IMAGES", count: orderStats.imageCount },
+                  { k: "unmatched-invoices", label: "UNMATCHED INVOICES", count: orderStats.unmatchedInvoiceLineCount },
+                ] as const).map((it) => (
+                  <button
+                    key={it.k}
+                    onClick={() => setOrderSubView(it.k)}
+                    className={`px-3 py-2 text-[10px] uppercase tracking-widest font-bold border-b-2 transition-colors ${
+                      orderSubView === it.k
+                        ? "text-[#FF6600] border-[#FF6600]"
+                        : "text-[#888888] border-transparent hover:text-[#E0E0E0]"
+                    }`}
+                  >
+                    {it.label} <span className="text-[#555555]">({it.count})</span>
+                  </button>
+                ))}
+              </div>
 
-              {orderThreads.map((thread) => {
+              {/* ============================================================ */}
+              {/* SUB-VIEW: THREADS */}
+              {/* ============================================================ */}
+              {orderSubView === "threads" && (
+                <>
+                  {/* Thread filters */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">SHOW:</span>
+                      {([
+                        { k: "ALL", label: "All" },
+                        { k: "HAS_GAPS", label: "Has Gaps" },
+                        { k: "FULLY_INVOICED", label: "Fully Invoiced" },
+                        { k: "HAS_SUGGESTIONS", label: "Has Suggestions" },
+                        { k: "HAS_IMAGES", label: "Has Images" },
+                      ] as const).map((f) => (
+                        <button
+                          key={f.k}
+                          onClick={() => setThreadFilter(f.k)}
+                          className={`px-2 py-0.5 text-[9px] border ${
+                            threadFilter === f.k
+                              ? "bg-[#FF6600] text-black border-[#FF6600]"
+                              : "bg-[#222222] text-[#E0E0E0] border-[#333333] hover:border-[#FF6600]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">SORT:</span>
+                      {([
+                        { k: "DATE", label: "Date" },
+                        { k: "MOST_LINES", label: "Most Lines" },
+                        { k: "MOST_GAPS", label: "Most Gaps" },
+                      ] as const).map((s) => (
+                        <button
+                          key={s.k}
+                          onClick={() => setThreadSort(s.k)}
+                          className={`px-2 py-0.5 text-[9px] border ${
+                            threadSort === s.k
+                              ? "bg-[#FF6600] text-black border-[#FF6600]"
+                              : "bg-[#222222] text-[#E0E0E0] border-[#333333] hover:border-[#FF6600]"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-[9px] text-[#666666] ml-auto">
+                      Showing {filteredSortedThreads.length} of {orderThreads.length}
+                    </div>
+                  </div>
+
+                  {/* Thread Cards */}
+                  {orderThreads.length === 0 && orderOrphanLines.length === 0 && (
+                    <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+                      No order threads found for this case. Run order reconstruction first.
+                    </div>
+                  )}
+
+              {filteredSortedThreads.map((thread) => {
                 const isExpanded = expandedThreadIds.has(thread.id);
                 const statusSummary = getThreadStatusSummary(thread);
                 const invoiceNums = getThreadInvoiceNumbers(thread);
@@ -1377,7 +1743,7 @@ export function BacklogCaseView({
                 const threadDocs = [...threadDocIds].map((id) => orderInvoiceDocs[id]).filter(Boolean);
 
                 return (
-                  <div key={thread.id} className="border border-[#333333] bg-[#1A1A1A]">
+                  <div key={thread.id} id={`thread-${thread.id}`} className="border border-[#333333] bg-[#1A1A1A]">
                     {/* Thread Header */}
                     <div
                       className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#222222] transition-colors"
@@ -1687,6 +2053,483 @@ export function BacklogCaseView({
                   </div>
                 </div>
               )}
+                </>
+              )}
+
+              {/* ============================================================ */}
+              {/* SUB-VIEW: GAPS */}
+              {/* ============================================================ */}
+              {orderSubView === "gaps" && (
+                <>
+                  {/* Gaps filters */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] uppercase tracking-widest text-[#888888]">SOURCE:</span>
+                      <select
+                        value={gapsSourceFilter}
+                        onChange={(e) => setGapsSourceFilter(e.target.value)}
+                        className="h-7 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-[10px] px-2"
+                      >
+                        <option value="ALL">All sources</option>
+                        {Object.entries(orderSourceMap).map(([id, meta]) => (
+                          <option key={id} value={id}>{meta.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest text-[#888888]">
+                      <input
+                        type="checkbox"
+                        checked={gapsGroupByMonth}
+                        onChange={(e) => setGapsGroupByMonth(e.target.checked)}
+                      />
+                      Group by month
+                    </label>
+                    <div className="text-[9px] text-[#666666] ml-auto">
+                      {allUnmatchedLines.length} gaps total · estimated {fmtGBP(orderMoney.gapEstimateValue)}
+                    </div>
+                  </div>
+
+                  {allUnmatchedLines.length === 0 && (
+                    <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#00CC66] text-sm">
+                      No gaps — every order line is matched to an invoice.
+                    </div>
+                  )}
+
+                  {allUnmatchedLines.length > 0 && (() => {
+                    const filtered = allUnmatchedLines.filter((l) => {
+                      if (gapsSourceFilter === "ALL") return true;
+                      return lineSourceId(l) === gapsSourceFilter;
+                    });
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="border border-[#333333] bg-[#1A1A1A] p-6 text-center text-[#888888] text-xs">
+                          No gaps match the current filter.
+                        </div>
+                      );
+                    }
+
+                    const groups: { key: string; lines: OrderTicketLine[] }[] = [];
+                    if (gapsGroupByMonth) {
+                      const byMonth: Record<string, OrderTicketLine[]> = {};
+                      const order: string[] = [];
+                      for (const l of filtered) {
+                        const k = monthBucket(l.date);
+                        if (!byMonth[k]) { byMonth[k] = []; order.push(k); }
+                        byMonth[k].push(l);
+                      }
+                      for (const k of order) groups.push({ key: k, lines: byMonth[k] });
+                    } else {
+                      groups.push({ key: "All gaps", lines: filtered });
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        {groups.map((g) => (
+                          <div key={g.key} className="border border-[#FF3333]/30 bg-[#1A1A1A]">
+                            <div className="px-4 py-2 flex items-center justify-between border-b border-[#333333]">
+                              <span className="text-[11px] uppercase tracking-widest text-[#FF3333] font-bold">{g.key}</span>
+                              <span className="text-[9px] text-[#888888]">{g.lines.length} gap{g.lines.length !== 1 ? "s" : ""}</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333] bg-[#151515]">
+                                    <th className="text-left px-2 py-1.5 w-24">Date</th>
+                                    <th className="text-left px-2 py-1.5 w-28">Sender</th>
+                                    <th className="text-left px-2 py-1.5 w-28">Source</th>
+                                    <th className="text-left px-2 py-1.5">Order Text</th>
+                                    <th className="text-left px-2 py-1.5 w-32">Product</th>
+                                    <th className="text-right px-2 py-1.5 w-16">Qty</th>
+                                    <th className="text-left px-2 py-1.5 w-12">Unit</th>
+                                    <th className="text-left px-2 py-1.5 w-32">Thread</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {g.lines.map((line) => {
+                                    const thread = threadByLineId[line.id];
+                                    return (
+                                      <tr key={line.id} className="border-b border-[#2A2A2A] hover:bg-[#1E1E1E]">
+                                        <td className="px-2 py-1.5 bb-mono text-[#E0E0E0] whitespace-nowrap">
+                                          {new Date(line.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-[#3399FF]">{line.sender}</td>
+                                        <td className="px-2 py-1.5 text-[9px] text-[#888888]">{lineSourceLabel(line)}</td>
+                                        <td className="px-2 py-1.5">
+                                          <div className="text-[#E0E0E0]">{line.rawText}</div>
+                                          {line.notes && <div className="text-[9px] text-[#888888] mt-0.5 italic">{line.notes}</div>}
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          <Badge className={`text-[7px] px-1 py-0 ${line.normalizedProduct !== "UNKNOWN" ? "text-[#00CC66] bg-[#00CC66]/10" : "text-[#FF3333] bg-[#FF3333]/10"}`}>
+                                            {line.normalizedProduct}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(line.requestedQty)}</td>
+                                        <td className="px-2 py-1.5 text-[#888888]">{line.requestedUnit}</td>
+                                        <td className="px-2 py-1.5">
+                                          {thread ? (
+                                            <button
+                                              onClick={() => {
+                                                setOrderSubView("threads");
+                                                setExpandedThreadIds((prev) => new Set([...prev, thread.id]));
+                                                setTimeout(() => {
+                                                  const el = document.getElementById(`thread-${thread.id}`);
+                                                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                                                }, 100);
+                                              }}
+                                              className="text-[9px] text-[#FF6600] hover:underline text-left"
+                                              title="Jump to thread"
+                                            >
+                                              {thread.label}
+                                            </button>
+                                          ) : (
+                                            <span className="text-[9px] text-[#555555] italic">orphan</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {/* ============================================================ */}
+              {/* SUB-VIEW: REVIEW (suggested matches) */}
+              {/* ============================================================ */}
+              {orderSubView === "review" && (
+                <>
+                  {suggestedLines.length === 0 && (
+                    <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+                      No suggested matches awaiting review.
+                    </div>
+                  )}
+
+                  {suggestedLines.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="text-[9px] text-[#888888]">
+                        {suggestedLines.length} order line{suggestedLines.length !== 1 ? "s" : ""} with a suggested invoice match. Approve to confirm, reject to clear.
+                      </div>
+
+                      {suggestedLines.map((line) => {
+                        const suggestedInv = findSuggestedInvoiceLines(line.notes);
+                        const invNum = parseSuggestedInvoiceNumber(line.notes);
+                        const busy = reviewBusyId === line.id;
+                        return (
+                          <div key={line.id} className="border border-[#FF9900]/40 bg-[#1A1A1A] p-3 space-y-2">
+                            <div className="grid grid-cols-2 gap-3">
+                              {/* Order line */}
+                              <div className="border border-[#333333] bg-[#151515] p-2 space-y-1">
+                                <div className="text-[8px] uppercase tracking-widest text-[#888888] font-bold">ORDER LINE</div>
+                                <div className="text-[10px] text-[#666666] bb-mono">
+                                  {new Date(line.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} · {line.sender}
+                                </div>
+                                <div className="text-xs text-[#E0E0E0]">{line.rawText}</div>
+                                <div className="flex items-center gap-2">
+                                  <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{line.normalizedProduct}</Badge>
+                                  <span className="text-[10px] bb-mono text-[#E0E0E0]">{Number(line.requestedQty)} {line.requestedUnit}</span>
+                                </div>
+                                {line.orderThread && (
+                                  <div className="text-[9px] text-[#888888]">Thread: <span className="text-[#FF6600]">{line.orderThread.label}</span></div>
+                                )}
+                              </div>
+
+                              {/* Suggested invoice */}
+                              <div className="border border-[#FF9900]/40 bg-[#151515] p-2 space-y-1">
+                                <div className="text-[8px] uppercase tracking-widest text-[#FF9900] font-bold">
+                                  SUGGESTED MATCH {invNum && <span className="text-[#E0E0E0]">· {invNum}</span>}
+                                </div>
+                                {suggestedInv.length === 0 ? (
+                                  <div className="text-[10px] text-[#FF3333] italic">
+                                    Invoice {invNum || "(unknown)"} not found in this case
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {suggestedInv.map((il) => (
+                                      <div key={il.id} className="border border-[#333333] bg-[#1A1A1A] p-2 space-y-1">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] text-[#E0E0E0] font-bold">{il.invoiceNumber}</span>
+                                          <span className="text-[9px] text-[#888888] bb-mono">
+                                            {new Date(il.invoiceDate).toLocaleDateString("en-GB")}
+                                          </span>
+                                        </div>
+                                        <div className="text-xs text-[#E0E0E0]">{il.productDescription}</div>
+                                        <div className="flex items-center gap-2 text-[10px]">
+                                          <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{il.normalizedProduct}</Badge>
+                                          <span className="bb-mono text-[#E0E0E0]">{Number(il.qty)} {il.unit}</span>
+                                          {il.rate != null && <span className="bb-mono text-[#888888]">@ {fmtGBP(Number(il.rate))}</span>}
+                                          {il.amount != null && <span className="bb-mono text-[#FF9900] font-bold">{fmtGBP(Number(il.amount))}</span>}
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          disabled={busy}
+                                          onClick={() => approveSuggestedMatch(line.id, il.id)}
+                                          className="h-6 px-2 text-[9px] bg-[#00CC66] text-black hover:bg-[#00AA55]"
+                                        >
+                                          {busy ? "..." : "Approve this match"}
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => rejectSuggestedMatch(line.id)}
+                                className="h-7 px-2 text-[10px] bg-[#222222] border border-[#333333] text-[#FF3333] hover:bg-[#FF3333]/10"
+                              >
+                                Reject suggestion
+                              </Button>
+                              {line.notes && (
+                                <span className="text-[9px] text-[#888888] italic truncate flex-1">{line.notes}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ============================================================ */}
+              {/* SUB-VIEW: IMAGES */}
+              {/* ============================================================ */}
+              {orderSubView === "images" && (
+                <>
+                  {imageMessages.length === 0 && (
+                    <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888] text-sm">
+                      No image messages found within this case date range.
+                    </div>
+                  )}
+
+                  {imageMessages.length > 0 && (() => {
+                    // Group by date (DD MMM YYYY)
+                    const byDate: Record<string, ImageMessage[]> = {};
+                    const order: string[] = [];
+                    for (const im of imageMessages) {
+                      const k = new Date(im.parsedTimestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                      if (!byDate[k]) { byDate[k] = []; order.push(k); }
+                      byDate[k].push(im);
+                    }
+                    return (
+                      <div className="space-y-4">
+                        <div className="text-[9px] text-[#888888]">
+                          {imageMessages.length} image{imageMessages.length !== 1 ? "s" : ""} across {order.length} day{order.length !== 1 ? "s" : ""}. Images themselves are not stored — review context and add line items manually.
+                        </div>
+                        {order.map((dateKey) => (
+                          <div key={dateKey} className="border border-[#AA66FF]/30 bg-[#1A1A1A]">
+                            <div className="px-4 py-2 border-b border-[#333333] flex items-center gap-2">
+                              <Image className="size-3.5 text-[#AA66FF]" />
+                              <span className="text-[11px] uppercase tracking-widest text-[#AA66FF] font-bold">{dateKey}</span>
+                              <span className="text-[9px] text-[#888888] ml-auto">{byDate[dateKey].length} image{byDate[dateKey].length !== 1 ? "s" : ""}</span>
+                            </div>
+                            <div className="divide-y divide-[#2A2A2A]">
+                              {byDate[dateKey].map((im) => {
+                                const ctx = imageContext[im.id];
+                                const srcLabel = orderSourceMap[im.sourceId]?.label || "";
+                                return (
+                                  <div key={im.id} className="px-4 py-3 space-y-2">
+                                    <div className="flex items-center gap-2 text-[10px]">
+                                      <span className="bb-mono text-[#888888]">
+                                        {new Date(im.parsedTimestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                                      </span>
+                                      <span className="font-bold text-[#3399FF]">{im.sender}</span>
+                                      <span className="text-[9px] text-[#555555]">{srcLabel}</span>
+                                      <Badge className="text-[7px] px-1 py-0 text-[#AA66FF] bg-[#AA66FF]/10">IMAGE</Badge>
+                                      {im.mediaType && <span className="text-[8px] text-[#666666]">{im.mediaType}</span>}
+                                    </div>
+                                    <div className="border border-[#AA66FF]/20 bg-[#151515] p-2">
+                                      {ctx && ctx.before.length > 0 && (
+                                        <div className="space-y-1 mb-2">
+                                          <div className="text-[8px] uppercase tracking-widest text-[#666666]">Before</div>
+                                          {ctx.before.map((m) => (
+                                            <div key={m.id} className="text-[10px] text-[#888888] pl-2 border-l border-[#333333]">
+                                              <span className="text-[#666666] bb-mono mr-1">
+                                                {new Date(m.parsedTimestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                                              </span>
+                                              <span className="text-[#3399FF] font-bold">{m.sender}:</span> {m.rawText}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div className="text-[10px] text-[#FF9900] italic bg-[#FF9900]/5 border border-[#FF9900]/20 px-2 py-1.5">
+                                        [Image not stored — please review and add line items]
+                                        {im.rawText && im.rawText !== "<Media omitted>" && (
+                                          <div className="text-[#E0E0E0] not-italic mt-1">Caption: {im.rawText}</div>
+                                        )}
+                                        {im.mediaFilename && (
+                                          <div className="text-[#888888] not-italic mt-0.5">File: {im.mediaFilename}</div>
+                                        )}
+                                      </div>
+                                      {ctx && ctx.after.length > 0 && (
+                                        <div className="space-y-1 mt-2">
+                                          <div className="text-[8px] uppercase tracking-widest text-[#666666]">After</div>
+                                          {ctx.after.map((m) => (
+                                            <div key={m.id} className="text-[10px] text-[#888888] pl-2 border-l border-[#333333]">
+                                              <span className="text-[#666666] bb-mono mr-1">
+                                                {new Date(m.parsedTimestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                                              </span>
+                                              <span className="text-[#3399FF] font-bold">{m.sender}:</span> {m.rawText}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {/* ============================================================ */}
+              {/* SUB-VIEW: UNMATCHED INVOICE LINES */}
+              {/* ============================================================ */}
+              {orderSubView === "unmatched-invoices" && (
+                <>
+                  <div className="text-[9px] text-[#888888]">
+                    {unmatchedInvoiceLines.length} invoice line{unmatchedInvoiceLines.length !== 1 ? "s" : ""} with no order match · Total {fmtGBP(orderMoney.unmatchedInvoiceValue)}
+                  </div>
+
+                  {unmatchedInvoiceLines.length === 0 && (
+                    <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#00CC66] text-sm">
+                      All invoice lines are matched to orders.
+                    </div>
+                  )}
+
+                  {unmatchedInvoiceLines.length > 0 && (
+                    <div className="border border-[#FF9900]/30 bg-[#1A1A1A]">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-[8px] uppercase tracking-widest text-[#666666] border-b border-[#333333] bg-[#151515]">
+                              <th className="text-left px-2 py-1.5 w-24">Invoice #</th>
+                              <th className="text-left px-2 py-1.5 w-24">Date</th>
+                              <th className="text-left px-2 py-1.5">Description</th>
+                              <th className="text-left px-2 py-1.5 w-32">Product</th>
+                              <th className="text-right px-2 py-1.5 w-16">Qty</th>
+                              <th className="text-left px-2 py-1.5 w-12">Unit</th>
+                              <th className="text-right px-2 py-1.5 w-20">Rate</th>
+                              <th className="text-right px-2 py-1.5 w-24">Amount</th>
+                              <th className="text-left px-2 py-1.5 w-32">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {unmatchedInvoiceLines.map((il) => {
+                              const active = manualLinkInvoiceId === il.id;
+                              const busy = reviewBusyId === il.id;
+                              const q = manualLinkQuery.trim().toLowerCase();
+                              const candidates = active
+                                ? allUnmatchedLines.filter((t) => {
+                                    if (!q) return true;
+                                    return (
+                                      t.rawText.toLowerCase().includes(q) ||
+                                      t.normalizedProduct.toLowerCase().includes(q) ||
+                                      t.sender.toLowerCase().includes(q)
+                                    );
+                                  }).slice(0, 20)
+                                : [];
+                              return (
+                                <React.Fragment key={il.id}>
+                                  <tr className="border-b border-[#2A2A2A] hover:bg-[#1E1E1E]">
+                                    <td className="px-2 py-1.5 bb-mono text-[#E0E0E0] font-bold">{il.invoiceNumber}</td>
+                                    <td className="px-2 py-1.5 bb-mono text-[#E0E0E0] whitespace-nowrap">
+                                      {new Date(il.invoiceDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-[#E0E0E0]">{il.productDescription}</td>
+                                    <td className="px-2 py-1.5">
+                                      <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{il.normalizedProduct}</Badge>
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#E0E0E0]">{Number(il.qty)}</td>
+                                    <td className="px-2 py-1.5 text-[#888888]">{il.unit}</td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#888888]">
+                                      {il.rate != null ? fmtGBP(Number(il.rate)) : "--"}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right bb-mono text-[#FF9900] font-bold">
+                                      {il.amount != null ? fmtGBP(Number(il.amount)) : "--"}
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <button
+                                        onClick={() => {
+                                          if (active) { setManualLinkInvoiceId(null); setManualLinkQuery(""); }
+                                          else { setManualLinkInvoiceId(il.id); setManualLinkQuery(""); }
+                                        }}
+                                        className={`text-[9px] px-2 py-0.5 border ${
+                                          active
+                                            ? "bg-[#FF6600] text-black border-[#FF6600]"
+                                            : "bg-[#222222] text-[#E0E0E0] border-[#333333] hover:border-[#FF6600]"
+                                        }`}
+                                      >
+                                        {active ? "Cancel" : "Link to order"}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {active && (
+                                    <tr className="bg-[#151515]">
+                                      <td colSpan={9} className="px-3 py-3">{/* manual link panel */}
+                                        <div className="space-y-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[9px] uppercase tracking-widest text-[#888888]">Find order line:</span>
+                                            <Input
+                                              value={manualLinkQuery}
+                                              onChange={(e) => setManualLinkQuery(e.target.value)}
+                                              placeholder="Search by product, text, or sender..."
+                                              className="h-7 text-[10px] bg-[#222222] border-[#333333]"
+                                            />
+                                          </div>
+                                          <div className="max-h-60 overflow-y-auto border border-[#333333] bg-[#1A1A1A]">
+                                            {candidates.length === 0 ? (
+                                              <div className="p-2 text-[9px] text-[#666666] italic">No unmatched order lines match.</div>
+                                            ) : (
+                                              candidates.map((t) => (
+                                                <button
+                                                  key={t.id}
+                                                  disabled={busy}
+                                                  onClick={() => linkInvoiceToTicketLine(il.id, t.id)}
+                                                  className="w-full text-left px-2 py-1.5 border-b border-[#2A2A2A] last:border-b-0 hover:bg-[#222222] disabled:opacity-50"
+                                                >
+                                                  <div className="flex items-center gap-2 text-[10px]">
+                                                    <span className="bb-mono text-[#666666] whitespace-nowrap">
+                                                      {new Date(t.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                                                    </span>
+                                                    <span className="text-[#3399FF] font-bold">{t.sender}</span>
+                                                    <Badge className="text-[7px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">{t.normalizedProduct}</Badge>
+                                                    <span className="bb-mono text-[#E0E0E0]">{Number(t.requestedQty)} {t.requestedUnit}</span>
+                                                    <span className="text-[9px] text-[#888888] truncate flex-1">{t.rawText}</span>
+                                                  </div>
+                                                </button>
+                                              ))
+                                            )}
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </>
           )}
 
@@ -1695,7 +2538,7 @@ export function BacklogCaseView({
               <ShoppingCart className="size-8 text-[#FF6600] mx-auto" />
               <div className="text-sm text-[#E0E0E0]">Order Threads</div>
               <div className="text-[9px] text-[#666666]">Click to load reconstructed order threads with line items and invoice reconciliation.</div>
-              <Button onClick={loadOrderThreads} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">Load Orders</Button>
+              <Button onClick={() => loadOrderThreads()} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">Load Orders</Button>
             </div>
           )}
         </TabsContent>
