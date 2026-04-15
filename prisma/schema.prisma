@@ -3116,6 +3116,8 @@ model InboxThread {
   lastSnippet     String?
   status          InboxThreadStatus    @default(NEW)
   linkedTicketId  String?
+  linkConfidence  InboxLinkConfidence?
+  linkSource      InboxLinkSource?
   noisedAt        DateTime?
   triagedAt       DateTime?
   triagedBy       String?
@@ -3159,4 +3161,15 @@ enum InboxThreadStatus {
   LINKED
   NOISE
   ARCHIVED
+}
+
+enum InboxLinkConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum InboxLinkSource {
+  AUTO
+  MANUAL
 }
