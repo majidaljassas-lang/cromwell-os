@@ -12,6 +12,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { TicketStatus } from "@/generated/prisma";
+import { scoreOpenTicketsForText, type LinkCandidate } from "@/lib/ingestion/link-resolver";
 
 const CLOSED_TICKET_STATUSES: TicketStatus[] = [
   TicketStatus.CLOSED,
@@ -41,9 +42,13 @@ function deriveChannelKey(event: IngestionEventLike): ChannelKey | null {
   }
 
   if (sourceType === "WHATSAPP") {
-    // whatsapp-web.js payloads carry `chatId`, `from`, or `id._serialized`
-    const chatId = (raw.chatId as string | undefined)
+    // The live ingest route normalises whatsapp-web.js fields into snake_case
+    // (`chat_id`, `sender_phone`). Accept either shape so pre-normalised and
+    // raw-library payloads both thread correctly.
+    const chatId = (raw.chat_id as string | undefined)
+      ?? (raw.chatId as string | undefined)
       ?? (raw.from as string | undefined)
+      ?? (raw.sender_phone as string | undefined)
       ?? ((raw.id as Record<string, unknown> | undefined)?._serialized as string | undefined);
     if (!chatId) return null;
     const isGroup = chatId.endsWith("@g.us");
@@ -73,17 +78,22 @@ function deriveMeta(event: IngestionEventLike) {
       ?? ((raw.body as Record<string, unknown> | undefined)?.content as string | undefined)
       ?? "").toString().slice(0, 240);
   } else if (sourceType === "WHATSAPP") {
-    sender = (raw.from as string | undefined) ?? (raw.author as string | undefined) ?? null;
+    // Accept snake_case (live-ingest shape) or camelCase (raw lib shape).
+    sender = (raw.sender_phone as string | undefined)
+      ?? (raw.from as string | undefined)
+      ?? (raw.author as string | undefined)
+      ?? null;
     if (sender) participants.add(sender);
-    const body = raw.body as string | undefined;
+    const body = (raw.message_text as string | undefined) ?? (raw.body as string | undefined);
     snippet = body ? body.slice(0, 240) : null;
-    subject = snippet ? snippet.slice(0, 80) : null;
+    subject = (raw.chat_name as string | undefined) ?? (snippet ? snippet.slice(0, 80) : null);
   }
 
   const hasAttachments =
     (raw.hasAttachments === true) ||
     (raw.hasMedia === true) ||
-    Array.isArray(raw.attachments) && (raw.attachments as unknown[]).length > 0;
+    (raw.has_media === true) ||
+    (Array.isArray(raw.attachments) && (raw.attachments as unknown[]).length > 0);
 
   return { subject, sender, snippet, participants: [...participants], hasAttachments };
 }
@@ -266,11 +276,70 @@ export async function attachEventToThread(eventId: string): Promise<string | nul
   return thread.id;
 }
 
+// Contact-match confidence mapped onto the same 0-100 scale the content
+// scorer uses, so we can compare apples to apples.
+const CONTACT_SCORE = { HIGH: 80, MEDIUM: 45, LOW: 0 } as const;
+
+// Tier cut-offs: these match link-resolver.ts so the two paths agree.
+const SCORE_HIGH = 70;
+const SCORE_MEDIUM = 40;
+
 /**
- * Contact-based auto-link. Runs after the thread upsert so every newly-arrived
- * message gets another chance to match (e.g. a contact added after first touch).
- * Protects any MANUAL link — once a human has linked a thread, we never touch
- * it again, even if the auto-linker disagrees.
+ * Aggregate thread text (subject + recent message snippets) for content
+ * scoring. Using up to 20 of the most recent messages keeps the signal fresh
+ * without blowing up query size on long threads.
+ */
+async function buildScoringInputForThread(
+  threadId: string,
+  sender: string | null,
+): Promise<{
+  rawText: string;
+  subject: string | null;
+  receivedAt: Date;
+  senderPhone: string | null;
+  senderEmail: string | null;
+}> {
+  const thread = await prisma.inboxThread.findUnique({
+    where: { id: threadId },
+    select: { subject: true, lastSnippet: true, latestAt: true },
+  });
+  const messages = await prisma.inboxThreadMessage.findMany({
+    where: { threadId },
+    orderBy: { occurredAt: "desc" },
+    take: 20,
+    select: { snippet: true, sender: true },
+  });
+  const rawText = [thread?.lastSnippet ?? "", ...messages.map((m) => m.snippet ?? "")]
+    .filter(Boolean)
+    .join("\n");
+
+  // Sender may be an email, a phone JID, or a display name. Feed both slots
+  // to the scorer — it discriminates internally.
+  const senderEmail = sender && sender.includes("@") && !sender.includes("@c.us") && !sender.includes("@g.us")
+    ? sender
+    : null;
+  const senderPhone = sender && (sender.includes("@c.us") || sender.includes("@s.whatsapp.net"))
+    ? sender
+    : null;
+
+  return {
+    rawText,
+    subject: thread?.subject ?? null,
+    receivedAt: thread?.latestAt ?? new Date(),
+    senderPhone,
+    senderEmail,
+  };
+}
+
+/**
+ * Auto-link a thread to an existing ticket using BOTH signals:
+ *   1. Contact-based match (resolveAutoLink) — sender identity → customer → open tickets
+ *   2. Content-based match (scoreOpenTicketsForText) — refs, site, customer name,
+ *      products, timeline mentioned in the message bodies
+ * Picks the higher-scoring candidate and applies HIGH/MEDIUM/LOW gates.
+ *
+ * Never creates a ticket — only links to existing ones.
+ * Protects MANUAL links: once a human has linked a thread, we never touch it.
  */
 async function autoLinkThread(
   threadId: string,
@@ -285,25 +354,54 @@ async function autoLinkThread(
   if (!current) return;
   if (current.linkSource === "MANUAL") return;
 
-  const result = await resolveAutoLink(channel, conversationKey, sender);
+  // 1) Contact-based candidate
+  const contact = await resolveAutoLink(channel, conversationKey, sender);
+  const contactCandidate = contact.ticketId
+    ? { ticketId: contact.ticketId, score: CONTACT_SCORE[contact.confidence], reasons: ["Contact-based match"] }
+    : { ticketId: null, score: CONTACT_SCORE[contact.confidence], reasons: [] as string[] };
 
-  if (result.confidence === "LOW") {
-    // Only write LOW if we haven't already recorded a better auto-confidence.
-    // Prevents a later LOW read from clobbering an earlier HIGH/MEDIUM verdict.
-    if (current.linkConfidence == null) {
-      await prisma.inboxThread.update({
-        where: { id: threadId },
-        data: { linkConfidence: "LOW", linkSource: "AUTO" },
-      });
-    }
-    return;
+  // 2) Content-based candidate — score against all open tickets using message text
+  const scoringInput = await buildScoringInputForThread(threadId, sender);
+  const contentCandidates: LinkCandidate[] = scoringInput.rawText.trim().length > 0
+    ? await scoreOpenTicketsForText({
+        eventType: "THREAD_SCORING",
+        sourceType: channel === "EMAIL" ? "OUTLOOK" : "WHATSAPP",
+        sender,
+        senderPhone: scoringInput.senderPhone,
+        senderEmail: scoringInput.senderEmail,
+        receivedAt: scoringInput.receivedAt,
+        rawText: scoringInput.rawText,
+        subject: scoringInput.subject,
+      })
+    : [];
+  const topContent = contentCandidates[0];
+
+  // 3) Pick the winner. If both point at the same ticket, boost the score
+  //    (signals corroborate). Otherwise take the higher individual score.
+  let winnerTicketId: string | null = null;
+  let winnerScore = 0;
+  let winnerReasons: string[] = [];
+
+  if (topContent && contactCandidate.ticketId && topContent.entityId === contactCandidate.ticketId) {
+    winnerTicketId = topContent.entityId;
+    winnerScore = Math.min(100, topContent.score + contactCandidate.score);
+    winnerReasons = [...topContent.reasons, ...contactCandidate.reasons];
+  } else if (topContent && topContent.score >= contactCandidate.score) {
+    winnerTicketId = topContent.entityId;
+    winnerScore = topContent.score;
+    winnerReasons = topContent.reasons;
+  } else if (contactCandidate.ticketId) {
+    winnerTicketId = contactCandidate.ticketId;
+    winnerScore = contactCandidate.score;
+    winnerReasons = contactCandidate.reasons;
   }
 
-  if (result.confidence === "HIGH") {
+  // 4) Apply tier gates
+  if (winnerTicketId && winnerScore >= SCORE_HIGH) {
     await prisma.inboxThread.update({
       where: { id: threadId },
       data: {
-        linkedTicketId: result.ticketId,
+        linkedTicketId: winnerTicketId,
         linkConfidence: "HIGH",
         linkSource: "AUTO",
         status: "LINKED",
@@ -312,11 +410,31 @@ async function autoLinkThread(
     return;
   }
 
-  // MEDIUM: don't link, but surface so the UI can offer one-tap selection.
-  await prisma.inboxThread.update({
-    where: { id: threadId },
-    data: { linkConfidence: "MEDIUM", linkSource: "AUTO" },
-  });
+  if (winnerTicketId && winnerScore >= SCORE_MEDIUM) {
+    // Suggestion: stash the ticket id so the UI can offer one-tap confirm,
+    // but keep status=NEW (not LINKED) until the human accepts.
+    await prisma.inboxThread.update({
+      where: { id: threadId },
+      data: {
+        linkedTicketId: winnerTicketId,
+        linkConfidence: "MEDIUM",
+        linkSource: "AUTO",
+      },
+    });
+    return;
+  }
+
+  // LOW / NONE — flag as potential new, don't clobber a prior better verdict.
+  if (current.linkConfidence == null) {
+    await prisma.inboxThread.update({
+      where: { id: threadId },
+      data: { linkConfidence: "LOW", linkSource: "AUTO" },
+    });
+  }
+  // Record the top reasons on console for debugging during backfill runs.
+  if (winnerReasons.length > 0) {
+    console.log(`[autoLinkThread] thread=${threadId} score=${winnerScore} LOW — reasons: ${winnerReasons.join("; ")}`);
+  }
 }
 
 /** Bulk backfill — call once to populate InboxThread from existing IngestionEvents. */

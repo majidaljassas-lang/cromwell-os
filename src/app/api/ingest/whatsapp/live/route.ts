@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { classifyMessage } from "@/lib/ingestion/classifier";
 import { resolveLink } from "@/lib/ingestion/link-resolver";
 import { classifyWorkPersonal } from "@/lib/ingestion/work-classifier";
+import { attachEventToThread } from "@/lib/inbox/thread-builder";
+import { CUTOVER_DATE } from "@/lib/sync-constants";
 import fs from "fs";
 import path from "path";
 
@@ -101,9 +103,9 @@ export async function POST(request: Request) {
   try {
     const msg = await request.json();
 
-    // Skip if before April 1st
+    // Skip if before cutover
     const msgDate = new Date(msg.timestamp);
-    if (msgDate < new Date("2026-04-01")) {
+    if (msgDate < CUTOVER_DATE) {
       return Response.json({ skipped: true, reason: "before_cutoff" });
     }
 
@@ -212,40 +214,44 @@ export async function POST(request: Request) {
       },
     });
 
-    // NOTE: Auto-linking DISABLED — everything lands in inbox for manual triage
+    // Auto-link: run the content matcher (refs, site/customer mentions, products,
+    // timeline) against all open tickets. Creates the InboundEvent with a
+    // confidence score. HIGH links, MEDIUM surfaces as a suggestion, LOW/NONE
+    // flags as potential new. Never creates a ticket automatically.
+    let linkStatus: string | null = null;
+    let linkConfidence = 0;
     try {
-      await prisma.inboundEvent.create({
-        data: {
-          eventType: "WHATSAPP_MESSAGE",
-          sourceType: "WHATSAPP",
-          externalRef: msg.message_id,
-          sender: msg.sender_name,
-          senderPhone: msg.sender_phone,
-          receivedAt: msgDate,
-          rawText: msg.message_text,
-          subject: msg.chat_name || msg.sender_name,
-          linkStatus: "UNPROCESSED",
-          ingestionEventId: event.id,
-        },
+      const result = await resolveLink({
+        eventType: "WHATSAPP_MESSAGE",
+        sourceType: "WHATSAPP",
+        sender: msg.sender_name,
+        senderPhone: msg.sender_phone,
+        receivedAt: msgDate,
+        rawText: msg.message_text,
+        subject: msg.chat_name || msg.sender_name,
+        ingestionEventId: event.id,
       });
-    } catch {
-      // Inbound event creation failed — continue anyway
+      linkStatus = result.linkStatus;
+      linkConfidence = result.linkConfidence;
+    } catch (err) {
+      console.error("resolveLink failed:", err);
     }
 
-    // Update event with classification (preserve DISMISSED status for filtered groups)
-    await prisma.ingestionEvent.update({
-      where: { id: event.id },
-      data: {
-        eventKind: msg.is_sent ? "WHATSAPP_SENT" : classification.classification,
-        status: ignoredByKeyword ? "DISMISSED" : "CLASSIFIED",
-      },
-    });
+    // Thread into the InboxThread model so the UI inbox picks it up and the
+    // thread-level auto-linker (contact + content) runs.
+    try {
+      await attachEventToThread(event.id);
+    } catch (err) {
+      console.error("attachEventToThread failed:", err);
+    }
 
     return Response.json({
       ok: true,
       eventId: event.id,
       classification: classification.classification,
       confidence: classification.confidence,
+      linkStatus,
+      linkConfidence,
     });
   } catch (error) {
     console.error("WhatsApp live ingest failed:", error);

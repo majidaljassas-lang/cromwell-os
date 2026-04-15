@@ -91,6 +91,65 @@ const REF_PATTERNS = [
   { pattern: /\bA\d{10,}/i, type: "selco_order" },
 ];
 
+// ─── Scoring helper (read-only, reusable) ──────────────────────────────────
+
+/**
+ * Score the input against every open ticket and return candidates sorted by
+ * score desc. Pure read — no writes to InboundEvent or ReviewQueueItem.
+ * Used by both `resolveLink` (below) and the thread-builder auto-linker so
+ * both paths share one scoring engine.
+ */
+export async function scoreOpenTicketsForText(
+  input: InboundEventInput
+): Promise<LinkCandidate[]> {
+  // Split the two Contact self-joins into separate queries — including both
+  // requestedByContact and actingOnBehalfOfContact in one findMany triggers a
+  // P1017 "Server has closed the connection" in Prisma 7 + pglite's driver
+  // after sustained use. Two smaller queries + in-memory join are stable.
+  const tickets = await prisma.ticket.findMany({
+    where: { status: { notIn: ["CLOSED"] } },
+    include: {
+      site: true,
+      payingCustomer: true,
+      requestedByContact: true,
+      lines: { take: 20, select: { normalizedItemName: true, productCode: true } },
+    },
+    take: 100,
+  });
+
+  const actingIds = Array.from(
+    new Set(tickets.map((t) => t.actingOnBehalfOfContactId).filter((x): x is string => !!x))
+  );
+  const actingContacts = actingIds.length
+    ? await prisma.contact.findMany({ where: { id: { in: actingIds } } })
+    : [];
+  const actingById = new Map(actingContacts.map((c) => [c.id, c]));
+
+  const candidates: LinkCandidate[] = [];
+  for (const ticket of tickets) {
+    const hydrated = {
+      ...ticket,
+      actingOnBehalfOfContact: ticket.actingOnBehalfOfContactId
+        ? actingById.get(ticket.actingOnBehalfOfContactId) ?? null
+        : null,
+    };
+    const { score, reasons } = scoreAgainstTicket(input, hydrated);
+    if (score > 0) {
+      candidates.push({
+        entityType: "Ticket",
+        entityId: ticket.id,
+        label: ticket.title,
+        score,
+        reasons,
+        siteId: ticket.siteId,
+        customerId: ticket.payingCustomerId,
+      });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
 // ─── Core Resolver ──────────────────────────────────────────────────────────
 
 export async function resolveLink(input: InboundEventInput): Promise<LinkResult> {
@@ -113,36 +172,8 @@ export async function resolveLink(input: InboundEventInput): Promise<LinkResult>
     },
   });
 
-  // Gather all active anchors
-  const candidates: LinkCandidate[] = [];
-
-  // Score against tickets
-  const tickets = await prisma.ticket.findMany({
-    where: { status: { notIn: ["CLOSED"] } },
-    include: {
-      site: true,
-      payingCustomer: true,
-      requestedByContact: true,
-      actingOnBehalfOfContact: true,
-      lines: { take: 20, select: { normalizedItemName: true, productCode: true } },
-    },
-    take: 100,
-  });
-
-  for (const ticket of tickets) {
-    const { score, reasons } = scoreAgainstTicket(input, ticket);
-    if (score > 0) {
-      candidates.push({
-        entityType: "Ticket",
-        entityId: ticket.id,
-        label: ticket.title,
-        score,
-        reasons,
-        siteId: ticket.siteId,
-        customerId: ticket.payingCustomerId,
-      });
-    }
-  }
+  // Gather all active anchors — start with the shared ticket scorer
+  const candidates: LinkCandidate[] = await scoreOpenTicketsForText(input);
 
   // Score against enquiries
   const enquiries = await prisma.enquiry.findMany({
@@ -293,7 +324,7 @@ export async function resolveLink(input: InboundEventInput): Promise<LinkResult>
 
 // ─── Scoring functions ──────────────────────────────────────────────────────
 
-function scoreAgainstTicket(
+export function scoreAgainstTicket(
   input: InboundEventInput,
   ticket: any
 ): { score: number; reasons: string[] } {

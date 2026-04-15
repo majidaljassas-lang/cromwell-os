@@ -5,6 +5,7 @@ import { classifyMessage } from "@/lib/ingestion/classifier";
 import { enqueueDocument } from "@/lib/intake/queue";
 import { looksLikeBillBody, subjectLooksLikeBill } from "@/lib/intake/email-body-detector";
 import { attachEventToThread } from "@/lib/inbox/thread-builder";
+import { resolveLink } from "@/lib/ingestion/link-resolver";
 import { CUTOVER_DATE } from "@/lib/sync-constants";
 
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
@@ -139,9 +140,30 @@ export async function POST(request: Request) {
             },
           });
 
-          // Attach to inbox thread (emails + WhatsApp go through the same threading pipe)
+          // Attach to inbox thread (emails + WhatsApp go through the same threading pipe).
+          // The thread-level auto-linker runs contact + content scoring against
+          // open tickets; HIGH auto-links, MEDIUM surfaces as a suggestion.
           await attachEventToThread(event.id).catch((err) =>
             console.warn(`attachEventToThread failed for ${event.id}:`, err instanceof Error ? err.message : err)
+          );
+
+          // Also score this email at the event level: creates an InboundEvent
+          // with linkStatus + linkConfidence against all open tickets/enquiries
+          // using references, site/customer mentions, products, timeline.
+          // This feeds the review queue; thread-level linking above drives the
+          // inbox UI. Never creates a ticket.
+          const e = email as any;
+          resolveLink({
+            eventType: "EMAIL",
+            sourceType: "OUTLOOK",
+            sender: senderEmail || null,
+            senderEmail: senderEmail || null,
+            receivedAt: new Date(e.receivedDateTime),
+            rawText: bodyText,
+            subject: e.subject ?? null,
+            ingestionEventId: event.id,
+          }).catch((err) =>
+            console.warn(`resolveLink failed for ${event.id}:`, err instanceof Error ? err.message : err)
           );
 
           // Download and parse attachments BEFORE building the parsed text
