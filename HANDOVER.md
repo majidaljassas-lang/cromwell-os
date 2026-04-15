@@ -32,41 +32,57 @@ pm2 list | grep cromwell
   4  cromwell-web       online   — reloaded with new matcher wiring
 ```
 
-## WhatsApp backfill run — BLOCKED on whatsapp-web.js Store warm-up
+## WhatsApp backfill — WORKING via direct Store.Msg access
 
-Triggered `POST /api/ingest/whatsapp/backfill` twice post-restart:
+### Debugging path (for future reference)
 
-| Attempt | Wait before trigger | chatsTotal | chatsScanned | messagesIngested | errors |
+| Attempt | Approach | chatsScanned | ingested | errors | Verdict |
 |---|---|---|---|---|---|
-| 1 | ~0s after ready | 920 | 920 | 0 | 920 |
-| 2 | ~50s after ready | 920 | 920 | 0 | 920 |
+| 1 | `chat.fetchMessages()` straight from `getChats()` | 920 | 0 | 920 | Fail |
+| 2 | +50s warm-up delay before trigger | 920 | 0 | 920 | Fail |
+| 3 | `client.getChatById(jid)` before fetchMessages + skip `status@broadcast` | 920 | 0 | 919 | Fail (skip worked, core still broken) |
+| 4 | `pupPage.evaluate(() => Store.Chat.getModelsArray())` Store nudge | 920 | 0 | 919 | Fail |
+| 5 | **Direct `Store.Msg.getModelsArray()` via `pupPage.evaluate`, bypass whatsapp-web.js high-level API** | 93 | **72** | **0** | ✅ |
 
-Every chat threw the same error inside puppeteer:
+Every failing attempt threw the same error from inside puppeteer:
 ```
 Cannot read properties of undefined (reading 'waitForChatLoading')
   at ...static.whatsapp.net/rsrc.php/.../ncxg1Zqzonb.js:2085:1607
 ```
+Root cause: `whatsapp-web.js@1.34.6` calls `Store.Chat.waitForChatLoading` internally, but that function no longer exists in the current WhatsApp Web build. The library has drifted from the web client. Every path that routes through `Chat.fetchMessages` is broken until the lib is upgraded.
 
-This is a whatsapp-web.js Store-warm-up issue. `client.on("ready")` fires before WhatsApp Web's internal `Store.Chat` is fully hydrated, so `chat.fetchMessages()` blows up on an undefined method. Live `message_create` events work fine because they don't call `fetchMessages`. Time alone doesn't fix it — the Store won't populate until the page is nudged.
+### Current implementation (option 5, shipped)
 
-**Known workarounds (pick one before the next attempt):**
-1. In `scripts/whatsapp-qr-server.js` `runBackfill`, before iterating chats call `await client.pupPage.evaluate(() => window.Store.Chat.getModelsArray());` to force-hydrate the Chat collection. Then retry fetchMessages.
-2. For each chat, `await client.getChatById(chat.id._serialized)` before `fetchMessages` — this forces the UI to open/load that chat in the background page.
-3. If neither works, swap the backfill loop for `client.pupPage.evaluate` that pulls `window.Store.Msg.models` filtered by chat + timestamp directly, bypassing the high-level API. Heavier rewrite.
+`scripts/whatsapp-qr-server.js` `runBackfill` now reads `Store.Msg` directly via `pupPage.evaluate`, filters by timestamp ≥ `since` in the page context, and POSTs each payload to `/api/ingest/whatsapp/live`. Same dedup + classifier + auto-linker pipeline as the live listener.
 
-Option 2 is the cleanest next step. Implementation sketch:
-```js
-for (const chat of chats) {
-  const hydrated = await client.getChatById(chat.id._serialized);
-  const messages = await hydrated.fetchMessages({ limit });
-  ...
-}
+### Known limitation of option 5
+
+`Store.Msg` only contains messages **currently loaded in the WhatsApp Web tab's memory**. After a cromwell-whatsapp restart it starts near-empty and accumulates over time as:
+- the live listener receives new messages, and
+- the WhatsApp Web tab lazily pulls chat history when opened in the UI (not triggered programmatically here).
+
+**Implication:** a backfill run right after a restart captures ~recent messages only. For a real "replay everything since 01.04.2026" you need the cromwell-whatsapp process to have been running long enough for the Store to accumulate, or a proper library upgrade that restores `fetchMessages`.
+
+### First successful run (post option 5 deploy)
+
 ```
+found=126 ingested=72 skipped=54 errors=0  (93 chats, 25s)
+```
+The 54 skips are a mix of dedupes (already ingested via live listener), blacklist/whitelist filter hits, and pre-cutover messages that slipped the in-evaluate filter. Zero errors means the pipeline is clean.
 
-**Check status any time:**
+### Re-run the backfill
+
 ```bash
+curl -sS -X POST http://localhost:3000/api/ingest/whatsapp/backfill \
+  -H "Content-Type: application/json" -d '{}'
+# then:
 curl -sS http://localhost:3000/api/ingest/whatsapp/backfill | jq
 ```
+
+### If you need a full historical replay
+
+1. Upgrade `whatsapp-web.js` to a version that tracks the current WhatsApp Web build. Test the live listener afterwards — the `message_create` contract may have changed.
+2. Alternatively, leave cromwell-whatsapp running for days/weeks — Store.Msg grows, and subsequent backfill runs replay whatever's accumulated.
 
 ## Known issues
 

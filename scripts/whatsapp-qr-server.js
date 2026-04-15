@@ -49,114 +49,113 @@ async function runBackfill(since) {
 
   console.log(`🔁 Backfill starting from ${since.toISOString()}`);
   try {
-    const chats = await client.getChats();
-    backfillState.chatsTotal = chats.length;
-    console.log(`   ${chats.length} chats to scan`);
+    // Bypass whatsapp-web.js's Chat.fetchMessages high-level API — it calls
+    // an internal `waitForChatLoading` that no longer exists in the current
+    // WhatsApp Web build against lib 1.34.6. Read directly from Store.Msg
+    // via pupPage.evaluate, which is stable across library/web-build drift.
+    //
+    // Trade-off: Store.Msg only contains messages currently in-memory. For
+    // chats that haven't been opened this session, older messages won't be
+    // present — only what's streamed in via the live listener since process
+    // start. This still covers everything observed since PM2 boot.
+    const sinceUnix = Math.floor(since.getTime() / 1000);
+    const extracted = await client.pupPage.evaluate((sinceUnix) => {
+      const Store = window.Store;
+      if (!Store || !Store.Msg) return { error: "Store.Msg unavailable", messages: [] };
+      const msgs = typeof Store.Msg.getModelsArray === "function"
+        ? Store.Msg.getModelsArray()
+        : (Store.Msg.models || []);
 
-    for (const rawChat of chats) {
-      const chatJid = rawChat.id?._serialized || "";
-      const label = rawChat.isGroup ? `[${rawChat.name || chatJid}]` : (rawChat.name || chatJid);
-      backfillState.currentChat = label;
+      const out = [];
+      for (const m of msgs) {
+        try {
+          const t = m.t || 0;
+          if (t < sinceUnix) continue;
 
-      // status@broadcast is a system pseudo-chat that always throws on
-      // fetchMessages — skip it outright.
-      if (chatJid === "status@broadcast" || !chatJid) {
-        backfillState.chatsScanned++;
-        continue;
-      }
+          const remote = m.id && m.id.remote
+            ? (typeof m.id.remote === "string" ? m.id.remote : m.id.remote._serialized || "")
+            : "";
+          const msgId = m.id && m.id._serialized ? m.id._serialized : "";
+          if (!msgId || !remote) continue;
+          if (remote === "status@broadcast") continue;
 
-      try {
-        // Re-hydrate the chat via getChatById before calling fetchMessages.
-        // The objects returned by client.getChats() aren't fully populated in
-        // WhatsApp Web's internal Store immediately after `ready`, and calling
-        // fetchMessages on them throws `waitForChatLoading is undefined`.
-        // getChatById forces the background page to load the chat first.
-        const chat = await client.getChatById(chatJid);
+          const body = m.body || "";
+          const type = m.type || "chat";
+          const hasMedia = !!(m.mediaType || m.mediaObject || m.isMedia);
+          if (!body && !hasMedia) continue;
 
-        // Paginate: grow the fetch window until the oldest message is before
-        // `since`, so we never miss messages in high-volume chats.
-        let limit = BACKFILL_PAGE_START;
-        let messages = [];
-        while (true) {
-          messages = await chat.fetchMessages({ limit });
-          if (messages.length === 0) break;
-          const oldest = messages[0];
-          const oldestDate = new Date((oldest.timestamp || 0) * 1000);
-          if (oldestDate < since) break;
-          if (messages.length < limit) break; // chat exhausted
-          if (limit >= BACKFILL_PAGE_CAP) {
-            console.warn(`   ⚠ ${label}: reached page cap ${BACKFILL_PAGE_CAP}, oldest fetched ${oldestDate.toISOString()}`);
-            break;
-          }
-          limit = Math.min(limit * BACKFILL_PAGE_GROWTH, BACKFILL_PAGE_CAP);
-        }
+          const chat = Store.Chat && typeof Store.Chat.get === "function" ? Store.Chat.get(remote) : null;
+          const chatName = chat && chat.name ? chat.name : "";
+          const isGroup = remote.endsWith("@g.us");
 
-        const recent = messages.filter((m) => new Date((m.timestamp || 0) * 1000) >= since);
-        if (recent.length === 0) {
-          backfillState.chatsScanned++;
-          continue;
-        }
+          const fromField = m.from && typeof m.from !== "string" && m.from._serialized
+            ? m.from._serialized
+            : (m.from || "");
 
-        console.log(`   ${label}: ${recent.length} messages`);
-
-        for (const msg of recent) {
-          if (msg.from === "status@broadcast") continue;
-          if (!msg.body && !msg.hasMedia) continue;
-
-          backfillState.messagesFound++;
-
-          let chatName = "";
-          let chatId = "";
-          let isGroup = false;
-          let senderName = msg.from || "Unknown";
-
+          // Sender contact lookup — best-effort, fall back to phone jid.
+          let senderName = "";
           try {
-            chatName = chat.name || "";
-            chatId = chat.id?._serialized || "";
-            isGroup = chat.isGroup || false;
-          } catch {}
-          try {
-            const contact = await msg.getContact();
-            senderName = contact.pushname || contact.name || msg.from || "Unknown";
+            const senderJid = isGroup && m.author
+              ? (typeof m.author === "string" ? m.author : m.author._serialized || "")
+              : fromField;
+            if (senderJid && Store.Contact && typeof Store.Contact.get === "function") {
+              const contact = Store.Contact.get(senderJid);
+              if (contact) {
+                senderName = contact.pushname || contact.name || contact.formattedName || "";
+              }
+            }
           } catch {}
 
-          const payload = {
-            message_id: msg.id?._serialized || `${Date.now()}`,
-            chat_id: chatId,
+          out.push({
+            message_id: msgId,
+            chat_id: remote,
             chat_name: chatName,
-            sender_phone: msg.from || "",
-            sender_name: senderName,
-            timestamp: new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
-            message_text: msg.body || "",
-            is_sent: msg.fromMe,
+            sender_phone: fromField,
+            sender_name: senderName || fromField,
+            timestamp: new Date(t * 1000).toISOString(),
+            message_text: body,
+            is_sent: !!m.fromMe,
             is_group: isGroup,
-            has_media: msg.hasMedia || false,
-            media_type: msg.type !== "chat" ? msg.type : null,
-          };
-
-          try {
-            const res = await fetch("http://localhost:3000/api/ingest/whatsapp/live", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (res.ok && !data.skipped) backfillState.messagesIngested++;
-            else backfillState.messagesSkipped++;
-          } catch (err) {
-            backfillState.messagesSkipped++;
-            backfillState.errors++;
-            backfillState.lastError = err.message;
-          }
-        }
-      } catch (err) {
-        backfillState.errors++;
-        backfillState.lastError = `${label}: ${err.message}`;
-        console.error(`   ❌ ${label}: ${err.message}`);
+            has_media: hasMedia,
+            media_type: type !== "chat" ? type : null,
+          });
+        } catch { /* skip malformed */ }
       }
+      return { error: null, messages: out };
+    }, sinceUnix);
 
-      backfillState.chatsScanned++;
+    if (extracted.error) {
+      console.warn(`   ⚠ Store.Msg extraction error: ${extracted.error}`);
+      backfillState.lastError = extracted.error;
     }
+
+    const payloads = extracted.messages || [];
+    // Represent "chats" in the progress counter as distinct conversation ids
+    // — keeps the status API meaningful even though we're not iterating
+    // per-chat anymore.
+    const distinctChats = new Set(payloads.map((p) => p.chat_id));
+    backfillState.chatsTotal = distinctChats.size;
+    console.log(`   extracted ${payloads.length} candidate messages across ${distinctChats.size} chats`);
+
+    for (const payload of payloads) {
+      backfillState.messagesFound++;
+      backfillState.currentChat = payload.chat_name || payload.chat_id;
+      try {
+        const res = await fetch("http://localhost:3000/api/ingest/whatsapp/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && !data.skipped) backfillState.messagesIngested++;
+        else backfillState.messagesSkipped++;
+      } catch (err) {
+        backfillState.messagesSkipped++;
+        backfillState.errors++;
+        backfillState.lastError = err.message;
+      }
+    }
+    backfillState.chatsScanned = distinctChats.size;
 
     console.log(`✅ Backfill complete: ${backfillState.messagesIngested} ingested, ${backfillState.messagesSkipped} skipped, ${backfillState.errors} errors`);
   } catch (err) {
