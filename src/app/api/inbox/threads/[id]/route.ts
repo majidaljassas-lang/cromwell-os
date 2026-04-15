@@ -85,3 +85,98 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   return Response.json({ error: "unknown action" }, { status: 400 });
 }
+
+/**
+ * DELETE /api/inbox/threads/:id
+ *
+ * Permanently removes the thread + its messages + the underlying IngestionEvents
+ * (plus any ParsedMessage / IntakeDocument / ExtractedEntity / IngestionLink
+ * derived from those events) from Cromwell OS.
+ *
+ * Safety rails:
+ *   - Only threads with status = NOISE can be hard-deleted (or pass ?force=1 to override)
+ *   - NEVER deletes IngestionEvents that have a SupplierBill derived from them
+ *     (those are accounting records we must keep)
+ *   - Email itself remains in Outlook — we only wipe OS-side state
+ */
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const url = new URL(request.url);
+  const force = url.searchParams.get("force") === "1";
+
+  const thread = await prisma.inboxThread.findUnique({
+    where: { id },
+    include: { messages: { select: { ingestionEventId: true } } },
+  });
+  if (!thread) return Response.json({ error: "thread not found" }, { status: 404 });
+  if (thread.status !== "NOISE" && !force) {
+    return Response.json({ error: `refusing — thread is ${thread.status}; must be NOISE or pass ?force=1` }, { status: 409 });
+  }
+
+  const eventIds = thread.messages.map((m) => m.ingestionEventId);
+
+  // Detect events that have accounting records derived from them — keep those.
+  const protectedEventIds = new Set<string>();
+  if (eventIds.length) {
+    const bills = await prisma.supplierBill.findMany({
+      where: { sourceAttachmentRef: { in: eventIds } },
+      select: { sourceAttachmentRef: true },
+    });
+    for (const b of bills) if (b.sourceAttachmentRef) protectedEventIds.add(b.sourceAttachmentRef);
+
+    const intakeDocs = await prisma.intakeDocument.findMany({
+      where: { ingestionEventId: { in: eventIds }, supplierBillId: { not: null } },
+      select: { ingestionEventId: true },
+    });
+    for (const d of intakeDocs) if (d.ingestionEventId) protectedEventIds.add(d.ingestionEventId);
+  }
+  const deletableEventIds = eventIds.filter((id) => !protectedEventIds.has(id));
+
+  // Cascade delete in the right order. Wrap in a transaction.
+  const deleted = await prisma.$transaction(async (tx) => {
+    // 1. Delete IntakeDocument rows for these events (not yet promoted to bills)
+    const intake = await tx.intakeDocument.deleteMany({
+      where: { ingestionEventId: { in: deletableEventIds }, supplierBillId: null },
+    });
+
+    // 2. Delete ExtractedEntity + IngestionLink via ParsedMessage (need the parsedMessage ids first)
+    const parsed = await tx.parsedMessage.findMany({
+      where: { ingestionEventId: { in: deletableEventIds } },
+      select: { id: true },
+    });
+    const parsedIds = parsed.map((p) => p.id);
+    const entities = await tx.extractedEntity.deleteMany({ where: { parsedMessageId: { in: parsedIds } } });
+    const links    = await tx.ingestionLink.deleteMany({ where: { parsedMessageId: { in: parsedIds } } });
+
+    // 3. Delete ParsedMessage rows
+    const parsedDel = await tx.parsedMessage.deleteMany({ where: { id: { in: parsedIds } } });
+
+    // 4. Delete SourceSiteMatch rows
+    const sourceSite = await tx.sourceSiteMatch.deleteMany({ where: { ingestionEventId: { in: deletableEventIds } } });
+
+    // 5. Delete DraftInvoiceRecoveryItem rows (if any)
+    let draftRecovery = { count: 0 };
+    try {
+      draftRecovery = await tx.draftInvoiceRecoveryItem.deleteMany({ where: { ingestionEventId: { in: deletableEventIds } } });
+    } catch { /* optional */ }
+
+    // 6. Delete the InboxThreadMessage rows (cascade will also run, but explicit is safer)
+    const threadMsgs = await tx.inboxThreadMessage.deleteMany({ where: { threadId: id } });
+
+    // 7. Delete IngestionEvent rows (only the ones not protected)
+    const events = await tx.ingestionEvent.deleteMany({ where: { id: { in: deletableEventIds } } });
+
+    // 8. Finally drop the thread itself
+    await tx.inboxThread.delete({ where: { id } });
+
+    return { intake, entities, links, parsed: parsedDel, sourceSite, draftRecovery, threadMsgs, events };
+  });
+
+  return Response.json({
+    ok: true,
+    threadId: id,
+    eventsDeleted: deleted.events.count,
+    eventsProtected: protectedEventIds.size,
+    details: deleted,
+  });
+}

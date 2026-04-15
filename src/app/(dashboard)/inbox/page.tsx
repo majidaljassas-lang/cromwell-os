@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { InboxView } from "@/components/inbox/inbox-view";
+import { InboxThreadsPanel } from "@/components/inbox/inbox-threads-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,11 @@ export default async function InboxPage() {
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-6">
+      {/* NEW — Inbox thread queue (live, from emails + WhatsApp, 2026-04-01+) */}
+      <InboxThreadsPanel />
+
+      {/* Existing unified-work view */}
       <InboxView
         customers={s(customers)}
         sites={s(sites)}

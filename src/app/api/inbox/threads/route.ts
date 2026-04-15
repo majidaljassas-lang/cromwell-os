@@ -31,7 +31,16 @@ export async function GET(request: Request) {
       take: limit,
       include: {
         _count: { select: { messages: true } },
-        linkedTicket: { select: { id: true, ticketNo: true, title: true } },
+        linkedTicket: {
+          select: {
+            id: true,
+            ticketNo: true,
+            title: true,
+            status: true,
+            payingCustomer: { select: { id: true, name: true } },
+            site: { select: { id: true, siteName: true } },
+          },
+        },
       },
     }),
     // Status counts for tabs
@@ -59,7 +68,18 @@ export async function GET(request: Request) {
       messageCount: t._count.messages,
       lastSnippet: t.lastSnippet,
       status: t.status,
-      linkedTicket: t.linkedTicket,
+      linkConfidence: t.linkConfidence,
+      linkSource: t.linkSource,
+      linkedTicket: t.linkedTicket
+        ? {
+            id: t.linkedTicket.id,
+            ticketNo: t.linkedTicket.ticketNo,
+            title: t.linkedTicket.title,
+            status: t.linkedTicket.status,
+            customer: t.linkedTicket.payingCustomer,
+            site: t.linkedTicket.site,
+          }
+        : null,
     })),
   });
 }
