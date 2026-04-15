@@ -110,7 +110,7 @@ model Site {
   supplierBillLines   SupplierBillLine[]
   tickets             Ticket[]
   ticketLines         TicketLine[]
-  billLineAllocations BillLineAllocation[] @relation("BillLineAllocationSite")
+  billLineAllocations BillLineAllocation[]  @relation("BillLineAllocationSite")
 
   @@index([siteName])
   @@index([siteCode])
@@ -459,6 +459,7 @@ model Ticket {
   site                      Site?                    @relation(fields: [siteId], references: [id])
   lines                     TicketLine[]
   phases                    TicketPhase[]
+  inboxThreads              InboxThread[]            @relation("InboxThreadTicket")
 
   @@index([status])
   @@index([payingCustomerId])
@@ -555,11 +556,11 @@ model TicketLine {
   components            TicketLine[]             @relation("BOMComponents")
   isBomParent           Boolean                  @default(false)
 
-  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
-  site               Site?               @relation(fields: [siteId], references: [id])
-  supplier           Supplier?           @relation("TicketLineSupplier", fields: [supplierId], references: [id])
-  ticket             Ticket              @relation(fields: [ticketId], references: [id])
-  ticketPhase        TicketPhase?        @relation(fields: [ticketPhaseId], references: [id])
+  siteCommercialLink  SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
+  site                Site?                @relation(fields: [siteId], references: [id])
+  supplier            Supplier?            @relation("TicketLineSupplier", fields: [supplierId], references: [id])
+  ticket              Ticket               @relation(fields: [ticketId], references: [id])
+  ticketPhase         TicketPhase?         @relation(fields: [ticketPhaseId], references: [id])
   billLineAllocations BillLineAllocation[] @relation("BillLineAllocationTicketLine")
 
   @@index([ticketId])
@@ -2412,6 +2413,7 @@ enum SourceType {
   IMAGE_UPLOAD
   MANUAL
   API
+  ENABLE_BANKING
 }
 
 enum EnquiryType {
@@ -2756,6 +2758,9 @@ model BankAccount {
   yapilyConsentToken  String?
   yapilyAccountId     String?
   yapilyInstitutionId String?
+  // Enable Banking (replaces Yapily)
+  enableSessionId     String?           // Enable Banking session ID stored after consent
+  enableAccountId     String?           @unique // Enable's account UID — unique per account
   lastSyncedAt        DateTime?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
@@ -2788,6 +2793,23 @@ model BankTransaction {
   @@index([transactionDate])
   @@index([reconciliationStatus])
   @@index([bankAccountId])
+}
+
+// Auto-reconciliation suggestions raised by the Enable Banking sync.
+// DO NOT auto-post — only surface for human review.
+model BankTransactionMatch {
+  id                  String   @id @default(uuid())
+  bankTransactionId   String   @unique
+  matchType           String   // INVOICE | BILL
+  matchedRecordId     String   // SalesInvoice.id or SupplierBill.id
+  matchedRecordRef    String?  // human-readable ref (invoiceNo / billNo)
+  confidenceScore     Int      @default(0) // 0-100
+  confirmedAt         DateTime?
+  dismissedAt         DateTime?
+  createdAt           DateTime @default(now())
+
+  @@index([bankTransactionId])
+  @@index([matchType, matchedRecordId])
 }
 
 model PaymentMade {
@@ -2927,8 +2949,8 @@ model BillLineAllocation {
   updatedAt            DateTime           @updatedAt
   supplierBillLine     SupplierBillLine   @relation(fields: [supplierBillLineId], references: [id])
   ticketLine           TicketLine?        @relation("BillLineAllocationTicketLine", fields: [ticketLineId], references: [id])
-  site                 Site?              @relation("BillLineAllocationSite",       fields: [siteId],       references: [id])
-  customer             Customer?          @relation("BillLineAllocationCustomer",   fields: [customerId],   references: [id])
+  site                 Site?              @relation("BillLineAllocationSite", fields: [siteId], references: [id])
+  customer             Customer?          @relation("BillLineAllocationCustomer", fields: [customerId], references: [id])
 
   @@index([supplierBillLineId])
   @@index([ticketLineId])
@@ -3072,4 +3094,69 @@ enum SupplierAliasSource {
   EMAIL_DOMAIN
   VAT
   SYSTEM
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inbox-as-ticket-queue: live thread reconstruction from emails + WhatsApp.
+// Every IngestionEvent joins an InboxThread keyed on conversationId (email)
+// or chatId (WA). User triages — ACCEPTED → Ticket, NOISE → hidden.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InboxThread {
+  id              String               @id @default(uuid())
+  // Natural key so duplicate events don't create duplicate threads.
+  channel         InboxThreadChannel
+  conversationKey String // Outlook conversationId OR WA chatId
+  subject         String?
+  participants    String[]             @default([])
+  classification  String? // BILL / ORDER / QUOTE_REQUEST / DELIVERY / QUERY / REPLY / NOISE / UNKNOWN
+  latestAt        DateTime
+  firstAt         DateTime
+  messageCount    Int                  @default(0)
+  lastSnippet     String?
+  status          InboxThreadStatus    @default(NEW)
+  linkedTicketId  String?
+  noisedAt        DateTime?
+  triagedAt       DateTime?
+  triagedBy       String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  messages        InboxThreadMessage[]
+  linkedTicket    Ticket?              @relation("InboxThreadTicket", fields: [linkedTicketId], references: [id])
+
+  @@unique([channel, conversationKey])
+  @@index([status])
+  @@index([latestAt])
+  @@index([linkedTicketId])
+}
+
+model InboxThreadMessage {
+  id               String      @id @default(uuid())
+  threadId         String
+  ingestionEventId String      @unique
+  occurredAt       DateTime
+  sender           String?
+  snippet          String?
+  hasAttachments   Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  thread           InboxThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([occurredAt])
+}
+
+enum InboxThreadChannel {
+  EMAIL
+  WHATSAPP
+  WHATSAPP_GROUP
+  SMS
+  OTHER
+}
+
+enum InboxThreadStatus {
+  NEW
+  TRIAGED
+  LINKED
+  NOISE
+  ARCHIVED
 }

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { BankAccountCard } from "./BankAccountCard";
 import { RecentTransactions } from "./RecentTransactions";
 import { ReconciliationSummary } from "./ReconciliationSummary";
+import { EnableBankingPanel } from "./EnableBankingPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,44 @@ export default async function FinancePage() {
   // Check if Yapily is configured
   const yapilyConfigured = !!(process.env.YAPILY_APP_UUID && process.env.YAPILY_APP_SECRET);
 
+  // Enable Banking — load connected sources and their stats
+  const enableCredentialsConfigured = !!(
+    process.env.ENABLE_APP_ID &&
+    process.env.ENABLE_JWT_KID &&
+    process.env.ENABLE_JWT_PRIVATE_KEY
+  );
+
+  const enableSources = await prisma.ingestionSource.findMany({
+    where: { sourceType: "ENABLE_BANKING" },
+    orderBy: { createdAt: "asc" },
+  });
+
+  // Per-source transaction counts — join through BankAccount.enableSessionId
+  const enableConnected = await Promise.all(
+    enableSources.map(async (src) => {
+      const bankAccountsForSource = await prisma.bankAccount.findMany({
+        where: { enableSessionId: src.externalRef ?? undefined },
+        select: { id: true },
+      });
+      const ids = bankAccountsForSource.map((b) => b.id);
+      const [txnCount, unreconciledCount] = await Promise.all([
+        prisma.bankTransaction.count({ where: { bankAccountId: { in: ids } } }),
+        prisma.bankTransaction.count({
+          where: { bankAccountId: { in: ids }, reconciliationStatus: "UNRECONCILED" },
+        }),
+      ]);
+      return {
+        id: src.id,
+        accountName: src.accountName,
+        connectorStatus: src.connectorStatus,
+        lastSyncAt: src.lastSyncAt?.toISOString() ?? null,
+        txnCount,
+        unreconciledCount,
+        reauthRequired: src.connectorStatus === "REAUTH_REQUIRED",
+      };
+    })
+  );
+
   // Group accounts by type
   const grouped: Record<string, typeof accounts> = {};
   for (const acct of accounts) {
@@ -87,6 +126,12 @@ export default async function FinancePage() {
       <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">
         FINANCE
       </h1>
+
+      {/* Enable Banking connection panel */}
+      <EnableBankingPanel
+        connected={enableConnected}
+        credentialsConfigured={enableCredentialsConfigured}
+      />
 
       {/* Bank Accounts */}
       <div className="space-y-3">

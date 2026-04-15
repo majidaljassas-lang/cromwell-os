@@ -4,6 +4,7 @@ import { processEmailAttachments } from "@/lib/ingestion/email-attachments";
 import { classifyMessage } from "@/lib/ingestion/classifier";
 import { enqueueDocument } from "@/lib/intake/queue";
 import { looksLikeBillBody, subjectLooksLikeBill } from "@/lib/intake/email-body-detector";
+import { attachEventToThread } from "@/lib/inbox/thread-builder";
 
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
 
@@ -133,6 +134,11 @@ export async function POST(request: Request) {
               status: "PARSED",
             },
           });
+
+          // Attach to inbox thread (emails + WhatsApp go through the same threading pipe)
+          await attachEventToThread(event.id).catch((err) =>
+            console.warn(`attachEventToThread failed for ${event.id}:`, err instanceof Error ? err.message : err)
+          );
 
           // Download and parse attachments BEFORE building the parsed text
           let attachmentText = "";

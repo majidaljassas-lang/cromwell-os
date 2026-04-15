@@ -10,6 +10,15 @@ async function safeJson(res) { try { return await res.json(); } catch { return n
 async function poll() {
   const now = new Date().toLocaleTimeString("en-GB");
   try {
+    // 0. Enable Banking live sync — pulls latest transactions from Barclays / Barclaycard.
+    //    Wrapped with catch so a missing/expired connection never breaks the email pipeline.
+    const bankRes = await fetch(`${BASE}/api/enable-banking/sync`, { method: "POST" })
+      .catch((e) => { console.log(`[${now}] [bank] skip: ${e.message}`); return null; });
+    const bank = bankRes ? ((await safeJson(bankRes)) || {}) : {};
+    const bankSummary = bankRes
+      ? ` bank[src=${bank.sourcesProcessed ?? 0} acct=${bank.accountsUpserted ?? 0} txn=${bank.transactionsUpserted ?? 0} sugg=${bank.suggestionsCreated ?? 0} reauth=${(bank.reauthRequired ?? []).length}]`
+      : " bank[skip]";
+
     // 1. Sync emails — populates IntakeDocument rows for any bill PDFs / supplier email bodies
     await fetch(`${BASE}/api/automation/sync/outlook`, { method: "POST" });
 
@@ -34,6 +43,7 @@ async function poll() {
     const rematch = (await safeJson(rematchRes)) || {};
 
     const summary =
+      bankSummary +
       ` intake[parse=${tick.parsed ?? 0} match=${tick.matched ?? 0} alloc=${tick.allocated ?? 0} err=${tick.errors ?? 0}]` +
       ` legacy[prog=${trickle.autoProgress?.transitionsApplied ?? 0} bills=${trickle.matchBills?.matched ?? 0}]` +
       ` rematch[scan=${rematch.scanned ?? 0} auto=${rematch.autoLinked ?? 0} sugg=${rematch.suggested ?? 0}]`;
