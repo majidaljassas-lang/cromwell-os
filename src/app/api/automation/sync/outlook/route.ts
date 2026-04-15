@@ -5,6 +5,7 @@ import { classifyMessage } from "@/lib/ingestion/classifier";
 import { enqueueDocument } from "@/lib/intake/queue";
 import { looksLikeBillBody, subjectLooksLikeBill } from "@/lib/intake/email-body-detector";
 import { attachEventToThread } from "@/lib/inbox/thread-builder";
+import { CUTOVER_DATE } from "@/lib/sync-constants";
 
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
 
@@ -73,12 +74,15 @@ export async function POST(request: Request) {
           },
         });
 
-        // Fetch emails since: explicit override > lastSyncAt > 7 days ago
-        const since = sinceOverride
-          ? new Date(sinceOverride).toISOString()
-          : source.lastSyncAt
-            ? source.lastSyncAt.toISOString()
-            : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        // Fetch emails since: explicit override > max(lastSyncAt, CUTOVER_DATE).
+        // Floor at CUTOVER_DATE so we always backfill from the cutover on first
+        // run and never fetch pre-cutover data.
+        const sinceDate = sinceOverride
+          ? new Date(sinceOverride)
+          : source.lastSyncAt && source.lastSyncAt > CUTOVER_DATE
+            ? source.lastSyncAt
+            : CUTOVER_DATE;
+        const since = sinceDate.toISOString();
 
         // Page through inbox + sent items (follow @odata.nextLink — Graph caps each page at 1000)
         async function pullAll(folder: "inbox") {

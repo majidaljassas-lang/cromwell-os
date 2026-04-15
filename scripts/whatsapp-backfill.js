@@ -5,9 +5,10 @@
  * Usage: node scripts/whatsapp-backfill.js
  */
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const { CUTOVER_DATE } = require("../src/lib/sync-constants");
 
 const API_BASE = "http://localhost:3000";
-const SINCE = new Date("2026-04-01"); // Pull from April 1st
+const SINCE = CUTOVER_DATE;
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth3" }),
