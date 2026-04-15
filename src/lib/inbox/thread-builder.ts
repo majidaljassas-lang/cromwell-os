@@ -13,6 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import { TicketStatus } from "@/generated/prisma";
 import { scoreOpenTicketsForText, type LinkCandidate } from "@/lib/ingestion/link-resolver";
+import { scoreDealRelevance } from "@/lib/inbox/deal-scorer";
 
 const CLOSED_TICKET_STATUSES: TicketStatus[] = [
   TicketStatus.CLOSED,
@@ -272,8 +273,65 @@ export async function attachEventToThread(eventId: string): Promise<string | nul
   ]);
 
   await autoLinkThread(thread.id, key.channel, key.conversationKey, meta.sender);
+  await scoreThreadDealRelevance(thread.id);
 
   return thread.id;
+}
+
+/**
+ * Score the thread for deal relevance based on aggregated message text and
+ * the known Site catalogue. Persists `dealScore` + `dealReasons` so the
+ * inbox can sort HIGH→LOW without re-scoring on every page load.
+ *
+ * Pure content scoring — sender identity is deliberately excluded so a
+ * one-off enquiry from an unknown number can still surface at the top if
+ * the body talks about a real deal.
+ */
+async function scoreThreadDealRelevance(threadId: string): Promise<void> {
+  try {
+    const thread = await prisma.inboxThread.findUnique({
+      where: { id: threadId },
+      select: { subject: true, lastSnippet: true },
+    });
+    if (!thread) return;
+
+    const messages = await prisma.inboxThreadMessage.findMany({
+      where: { threadId },
+      orderBy: { occurredAt: "desc" },
+      take: 20,
+      select: { snippet: true },
+    });
+    const aggregatedText = [thread.lastSnippet ?? "", ...messages.map((m) => m.snippet ?? "")]
+      .filter(Boolean)
+      .join("\n");
+
+    // Pull Site catalogue once per call. With ~100s of sites this is cheap;
+    // if it grows we can cache in-process.
+    const sites = await prisma.site.findMany({
+      where: { isActive: true },
+      select: { siteName: true, aliases: true },
+    });
+    const knownSiteNames: string[] = [];
+    for (const s of sites) {
+      if (s.siteName) knownSiteNames.push(s.siteName.toLowerCase());
+      for (const a of s.aliases || []) {
+        if (a) knownSiteNames.push(a.toLowerCase());
+      }
+    }
+
+    const { score, reasons } = scoreDealRelevance({
+      text: aggregatedText,
+      subject: thread.subject,
+      knownSiteNames,
+    });
+
+    await prisma.inboxThread.update({
+      where: { id: threadId },
+      data: { dealScore: score, dealReasons: reasons },
+    });
+  } catch (err) {
+    console.warn(`scoreThreadDealRelevance failed for ${threadId}:`, err instanceof Error ? err.message : err);
+  }
 }
 
 // Contact-match confidence mapped onto the same 0-100 scale the content

@@ -90,6 +90,48 @@ curl -sS http://localhost:3000/api/ingest/whatsapp/backfill | jq
 - **Prisma + pglite P1017 on heavy `include`.** `prisma.ticket.findMany` with `include: { site, payingCustomer, requestedByContact, actingOnBehalfOfContact, lines }` reliably fails after sustained load ("Server has closed the connection"). Worked around in `scoreOpenTicketsForText` by splitting `actingOnBehalfOfContact` into a follow-up fetch. If you see the error elsewhere, apply the same pattern.
 - **Outlook route TS errors (pre-existing).** 41 errors in `src/app/api/automation/sync/outlook/route.ts`, all from the `emails.map((e) => ({ ...e, _folder: "INBOX" as const }))` spread erasing Graph API types. Runtime is fine; only inference is lost. Not touched this session.
 
+## Content-based deal-relevance triage
+
+Every InboxThread is now scored on content alone — no sender-based noise rules. The score drives queue ordering: HIGH at top, LOW at bottom (still visible).
+
+**Schema:** `InboxThread.dealScore Int @default(0)` + `dealReasons String[]`. Indexed for sort.
+
+**Scorer** (`src/lib/inbox/deal-scorer.ts`, additive, capped at 100):
+
+| Signal | Weight | Pattern |
+|---|---|---|
+| PO reference | +30 | `PO12345`, `P/O 9999`, `purchase order #...` |
+| Site mention | +25 | substring match against `Site.siteName` + `aliases` |
+| Amount | +15 | `£`, `$`, `€`, `GBP/USD/EUR` |
+| Product cue | +15 | pipe sizes (`15mm`/`22mm`), copper, brass, MLCP, MDPE, fittings, valves, cylinders, etc. |
+| Quantity | +10 | `10 x`, `20 pcs`, `5 lengths`, `30 metres`, etc. |
+| Delivery cue | +10 | `delivery`, `dispatch`, `ETA`, `drop off`, `arriving`, etc. |
+
+**Tiers** (computed in the inbox API, not stored as enum):
+- **HIGH ≥ 70** — auto-surface at top of queue, prompt to ACCEPT
+- **MEDIUM ≥ 40** — surface for review
+- **LOW < 40** — bottom of queue, never hidden
+
+**Wiring:** `attachEventToThread` runs `scoreThreadDealRelevance` after the auto-linker on every new event. `/api/inbox/threads` orders by `dealScore desc, latestAt desc` and includes `dealScore`, `dealTier`, `dealReasons` in the response.
+
+**Backfill of existing threads** (`scripts/backfill-deal-scores.js`):
+```
+HIGH=0  MEDIUM=7  LOW=402   (out of 409 NEW threads)
+```
+
+### Known limitation — score quality
+
+The scorer reads `lastSnippet` + each `InboxThreadMessage.snippet`, which are both truncated at 240 chars. That's why no thread crossed HIGH on the first backfill: the truncation strips signals. To improve coverage in v2, pull the full message body from `IngestionEvent.rawPayload` (Outlook `body.content`, WhatsApp `message_text`) instead of the snippet. The scoring formula stays the same; the input gets richer.
+
+**Re-run the backfill any time after schema/scoring tweaks:**
+```bash
+node scripts/backfill-deal-scores.js
+```
+
+### What's still missing (UI)
+
+The API now returns `dealScore`/`dealTier`. The inbox panel (`src/components/inbox/inbox-threads-panel.tsx`) does NOT yet render a tier badge or special HIGH-tier "Create ticket?" prompt — that's the next step. Threads do already surface in score order because the API sort changed.
+
 ## What's still ahead (from the original plan)
 
 1. ~~Step 1: CUTOVER_DATE + Outlook backfill + WhatsApp backfill~~ — done.

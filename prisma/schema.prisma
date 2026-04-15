@@ -3118,6 +3118,14 @@ model InboxThread {
   linkedTicketId  String?
   linkConfidence  InboxLinkConfidence?
   linkSource      InboxLinkSource?
+  // Content-based deal-relevance score (0-100). HIGH ≥70, MEDIUM ≥40, LOW <40.
+  // Scored from message text only — site mentions, products, qty, amounts, PO
+  // references, delivery cues. Drives queue ordering: HIGH at the top, LOW at
+  // the bottom (never hidden). Independent of linkConfidence which scores
+  // match-to-existing-ticket; a thread can be HIGH deal-relevance and still
+  // unlinked.
+  dealScore       Int                  @default(0)
+  dealReasons     String[]             @default([])
   noisedAt        DateTime?
   triagedAt       DateTime?
   triagedBy       String?
@@ -3130,6 +3138,7 @@ model InboxThread {
   @@index([status])
   @@index([latestAt])
   @@index([linkedTicketId])
+  @@index([dealScore])
 }
 
 model InboxThreadMessage {

@@ -27,7 +27,9 @@ export async function GET(request: Request) {
   const [threads, counts] = await Promise.all([
     prisma.inboxThread.findMany({
       where,
-      orderBy: { latestAt: "desc" },
+      // Content-based triage: HIGH deal-relevance threads at the top, LOW
+      // threads at the bottom (still visible). Within each tier, newest first.
+      orderBy: [{ dealScore: "desc" }, { latestAt: "desc" }],
       take: limit,
       include: {
         _count: { select: { messages: true } },
@@ -70,6 +72,9 @@ export async function GET(request: Request) {
       status: t.status,
       linkConfidence: t.linkConfidence,
       linkSource: t.linkSource,
+      dealScore: t.dealScore,
+      dealTier: t.dealScore >= 70 ? "HIGH" : t.dealScore >= 40 ? "MEDIUM" : "LOW",
+      dealReasons: t.dealReasons,
       linkedTicket: t.linkedTicket
         ? {
             id: t.linkedTicket.id,
