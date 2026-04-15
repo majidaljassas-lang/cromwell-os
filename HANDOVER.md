@@ -4,7 +4,7 @@ Last updated: 2026-04-15 by Majid + Claude (Opus 4.6 1M)
 
 ## Where this branch stands
 
-Branch `feature/ingestion-cutover` pushed to origin. Head: `7f88339`.
+Branch `feature/ingestion-cutover` pushed to origin. Head: `3d4161f`.
 
 Three pieces shipped in this session:
 1. **CUTOVER_DATE cutover floor** (`src/lib/sync-constants.js`) — all pollers clamp `since = max(lastSyncAt, CUTOVER_DATE)`, with 2026-04-01 as the floor. Outlook sync route uses it; WhatsApp live ingest uses it; backfill scripts import it.

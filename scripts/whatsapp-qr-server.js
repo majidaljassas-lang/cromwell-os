@@ -53,11 +53,26 @@ async function runBackfill(since) {
     backfillState.chatsTotal = chats.length;
     console.log(`   ${chats.length} chats to scan`);
 
-    for (const chat of chats) {
-      const label = chat.isGroup ? `[${chat.name || chat.id._serialized}]` : (chat.name || chat.id._serialized);
+    for (const rawChat of chats) {
+      const chatJid = rawChat.id?._serialized || "";
+      const label = rawChat.isGroup ? `[${rawChat.name || chatJid}]` : (rawChat.name || chatJid);
       backfillState.currentChat = label;
 
+      // status@broadcast is a system pseudo-chat that always throws on
+      // fetchMessages — skip it outright.
+      if (chatJid === "status@broadcast" || !chatJid) {
+        backfillState.chatsScanned++;
+        continue;
+      }
+
       try {
+        // Re-hydrate the chat via getChatById before calling fetchMessages.
+        // The objects returned by client.getChats() aren't fully populated in
+        // WhatsApp Web's internal Store immediately after `ready`, and calling
+        // fetchMessages on them throws `waitForChatLoading is undefined`.
+        // getChatById forces the background page to load the chat first.
+        const chat = await client.getChatById(chatJid);
+
         // Paginate: grow the fetch window until the oldest message is before
         // `since`, so we never miss messages in high-volume chats.
         let limit = BACKFILL_PAGE_START;
