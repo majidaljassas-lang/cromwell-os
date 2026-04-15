@@ -2031,9 +2031,8 @@ function SupplierBillsTab({
               </TableRow>
             ) : (
               bills.map((bill) => (
-                <>
+                <React.Fragment key={bill.id}>
                   <TableRow
-                    key={bill.id}
                     className="cursor-pointer"
                     onClick={() =>
                       setExpandedBill(
@@ -2284,7 +2283,7 @@ function SupplierBillsTab({
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </React.Fragment>
               ))
             )}
           </TableBody>

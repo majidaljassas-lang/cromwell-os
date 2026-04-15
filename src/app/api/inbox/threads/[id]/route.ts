@@ -9,6 +9,76 @@
  */
 import { prisma } from "@/lib/prisma";
 
+type CustomerResolution =
+  | { ok: true; customerId: string }
+  | { ok: false; error: string };
+
+function phoneDigits(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  return digits.length >= 7 ? digits : null;
+}
+
+/**
+ * Resolve a single payingCustomerId from a thread's sender. Mirror of the
+ * contact-walk in thread-builder.ts so ACCEPT and the auto-linker stay
+ * consistent: same Contact lookup, same SiteContactLink walk.
+ */
+async function deriveCustomerFromThread(thread: {
+  channel: string;
+  conversationKey: string;
+  participants: string[];
+}): Promise<CustomerResolution> {
+  let contactIds: string[] = [];
+
+  if (thread.channel === "EMAIL") {
+    const emails = (thread.participants || [])
+      .map((p) => p.trim().toLowerCase())
+      .filter((p) => p.includes("@"));
+    if (emails.length === 0) return { ok: false, error: "no email participants on thread" };
+    const contacts = await prisma.contact.findMany({
+      where: { email: { in: emails, mode: "insensitive" }, isActive: true },
+      select: { id: true },
+    });
+    contactIds = contacts.map((c) => c.id);
+  } else if (thread.channel === "WHATSAPP" || thread.channel === "SMS") {
+    const localPart = thread.conversationKey.split("@")[0] ?? "";
+    const digits = phoneDigits(localPart);
+    if (!digits) return { ok: false, error: "could not parse phone from conversationKey" };
+    const candidates = await prisma.contact.findMany({
+      where: { phone: { not: null }, isActive: true },
+      select: { id: true, phone: true },
+    });
+    contactIds = candidates
+      .filter((c) => {
+        const d = phoneDigits(c.phone);
+        if (!d) return false;
+        return d === digits || d.endsWith(digits) || digits.endsWith(d);
+      })
+      .map((c) => c.id);
+  } else {
+    return { ok: false, error: `cannot auto-derive customer for channel ${thread.channel} — use LINK instead` };
+  }
+
+  if (contactIds.length === 0) {
+    return { ok: false, error: "sender not in Contacts — add the contact first, or use LINK to attach to an existing ticket" };
+  }
+
+  const links = await prisma.siteContactLink.findMany({
+    where: { contactId: { in: contactIds }, customerId: { not: null }, isActive: true },
+    select: { customerId: true },
+  });
+  const customerIds = Array.from(new Set(links.map((l) => l.customerId!).filter(Boolean)));
+
+  if (customerIds.length === 0) {
+    return { ok: false, error: "sender's Contact has no Customer link — link them in Contacts, or use LINK" };
+  }
+  if (customerIds.length > 1) {
+    return { ok: false, error: `sender resolves to ${customerIds.length} customers — use LINK to specify which ticket` };
+  }
+  return { ok: true, customerId: customerIds[0] };
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const thread = await prisma.inboxThread.findUnique({
@@ -25,6 +95,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
   const { id } = await params;
   const body = await request.json() as { action?: string; ticketId?: string; title?: string };
   const thread = await prisma.inboxThread.findUnique({
@@ -59,17 +130,27 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   if (body.action === "ACCEPT") {
-    // Create a new Ticket from this thread
-    const lastTicket = await prisma.ticket.findFirst({ orderBy: { ticketNo: "desc" }, select: { ticketNo: true } });
-    const nextTicketNo = (lastTicket?.ticketNo ?? 0) + 1;
+    // Auto-derive payingCustomerId from the thread's sender via
+    // Contact → SiteContactLink → Customer. ACCEPT only succeeds when the
+    // sender resolves to exactly one customer; ambiguous / unknown senders
+    // get a clear error so the user can fall back to LINK.
+    const customerResolution = await deriveCustomerFromThread(thread);
+    if (!customerResolution.ok) {
+      return Response.json({ error: customerResolution.error }, { status: 400 });
+    }
+
+    const ticketMode =
+      thread.classification === "ORDER" ? "DIRECT_ORDER" :
+      thread.classification === "QUOTE_REQUEST" ? "PRICING_FIRST" :
+      "DIRECT_ORDER";
+
     const title = body.title ?? thread.subject ?? `Thread ${thread.id.slice(0, 8)}`;
     const ticket = await prisma.ticket.create({
       data: {
-        ticketNo: nextTicketNo,
         title: title.slice(0, 200),
-        ticketMode: thread.classification === "ORDER" ? "DIRECT_ORDER" : "ENQUIRY",
+        ticketMode,
         status: "CAPTURED",
-        revenueState: "UNCAPTURED",
+        payingCustomer: { connect: { id: customerResolution.customerId } },
       },
     });
     await prisma.inboxThread.update({
@@ -84,6 +165,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   return Response.json({ error: "unknown action" }, { status: 400 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("PATCH /api/inbox/threads/[id] failed:", err);
+    return Response.json({ error: msg }, { status: 500 });
+  }
 }
 
 /**

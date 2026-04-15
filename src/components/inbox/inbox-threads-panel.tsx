@@ -102,12 +102,21 @@ export function InboxThreadsPanel() {
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [statusFilter, channelFilter]);
 
+  // Defensive JSON parser — Next.js dev returns HTML when a route throws, so
+  // a naive r.json() crashes the UI with "Unexpected end of JSON input".
+  async function safeJson(r: Response): Promise<any> {
+    const text = await r.text();
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch { return { error: text.slice(0, 200) }; }
+  }
+
   async function openThread(t: Thread) {
     setSelectedThread(t);
     setDrawerLoading(true);
     try {
       const r = await fetch(`/api/inbox/threads/${t.id}`);
-      const j = await r.json();
+      const j = await safeJson(r);
       setThreadMessages((j.thread?.messages ?? []).map((m: ThreadMessage) => ({
         id: m.id, occurredAt: m.occurredAt, sender: m.sender, snippet: m.snippet, hasAttachments: m.hasAttachments,
       })));
@@ -123,7 +132,7 @@ export function InboxThreadsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: act, ...opts }),
       });
-      const j = await r.json();
+      const j = await safeJson(r);
       if (r.ok) {
         if (act === "ACCEPT" && j.ticket) setToast(`✓ Ticket #${j.ticket.ticketNo} created from thread`);
         else if (act === "LINK")  setToast("✓ Thread confirmed · linked to ticket");
@@ -132,7 +141,7 @@ export function InboxThreadsPanel() {
         await refresh();
         if (selectedThread?.id === id) setSelectedThread(null);
       } else {
-        setToast(`✗ ${j.error ?? "failed"}`);
+        setToast(`✗ ${j.error ?? `HTTP ${r.status}`}`);
       }
     } finally { setWorking(null); }
   }
@@ -143,7 +152,7 @@ export function InboxThreadsPanel() {
     setToast(null);
     try {
       const r = await fetch(`/api/inbox/threads/${id}`, { method: "DELETE" });
-      const j = await r.json();
+      const j = await safeJson(r);
       if (r.ok) {
         setToast(`✓ Deleted · ${j.eventsDeleted} event(s) wiped${j.eventsProtected ? ` · ${j.eventsProtected} preserved (tied to bills)` : ""}`);
         await refresh();
