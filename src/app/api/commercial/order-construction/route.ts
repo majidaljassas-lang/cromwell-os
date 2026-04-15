@@ -57,10 +57,31 @@ export async function POST(request: Request) {
       return Response.json({ error: "siteId is required" }, { status: 400 });
     }
 
-    // Verify site exists
-    const site = await prisma.site.findUnique({ where: { id: siteId } });
+    // Verify site exists and resolve its billing customer (OrderGroup/OrderEvent
+    // both require customerId — site activity must be attached to a customer).
+    const site = await prisma.site.findUnique({
+      where: { id: siteId },
+      include: {
+        siteCommercialLinks: {
+          where: { isActive: true, billingAllowed: true },
+          orderBy: [{ defaultBillingCustomer: "desc" }],
+        },
+      },
+    });
     if (!site) {
       return Response.json({ error: "Site not found" }, { status: 404 });
+    }
+    const resolvedCustomerId = site.siteCommercialLinks[0]?.customerId;
+    if (!resolvedCustomerId) {
+      return Response.json(
+        {
+          error: "CUSTOMER_REQUIRED",
+          message: "Cannot construct orders for a site with no active billable SiteCommercialLink. " +
+            "Link the site to a billing customer before running order construction.",
+          field: "customerId",
+        },
+        { status: 422 }
+      );
     }
 
     // Find backlog case for this site
@@ -140,6 +161,7 @@ export async function POST(request: Request) {
       const orderGroup = await prisma.orderGroup.create({
         data: {
           siteId,
+          customerId: resolvedCustomerId,
           label: proposed.label,
           description: `Auto-constructed from ${proposed.events.length} WhatsApp messages. Confidence: ${proposed.confidence}%.${proposed.isUncertain ? " UNCERTAIN — needs review." : ""}`,
         },
@@ -223,6 +245,7 @@ export async function POST(request: Request) {
               orderGroupId: orderGroup.id,
               canonicalProductId,
               siteId,
+              customerId: resolvedCustomerId,
               eventType: event.eventType as any,
               qty: pl.qty,
               rawUom: pl.rawUom,
@@ -331,6 +354,7 @@ export async function PATCH(request: Request) {
         const newGroup = await prisma.orderGroup.create({
           data: {
             siteId: group.siteId,
+            customerId: group.customerId,
             label: `${group.label} (split)`,
             description: `Split from group ${group.id} at event index ${splitAtEventIndex}`,
           },

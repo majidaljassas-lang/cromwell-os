@@ -51,15 +51,44 @@ export async function POST(request: Request) {
     // Use parsed PO number or generate one
     const poNo = parsed.poNo || `PO-${Date.now().toString(36).toUpperCase()}`;
 
-    // If customerId provided, create PO immediately
+    // If customerId provided, create PO immediately — but a PO is transactional
+    // activity and requires a site. Try the explicit siteId, then the linked
+    // ticket's siteId, then the customer's single billable site link.
     if (customerId) {
+      let resolvedSiteId: string | null = siteId || null;
+      if (!resolvedSiteId && ticketId) {
+        const t = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { siteId: true } });
+        resolvedSiteId = t?.siteId ?? null;
+      }
+      if (!resolvedSiteId) {
+        const links = await prisma.siteCommercialLink.findMany({
+          where: { customerId, isActive: true, billingAllowed: true },
+          orderBy: [{ defaultBillingCustomer: "desc" }],
+          select: { siteId: true },
+        });
+        if (links.length === 1) resolvedSiteId = links[0].siteId;
+      }
+      if (!resolvedSiteId) {
+        return Response.json(
+          {
+            error: "SITE_REQUIRED",
+            message: "A customer PO requires a site. Provide siteId, link to a ticket that has " +
+              "a site, or ensure the customer has exactly one active billable SiteCommercialLink.",
+            field: "siteId",
+            parsed,
+            fileRef: `/po-uploads/${diskFilename}`,
+          },
+          { status: 422 }
+        );
+      }
+
       const totalExVat = parsed.lines.reduce((s, l) => s + (l.lineTotal || 0), 0) || parsed.totalAmount || 0;
 
       const po = await prisma.customerPO.create({
         data: {
           customerId,
           ticketId: ticketId || undefined,
-          siteId: siteId || undefined,
+          siteId: resolvedSiteId,
           issuedByContactId: issuedByContactId || undefined,
           poNo,
           poType: "STANDARD_FIXED",

@@ -116,6 +116,26 @@ export function getDellowConfig(siteId: string, caseId: string): OrderBuilderCon
 export async function buildOrders(config: OrderBuilderConfig): Promise<BuildResult> {
   const { siteId, caseId, sitePatterns, excludePatterns } = config;
 
+  // Site activity (OrderGroup, OrderEvent) requires a customer. Resolve via the
+  // site's default billing customer; fall back to single billable link.
+  const siteForCustomer = await prisma.site.findUnique({
+    where: { id: siteId },
+    include: {
+      siteCommercialLinks: {
+        where: { isActive: true, billingAllowed: true },
+        orderBy: [{ defaultBillingCustomer: "desc" }],
+      },
+    },
+  });
+  const resolvedCustomerId = siteForCustomer?.siteCommercialLinks[0]?.customerId;
+  if (!resolvedCustomerId) {
+    throw new Error(
+      `Order builder cannot proceed: site ${siteId} has no active SiteCommercialLink ` +
+      `with billingAllowed=true. A site must be linked to a billing customer before ` +
+      `transactional orders can be created.`,
+    );
+  }
+
   const backlogCase = await prisma.backlogCase.findFirst({
     where: { id: caseId },
     include: { sourceGroups: { include: { sources: true } } },
@@ -460,6 +480,7 @@ export async function buildOrders(config: OrderBuilderConfig): Promise<BuildResu
     const orderGroup = await prisma.orderGroup.create({
       data: {
         siteId,
+        customerId: resolvedCustomerId,
         label: `${firstName} — ${dateStr} — ${productStr}`,
         description: `Anchor order: ${productCodes.length} products, ${1 + attachedEvents.length} events. Source: ${sourceLabels[anchorItem.sourceId] || anchorItem.sourceId}`,
         approvalStatus: isConfirmed ? "AUTO_APPROVED" as any : "PENDING_REVIEW" as any,
@@ -498,6 +519,7 @@ export async function buildOrders(config: OrderBuilderConfig): Promise<BuildResu
           orderGroupId: orderGroup.id,
           canonicalProductId: cp.id,
           siteId,
+          customerId: resolvedCustomerId,
           eventType: "INITIAL_ORDER",
           qty: product.qty,
           rawUom: product.rawUom,
@@ -556,6 +578,7 @@ export async function buildOrders(config: OrderBuilderConfig): Promise<BuildResu
             orderGroupId: orderGroup.id,
             canonicalProductId: cp.id,
             siteId,
+            customerId: resolvedCustomerId,
             eventType: attached.type as any,
             qty: pl.qty,
             rawUom: pl.rawUom,

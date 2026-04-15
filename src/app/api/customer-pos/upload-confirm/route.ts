@@ -9,19 +9,46 @@ export async function POST(request: Request) {
       return Response.json({ error: "Customer and PO number are required" }, { status: 400 });
     }
 
+    // CustomerPO is transactional — site is mandatory. Try explicit siteId,
+    // then the linked ticket's siteId, then the customer's single billable link.
+    let resolvedSiteId: string | null = siteId || null;
+    if (!resolvedSiteId && ticketId) {
+      const t = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { siteId: true } });
+      resolvedSiteId = t?.siteId ?? null;
+    }
+    if (!resolvedSiteId) {
+      const links = await prisma.siteCommercialLink.findMany({
+        where: { customerId, isActive: true, billingAllowed: true },
+        orderBy: [{ defaultBillingCustomer: "desc" }],
+        select: { siteId: true },
+      });
+      if (links.length === 1) resolvedSiteId = links[0].siteId;
+    }
+    if (!resolvedSiteId) {
+      return Response.json(
+        {
+          error: "SITE_REQUIRED",
+          message: "A customer PO requires a site. Provide siteId, link to a ticket that has " +
+            "a site, or ensure the customer has exactly one active billable SiteCommercialLink.",
+          field: "siteId",
+        },
+        { status: 422 }
+      );
+    }
+
     const totalExVat = (lines || []).reduce((s: number, l: any) => s + (l.lineTotal || 0), 0);
 
     // Auto-create ticket if none provided
     let resolvedTicketId = ticketId;
     if (!resolvedTicketId) {
       const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { name: true } });
-      const site = siteId ? await prisma.site.findUnique({ where: { id: siteId }, select: { siteName: true } }) : null;
+      const site = await prisma.site.findUnique({ where: { id: resolvedSiteId }, select: { siteName: true } });
       const title = site ? `${site.siteName} — ${poNo}` : `${customer?.name || "Unknown"} — ${poNo}`;
 
       const ticket = await prisma.ticket.create({
         data: {
           payingCustomerId: customerId,
-          siteId: siteId || undefined,
+          siteId: resolvedSiteId,
           title,
           ticketMode: "DIRECT_ORDER",
           status: "APPROVED",
@@ -36,7 +63,7 @@ export async function POST(request: Request) {
       data: {
         customerId,
         ticketId: resolvedTicketId,
-        siteId: siteId || undefined,
+        siteId: resolvedSiteId,
         issuedBy: issuedBy || undefined,
         poNo,
         poType: "STANDARD_FIXED",

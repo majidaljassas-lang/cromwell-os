@@ -170,6 +170,7 @@ export async function PATCH(request: Request) {
         const newGroup = await prisma.orderGroup.create({
           data: {
             siteId: group.siteId,
+            customerId: group.customerId,
             label: `${group.label} (split)`,
             description: `Split from group at event ${splitAtEventIndex}`,
             approvalStatus: "PENDING_REVIEW",

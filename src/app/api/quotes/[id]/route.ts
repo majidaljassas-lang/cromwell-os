@@ -66,6 +66,22 @@ export async function PATCH(
         },
       });
       if (fullQuote) {
+        // Approving a quote transitions the ticket out of QUOTED into APPROVED
+        // (a transactional state). Site becomes mandatory at this point.
+        const resolvedSiteId = fullQuote.siteId ?? fullQuote.ticket?.siteId ?? null;
+        if (!resolvedSiteId) {
+          return Response.json(
+            {
+              error: "SITE_REQUIRED",
+              message: "Cannot approve quote without a site. Quotes may exist without a site, " +
+                "but approval transitions the ticket into a transactional state and requires a site. " +
+                "Assign a site to the quote (or its ticket) before approving.",
+              field: "siteId",
+            },
+            { status: 422 }
+          );
+        }
+
         await prisma.event.create({
           data: {
             ticketId: fullQuote.ticketId,
@@ -77,7 +93,7 @@ export async function PATCH(
 
         await prisma.ticket.update({
           where: { id: fullQuote.ticketId },
-          data: { status: "APPROVED" },
+          data: { status: "APPROVED", siteId: resolvedSiteId },
         });
 
         // Auto-create CustomerPO if none exists for this ticket
@@ -93,7 +109,7 @@ export async function PATCH(
             data: {
               ticketId: fullQuote.ticketId,
               customerId: fullQuote.customerId,
-              siteId: fullQuote.siteId || undefined,
+              siteId: resolvedSiteId,
               siteCommercialLinkId: fullQuote.siteCommercialLinkId || undefined,
               quoteId: fullQuote.id,
               poNo,

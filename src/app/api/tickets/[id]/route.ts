@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
 
+const PRE_TRANSACTIONAL_STATUSES = new Set(["CAPTURED", "PRICING", "QUOTED"]);
+const TRANSACTIONAL_STATUSES = new Set([
+  "APPROVED", "ORDERED", "DELIVERED", "COSTED",
+  "PENDING_PO", "RECOVERY", "VERIFIED", "LOCKED", "INVOICED", "CLOSED",
+]);
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -39,6 +45,32 @@ export async function PATCH(
   const { id } = await params;
   try {
     const body = await request.json();
+
+    if (typeof body.status === "string" && TRANSACTIONAL_STATUSES.has(body.status)) {
+      const current = await prisma.ticket.findUnique({
+        where: { id },
+        select: { siteId: true, status: true },
+      });
+      if (!current) {
+        return Response.json({ error: "Ticket not found" }, { status: 404 });
+      }
+      const resolvedSiteId = body.siteId ?? current.siteId;
+      if (!resolvedSiteId) {
+        return Response.json(
+          {
+            error: "SITE_REQUIRED",
+            message: `Cannot move ticket from ${current.status} to ${body.status} without a site. ` +
+              `A site must be assigned before the ticket enters any transactional state ` +
+              `(orders, deliveries, invoices). Quoting phase does not require a site.`,
+            currentStatus: current.status,
+            attemptedStatus: body.status,
+            field: "siteId",
+          },
+          { status: 422 },
+        );
+      }
+    }
+
     const ticket = await prisma.ticket.update({
       where: { id },
       data: body,
@@ -64,12 +96,15 @@ export async function PATCH(
           const invoiceNo = `INV-AUTO-${Date.now()}`;
           const poRef = fullTicket.customerPOs[0]?.poNo || null;
 
+          if (!fullTicket.siteId) {
+            throw new Error("Invariant violated: ticket reached transactional state without siteId");
+          }
           const invoice = await prisma.salesInvoice.create({
             data: {
               ticketId: id,
               invoiceNo,
               customerId: fullTicket.payingCustomerId,
-              siteId: fullTicket.siteId || undefined,
+              siteId: fullTicket.siteId,
               siteCommercialLinkId: fullTicket.siteCommercialLinkId || undefined,
               poNo: poRef,
               invoiceType: "STANDARD",

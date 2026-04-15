@@ -47,13 +47,35 @@ export async function POST(request: Request) {
     }
 
     // Verify site exists
-    const site = await prisma.site.findUnique({ where: { id: siteId } });
+    const site = await prisma.site.findUnique({
+      where: { id: siteId },
+      include: {
+        siteCommercialLinks: {
+          where: { isActive: true, billingAllowed: true },
+          orderBy: [{ defaultBillingCustomer: "desc" }],
+          take: 1,
+        },
+      },
+    });
     if (!site) {
       return Response.json({ error: "Site not found. No auto site creation allowed." }, { status: 404 });
     }
 
+    const resolvedCustomerId = customerId ?? site.siteCommercialLinks[0]?.customerId;
+    if (!resolvedCustomerId) {
+      return Response.json(
+        {
+          error: "CUSTOMER_REQUIRED",
+          message: "Order groups require a customer. Provide customerId or ensure the site " +
+            "has an active SiteCommercialLink with billingAllowed=true.",
+          field: "customerId",
+        },
+        { status: 422 }
+      );
+    }
+
     const group = await prisma.orderGroup.create({
-      data: { siteId, customerId, label, description },
+      data: { siteId, customerId: resolvedCustomerId, label, description },
       include: { site: true },
     });
     return Response.json(group, { status: 201 });

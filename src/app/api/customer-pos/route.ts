@@ -77,6 +77,18 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!siteId) {
+      return Response.json(
+        {
+          error: "SITE_REQUIRED",
+          message: "A customer PO is transactional activity and requires a site. " +
+            "Quotes may exist without a site, but PO creation must specify siteId.",
+          field: "siteId",
+        },
+        { status: 422 }
+      );
+    }
+
     // Auto-resolve quoteId from ticket if not explicitly provided
     let resolvedQuoteId = body.quoteId ?? null;
     if (!resolvedQuoteId && ticketId) {
@@ -104,7 +116,7 @@ export async function POST(request: Request) {
         const ticket = await tx.ticket.create({
           data: {
             payingCustomerId: customerId,
-            siteId: siteId || undefined,
+            siteId,
             title,
             ticketMode: "DIRECT_ORDER",
             status: "APPROVED",
@@ -149,7 +161,7 @@ export async function POST(request: Request) {
         data: {
           ticketId: resolvedTicketId,
           customerId,
-          siteId: siteId || undefined,
+          siteId,
           siteCommercialLinkId: siteCommercialLinkId || undefined,
           issuedByContactId: issuedByContactId || undefined,
           issuedBy: issuedBy || undefined,

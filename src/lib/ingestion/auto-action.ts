@@ -174,30 +174,63 @@ async function handlePODocument(eventId: string, subject: string, text: string, 
     // Check if PO already exists
     const existing = await prisma.customerPO.findFirst({ where: { poNo } });
     if (!existing) {
-      // ALWAYS create the PO — don't wait for a customer match
-      await prisma.customerPO.create({
-        data: {
-          poNo,
-          poType: "STANDARD_FIXED",
-          customerId: customer!.id,
-          ticketId: ticketId || undefined,
-          status: "RECEIVED",
-          notes: `Auto-created from email: ${subject} (${fromName} <${fromEmail}>)`,
-        },
-      });
+      // CustomerPO requires a site (transactional activity). Try to resolve one
+      // via the linked ticket, or via the customer's single billable site link.
+      let resolvedSiteId: string | null = null;
+      if (ticketId) {
+        const t = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { siteId: true } });
+        resolvedSiteId = t?.siteId ?? null;
+      }
+      if (!resolvedSiteId && customer) {
+        const links = await prisma.siteCommercialLink.findMany({
+          where: { customerId: customer.id, isActive: true, billingAllowed: true },
+          orderBy: [{ defaultBillingCustomer: "desc" }],
+          select: { siteId: true },
+        });
+        if (links.length === 1) resolvedSiteId = links[0].siteId;
+      }
 
-      // If no ticket linked, create a work queue task to link it
-      if (!ticketId) {
-        // Find any ticket to attach the task to, or use the first one
+      if (resolvedSiteId) {
+        await prisma.customerPO.create({
+          data: {
+            poNo,
+            poType: "STANDARD_FIXED",
+            customerId: customer!.id,
+            siteId: resolvedSiteId,
+            ticketId: ticketId || undefined,
+            status: "RECEIVED",
+            notes: `Auto-created from email: ${subject} (${fromName} <${fromEmail}>)`,
+          },
+        });
+
+        // If no ticket linked, create a work queue task to link it
+        if (!ticketId) {
+          const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
+          if (anyTicket) {
+            await prisma.task.create({
+              data: {
+                ticketId: anyTicket.id,
+                taskType: "LINK_PO",
+                priority: "MEDIUM",
+                status: "OPEN",
+                generatedReason: `Customer PO ${poNo} received from ${fromName} — needs linking to correct ticket`,
+              },
+            });
+          }
+        }
+      } else {
+        // Cannot resolve a site — park as a review task instead of creating an
+        // orphan PO. A human must assign customer + site before the PO is created.
         const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
         if (anyTicket) {
           await prisma.task.create({
             data: {
               ticketId: anyTicket.id,
               taskType: "LINK_PO",
-              priority: "MEDIUM",
+              priority: "HIGH",
               status: "OPEN",
-              reason: `Customer PO ${poNo} received from ${fromName} — needs linking to correct ticket`,
+              generatedReason: `Customer PO ${poNo} from ${fromName} (${fromEmail}) — site could not be resolved automatically. ` +
+                `Assign customer + site, then create the PO manually.`,
             },
           });
         }

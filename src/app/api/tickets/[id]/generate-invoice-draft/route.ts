@@ -99,6 +99,18 @@ export async function POST(
 
     const invoiceNo = `INV-${Date.now()}`;
     const resolvedCustomerId = customerId || ticket.payingCustomerId;
+    const resolvedSiteId = siteId || ticket.siteId;
+    if (!resolvedSiteId) {
+      return Response.json(
+        {
+          error: "SITE_REQUIRED",
+          message: "Cannot draft an invoice without a site. Assign a site to the ticket " +
+            "(or pass siteId in the request body) before generating the invoice.",
+          field: "siteId",
+        },
+        { status: 422 }
+      );
+    }
 
     // Auto-pull PO reference from linked CustomerPOs
     const linkedPO = await prisma.customerPO.findFirst({
@@ -114,7 +126,7 @@ export async function POST(
           ticketId: id,
           invoiceNo,
           customerId: resolvedCustomerId,
-          siteId: siteId || ticket.siteId,
+          siteId: resolvedSiteId,
           siteCommercialLinkId: ticket.siteCommercialLinkId,
           poNo: poRef,
           invoiceType,

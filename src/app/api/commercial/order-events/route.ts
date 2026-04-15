@@ -61,6 +61,27 @@ export async function POST(request: Request) {
       return Response.json({ error: "Canonical product not found" }, { status: 404 });
     }
 
+    // Resolve customerId from the parent OrderGroup so every OrderEvent inherits
+    // the same customer (single source of truth).
+    const parentGroup = await prisma.orderGroup.findUnique({
+      where: { id: orderGroupId },
+      select: { customerId: true },
+    });
+    if (!parentGroup) {
+      return Response.json({ error: "OrderGroup not found" }, { status: 404 });
+    }
+    const resolvedCustomerId = customerId ?? parentGroup.customerId;
+    if (!resolvedCustomerId) {
+      return Response.json(
+        {
+          error: "CUSTOMER_REQUIRED",
+          message: "Order events require a customer. The parent OrderGroup must have a customerId.",
+          field: "customerId",
+        },
+        { status: 422 }
+      );
+    }
+
     // Normalise UOM
     const uomResult = await normaliseUom(canonicalProductId, qty, rawUom, product.canonicalUom);
 
@@ -69,7 +90,7 @@ export async function POST(request: Request) {
         orderGroupId,
         canonicalProductId,
         siteId,
-        customerId,
+        customerId: resolvedCustomerId,
         eventType,
         qty,
         rawUom,

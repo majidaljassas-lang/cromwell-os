@@ -891,7 +891,7 @@ model CustomerPO {
   id                      String                   @id @default(uuid())
   ticketId                String?
   customerId              String
-  siteId                  String?
+  siteId                  String
   siteCommercialLinkId    String?
   poNo                    String
   poType                  CustomerPOType
@@ -924,7 +924,7 @@ model CustomerPO {
   issuedByContact         Contact?                 @relation("POIssuedBy", fields: [issuedByContactId], references: [id])
   Quote                   Quote?                   @relation(fields: [quoteId], references: [id])
   siteCommercialLink      SiteCommercialLink?      @relation(fields: [siteCommercialLinkId], references: [id])
-  site                    Site?                    @relation(fields: [siteId], references: [id])
+  site                    Site                     @relation(fields: [siteId], references: [id])
   ticket                  Ticket?                  @relation(fields: [ticketId], references: [id])
   allocations             CustomerPOAllocation[]
   lines                   CustomerPOLine[]
@@ -1089,7 +1089,7 @@ model SalesInvoice {
   ticketId             String
   invoiceNo            String?
   customerId           String
-  siteId               String?
+  siteId               String
   siteCommercialLinkId String?
   poNo                 String?
   invoiceType          String
@@ -1104,7 +1104,7 @@ model SalesInvoice {
   payments             Payment[]
   customer             Customer               @relation(fields: [customerId], references: [id])
   siteCommercialLink   SiteCommercialLink?    @relation(fields: [siteCommercialLinkId], references: [id])
-  site                 Site?                  @relation(fields: [siteId], references: [id])
+  site                 Site                   @relation(fields: [siteId], references: [id])
   ticket               Ticket                 @relation(fields: [ticketId], references: [id])
   lines                SalesInvoiceLine[]
   sitePackItems        SitePackItem[]
@@ -1876,7 +1876,7 @@ model UomConversion {
 model OrderGroup {
   id                     String                  @id @default(uuid())
   siteId                 String
-  customerId             String?
+  customerId             String
   label                  String
   description            String?
   fulfilmentStatus       OrderFulfilmentStatus   @default(UNFULFILLED)
@@ -1911,7 +1911,7 @@ model OrderEvent {
   orderGroupId       String
   canonicalProductId String
   siteId             String
-  customerId         String?
+  customerId         String
   eventType          OrderEventType
   qty                Decimal           @db.Decimal(14, 4)
   rawUom             String
