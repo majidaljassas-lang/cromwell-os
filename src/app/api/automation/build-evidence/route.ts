@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 // Mirror the Prisma enums as string-literal types so the file compiles
 // even when the generated client has not been materialised in this worktree.
@@ -59,7 +60,9 @@ const EVENT_TO_EVIDENCE: Record<
   },
 };
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     const tickets = await prisma.ticket.findMany({
       where: {

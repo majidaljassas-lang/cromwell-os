@@ -68,7 +68,10 @@ const ABSORBED_KEYWORDS = [
   "rush", "express", "same day", "next day delivery",
 ];
 
-export function classifyMessage(text: string): {
+export function classifyMessage(
+  text: string,
+  options: { fallback?: MessageClassification } = {}
+): {
   classification: MessageClassification;
   confidence: number;
   reasons: string[];
@@ -107,6 +110,35 @@ export function classifyMessage(text: string): {
     classification = "GENERAL_CHATTER";
     confidence = 50;
     reasons.push("Very short message");
+  }
+
+  // PDF fallback: if body classification came back weak but the text also
+  // contains attachment markers ("--- filename.pdf ---"), scan every
+  // attachment section (from the first marker onward) for bill/PO keywords.
+  // Many supplier bill emails have a bland body and the real signal lives
+  // only inside the PDF text.
+  if (classification === "UNKNOWN" || classification === "GENERAL_CHATTER") {
+    const firstMarker = text.indexOf("--- ");
+    if (firstMarker !== -1) {
+      const pdfSection = text.slice(firstMarker).toLowerCase();
+      if (matchesKeywords(pdfSection, BILL_KEYWORDS)) {
+        classification = "BILL_DOCUMENT";
+        confidence = 75;
+        reasons.push("PDF attachment text contains bill keywords");
+      } else if (matchesKeywords(pdfSection, PO_KEYWORDS)) {
+        classification = "PO_DOCUMENT";
+        confidence = 75;
+        reasons.push("PDF attachment text contains PO keywords");
+      }
+    }
+  }
+
+  // Caller-supplied fallback (e.g. WhatsApp text that matched no keyword list
+  // should land in GENERAL_CHATTER rather than UNKNOWN, so it doesn't sit
+  // forever in NEEDS_TRIAGE).
+  if (classification === "UNKNOWN" && options.fallback) {
+    classification = options.fallback;
+    reasons.push(`No keyword match — fell back to ${options.fallback}`);
   }
 
   // Boost confidence if monetary values present

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 interface TicketLine {
   id: string;
@@ -100,7 +101,9 @@ const COSTED_OR_LATER = [
   "CLOSED",
 ] as const;
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     const tickets = await prisma.ticket.findMany({
       where: {

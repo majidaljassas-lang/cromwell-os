@@ -278,32 +278,18 @@ export async function commercialiseMessage(
   const sourceType = event.source.sourceType;
 
   if (options.createEnquiry) {
-    const enquiry = await prisma.enquiry.create({
-      data: {
-        sourceType: sourceType as "WHATSAPP" | "OUTLOOK" | "ZOHO_BOOKS" | "EMAIL" | "PDF_UPLOAD" | "IMAGE_UPLOAD" | "MANUAL" | "API",
-        channelThreadRef: (structured?.chatId || structured?.threadId) as string || undefined,
-        sourceContactId: options.sourceContactId,
-        receivedAt: event.receivedAt,
-        subjectOrLabel: (structured?.subject || structured?.chatName) as string || undefined,
-        rawText: parsed.extractedText,
-        suggestedSiteId: options.suggestedSiteId,
-        suggestedCustomerId: options.suggestedCustomerId,
-        enquiryType: (options.enquiryType || "OTHER") as "DIRECT_ORDER" | "QUOTE_REQUEST" | "PRICING_FIRST" | "SPEC_REQUEST" | "COMPETITIVE_BID" | "APPROVAL" | "FOLLOW_UP" | "DELIVERY_UPDATE" | "DISPUTE" | "OTHER",
-        confidenceScore: parsed.confidenceScore ? Number(parsed.confidenceScore) : undefined,
-        status: "NEW",
-      },
-    });
-
-    await prisma.ingestionLink.create({
-      data: {
-        parsedMessageId: parsed.id,
-        enquiryId: enquiry.id,
-        linkConfidence: Number(parsed.confidenceScore || 70),
-        linkStatus: "AUTO_LINKED",
-      },
-    });
-
-    result.createdObjects.push({ type: "Enquiry", id: enquiry.id });
+    // DEPRECATED 2026-04-15 (Phase 7). The legacy Enquiry pipeline is
+    // retired. The modern flow is IngestionEvent → InboxThread → Ticket.
+    // This branch is a no-op so callers that still pass
+    // `createEnquiry: true` don't crash; remove the option from callers
+    // when convenient.
+    console.warn(
+      "[commercialiser] createEnquiry is DEPRECATED (Phase 7) — no Enquiry created. " +
+        "Switch callers to the inbox flow."
+    );
+    result.errors.push(
+      "createEnquiry option is deprecated (Phase 7) — no Enquiry created. See src/lib/ingestion/commercialiser.ts."
+    );
   }
 
   if (options.createEvidence && options.ticketId) {

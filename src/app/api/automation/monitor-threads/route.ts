@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { randomUUID } from "node:crypto";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * Thread monitor.
@@ -102,7 +103,9 @@ interface MonitorResult {
   }>;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const result: MonitorResult = {
     ok: true,
     scanned: 0,

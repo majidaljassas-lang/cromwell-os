@@ -2,13 +2,17 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/ingestion/audit";
 
 /**
- * Enquiry Disposition
- * POST: discard, spam, duplicate, archive — with reason
+ * Enquiry Disposition — the ONLY mutation surface left on the legacy
+ * Enquiry model after Phase 7. Restricted to terminal closures:
  *
- * Discarded enquiries are removed from active queue but retained for audit.
- * If enquiry has downstream objects (work items, tickets), block discard
- * unless unlinked first.
+ *   status = "CLOSED"         — standard closure
+ *   status = "LEGACY_ORPHAN"  — Phase-7 orphan state
+ *
+ * Any other status payload returns 400. The block on active downstream
+ * objects (open work items, linked tickets) is retained.
  */
+
+const ALLOWED_STATUSES = new Set(["CLOSED", "LEGACY_ORPHAN"]);
 
 export async function POST(
   request: Request,
@@ -17,14 +21,23 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { action, reason, actor } = body as {
-      action: "DISCARDED" | "SPAM" | "DUPLICATE" | "ARCHIVED";
+    const { status, reason, actor } = body as {
+      status?: string;
       reason?: string;
       actor?: string;
     };
 
-    if (!action) {
-      return Response.json({ error: "action required" }, { status: 400 });
+    if (!status || !ALLOWED_STATUSES.has(status)) {
+      return Response.json(
+        {
+          error:
+            "Enquiry disposition is restricted to CLOSED / LEGACY_ORPHAN transitions only. The legacy pipeline is deprecated; no other status writes are accepted.",
+          deprecatedSince: "2026-04-15",
+          allowed: Array.from(ALLOWED_STATUSES),
+          received: status ?? "(none)",
+        },
+        { status: 400 }
+      );
     }
 
     const enquiry = await prisma.enquiry.findUnique({
@@ -39,19 +52,29 @@ export async function POST(
       return Response.json({ error: "Enquiry not found" }, { status: 404 });
     }
 
-    // Block discard if downstream objects exist
+    // Block closure if active downstream objects exist (same rule as before)
     const activeWorkItems = enquiry.workItems.filter(
-      (w) => w.status !== "CLOSED_LOST" && w.status !== "CLOSED_NO_ACTION"
+      (w) =>
+        w.status !== "CLOSED_LOST" &&
+        w.status !== "CLOSED_NO_ACTION" &&
+        w.status !== "LEGACY_ORPHAN"
     );
     const linkedTickets = enquiry.ingestionLinks.filter((l) => l.ticketId != null);
 
-    if (action === "DISCARDED" && (activeWorkItems.length > 0 || linkedTickets.length > 0)) {
-      return Response.json({
-        error: "Cannot discard — enquiry has active downstream objects",
-        activeWorkItems: activeWorkItems.length,
-        linkedTickets: linkedTickets.length,
-        suggestion: "Unlink downstream objects first or use ARCHIVED instead",
-      }, { status: 409 });
+    if (
+      status === "CLOSED" &&
+      (activeWorkItems.length > 0 || linkedTickets.length > 0)
+    ) {
+      return Response.json(
+        {
+          error: "Cannot close — enquiry has active downstream objects",
+          activeWorkItems: activeWorkItems.length,
+          linkedTickets: linkedTickets.length,
+          suggestion:
+            "Orphan the work items first (LEGACY_ORPHAN) or unlink tickets before closing.",
+        },
+        { status: 409 }
+      );
     }
 
     const previousStatus = enquiry.status;
@@ -59,9 +82,9 @@ export async function POST(
     const updated = await prisma.enquiry.update({
       where: { id },
       data: {
-        status: action,
-        discardReason: reason || action,
-        discardedBy: actor || "UNKNOWN",
+        status,
+        discardReason: reason ?? status,
+        discardedBy: actor ?? "UNKNOWN",
         discardedAt: new Date(),
       },
     });
@@ -69,10 +92,10 @@ export async function POST(
     await logAudit({
       objectType: "Enquiry",
       objectId: id,
-      actionType: `DISPOSITION_${action}`,
+      actionType: `DISPOSITION_${status}`,
       actor,
       previousValue: { status: previousStatus },
-      newValue: { status: action, reason },
+      newValue: { status, reason },
       reason,
     });
 

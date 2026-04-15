@@ -216,6 +216,7 @@ model SiteContactLink {
   customerId           String?
   siteCommercialLinkId String?
   roleOnSite           String?
+  inferredRole         String?
   isPrimary            Boolean             @default(false)
   activeFrom           DateTime?
   activeTo             DateTime?
@@ -325,6 +326,16 @@ model IngestionLink {
   @@index([linkStatus])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPRECATED (2026-04-15, Phase 7). Legacy enquiry pipeline. The modern
+// flow is IngestionEvent → InboxThread → Ticket. Write routes on
+// /api/enquiries and /api/work-items return 410 Gone. `createEnquiry`
+// in src/lib/ingestion/commercialiser.ts is a no-op with a console.warn.
+// Tables stay queryable for audit; do not extend, do not migrate, do
+// not write to. The disposition route (/api/ingestion/disposition/
+// enquiry/[id]) is the only remaining mutation surface, restricted to
+// CLOSED / LEGACY_ORPHAN transitions.
+// ─────────────────────────────────────────────────────────────────────────────
 model Enquiry {
   id                            String              @id @default(uuid())
   parentJobId                   String?
@@ -360,6 +371,7 @@ model Enquiry {
   @@index([sourceType])
 }
 
+// DEPRECATED (2026-04-15, Phase 7). See deprecation note on `Enquiry` model.
 model EnquiryTask {
   id          String    @id @default(uuid())
   enquiryId   String
@@ -377,6 +389,7 @@ model EnquiryTask {
   @@index([status])
 }
 
+// DEPRECATED (2026-04-15, Phase 7). See deprecation note on `Enquiry` model.
 model InquiryWorkItem {
   id                   String              @id @default(uuid())
   enquiryId            String
@@ -428,6 +441,9 @@ model Ticket {
   closedAt                  DateTime?
   updatedAt                 DateTime                 @updatedAt
   revenueState              String                   @default("OPERATIONAL")
+  // Phase 3: set true when any LogisticsEvent on this ticket reports
+  // BYPASSED or NOT_ARRIVED. Cleared when a later DELIVERED event lands.
+  deliveryFailed            Boolean                  @default(false)
   ticketNo                  Int                      @unique @default(autoincrement())
   absorbedCostAllocations   AbsorbedCostAllocation[]
   cashSales                 CashSale[]
@@ -526,6 +542,8 @@ model TicketLine {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   sectionLabel          String?
+  canonicalProductId    String?
+  canonicalProduct      CanonicalProduct?        @relation(fields: [canonicalProductId], references: [id])
   absorbedCosts         AbsorbedCostAllocation[]
   benchmarks            Benchmark[]
   compSheetLines        CompSheetLine[]
@@ -567,6 +585,7 @@ model TicketLine {
   @@index([status])
   @@index([payingCustomerId])
   @@index([parentLineId])
+  @@index([canonicalProductId])
 }
 
 model SalesBundle {
@@ -715,12 +734,20 @@ model QuoteLine {
 }
 
 model Supplier {
-  id                String                   @id @default(uuid())
-  name              String
-  legalName         String?
-  email             String?
-  phone             String?
-  notes             String?
+  id                 String                   @id @default(uuid())
+  name               String
+  legalName          String?
+  email              String?
+  phone              String?
+  notes              String?
+  // Phase 9: stored bank details for fraud detection. Never auto-updated
+  // from inbound documents — a mismatch always creates a
+  // BANK_DETAIL_CHANGE_ALERT task for human verification by phone.
+  bankAccount        String?
+  sortCode           String?
+  iban               String?
+  bankLastVerifiedAt DateTime?
+  bankLastVerifiedBy String?
   costAllocations   CostAllocation[]
   creditNotes       CreditNote[]
   procurementOrders ProcurementOrder[]
@@ -790,15 +817,28 @@ model SupplierBill {
   supplierId          String
   billNo              String
   billDate            DateTime
+  dueDate             DateTime?
   siteRef             String?
   customerRef         String?
   status              String
+  paymentStatus       String                  @default("UNPAID")
+  amountExVat         Decimal?                @db.Decimal(14, 2)
+  vatAmount           Decimal?                @db.Decimal(14, 2)
+  amountIncVat        Decimal?                @db.Decimal(14, 2)
   totalCost           Decimal                 @db.Decimal(14, 2)
+  sourceThreadId      String?
   sourceAttachmentRef String?
   intakeDocumentId    String?
   duplicateOfBillId   String?
   duplicateStatus     String?
   checksum            String?
+  // ── Phase 2: 3-way match (PO ↔ Delivery ↔ Bill). Distinct from `status`,
+  // which tracks line-level allocation (MATCHED/PARTIAL/PENDING). matchStatus
+  // is bill-level 3-way reconciliation; see src/lib/finance/three-way-match.ts
+  matchStatus         BillMatchStatus?
+  matchedAt           DateTime?
+  matchVarianceAmt    Decimal?                @db.Decimal(14, 2)
+  matchNotes          String?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
   ingestionLinks      IngestionLink[]
@@ -808,10 +848,15 @@ model SupplierBill {
   intakeDocument      IntakeDocument?         @relation(fields: [intakeDocumentId], references: [id])
   duplicateOf         SupplierBill?           @relation("BillDuplicates", fields: [duplicateOfBillId], references: [id])
   duplicates          SupplierBill[]          @relation("BillDuplicates")
+  tasks               Task[]
 
   @@index([billNo])
   @@index([checksum])
   @@index([intakeDocumentId])
+  @@index([dueDate])
+  @@index([paymentStatus])
+  @@index([sourceThreadId])
+  @@index([matchStatus])
 }
 
 model SupplierBillLine {
@@ -1095,6 +1140,7 @@ model SalesInvoice {
   invoiceType          String
   status               String
   issuedAt             DateTime?
+  dueDate              DateTime?
   paidAt               DateTime?
   totalSell            Decimal                @default(0) @db.Decimal(14, 2)
   notes                String?
@@ -1112,25 +1158,30 @@ model SalesInvoice {
 
   @@index([invoiceNo])
   @@index([status])
+  @@index([dueDate])
 }
 
 model SalesInvoiceLine {
-  id             String       @id @default(uuid())
-  salesInvoiceId String
-  ticketLineId   String
-  description    String
-  qty            Decimal      @db.Decimal(14, 4)
-  unitPrice      Decimal      @db.Decimal(14, 4)
-  lineTotal      Decimal      @db.Decimal(14, 2)
-  displayMode    String
-  poMatched      Boolean      @default(false)
-  poMatchStatus  String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  salesInvoice   SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
-  ticketLine     TicketLine   @relation(fields: [ticketLineId], references: [id])
+  id               String       @id @default(uuid())
+  salesInvoiceId   String
+  ticketLineId     String
+  description      String
+  qty              Decimal      @db.Decimal(14, 4)
+  unitPrice        Decimal      @db.Decimal(14, 4)
+  lineTotal        Decimal      @db.Decimal(14, 2)
+  vatRate          Decimal?     @db.Decimal(5, 2)
+  vatAmount        Decimal?     @db.Decimal(14, 2)
+  displayMode      String
+  poMatched        Boolean      @default(false)
+  poMatchStatus    String?
+  costUnconfirmed  Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  salesInvoice     SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
+  ticketLine       TicketLine   @relation(fields: [ticketLineId], references: [id])
 
   @@index([ticketLineId])
+  @@index([costUnconfirmed])
 }
 
 model Payment {
@@ -1185,19 +1236,26 @@ model Event {
 }
 
 model Task {
-  id              String      @id @default(uuid())
+  id              String        @id @default(uuid())
   ticketId        String
   ticketLineId    String?
+  supplierBillId  String?
   taskType        String
   priority        String
   status          String
   generatedReason String?
+  draftBody       String?
   dueAt           DateTime?
   assignedTo      String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  ticket          Ticket      @relation(fields: [ticketId], references: [id])
-  ticketLine      TicketLine? @relation(fields: [ticketLineId], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  ticket          Ticket        @relation(fields: [ticketId], references: [id])
+  ticketLine      TicketLine?   @relation(fields: [ticketLineId], references: [id])
+  supplierBill    SupplierBill? @relation(fields: [supplierBillId], references: [id])
+
+  @@index([taskType, status])
+  @@index([supplierBillId])
+  @@index([dueAt])
 }
 
 model RecoveryCase {
@@ -1251,18 +1309,33 @@ model EvidencePackItem {
 }
 
 model LogisticsEvent {
-  id            String   @id @default(uuid())
-  ticketId      String
-  siteId        String?
-  eventType     String
-  contactId     String?
-  timestamp     DateTime
-  costTotal     Decimal? @db.Decimal(14, 2)
-  notes         String?
-  attachmentRef String?
-  contact       Contact? @relation(fields: [contactId], references: [id])
-  site          Site?    @relation(fields: [siteId], references: [id])
-  ticket        Ticket   @relation(fields: [ticketId], references: [id])
+  id              String               @id @default(uuid())
+  ticketId        String
+  siteId          String?
+  eventType       String
+  contactId       String?
+  timestamp       DateTime
+  costTotal       Decimal?             @db.Decimal(14, 2)
+  notes           String?
+  attachmentRef   String?
+  // Phase 3: structured delivery signal. eventType (free-text) stays for
+  // backward compat with auto-progress. stopStatus is the canonical field
+  // the delivery tracker + 3-way match read.
+  cpRef           String?
+  stopStatus      LogisticsStopStatus?
+  plannedDate     DateTime?
+  driver          String?
+  deliveryAddress String?
+  deliveredAt     DateTime?
+  processedAt     DateTime?
+  contact         Contact?             @relation(fields: [contactId], references: [id])
+  site            Site?                @relation(fields: [siteId], references: [id])
+  ticket          Ticket               @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId, timestamp])
+  @@index([stopStatus])
+  @@index([processedAt])
+  @@index([cpRef])
 }
 
 model Return {
@@ -1335,6 +1408,7 @@ model StockExcessRecord {
   id                 String            @id @default(uuid())
   supplierBillLineId String?
   ticketLineId       String?
+  canonicalProductId String?
   purchasedCost      Decimal           @db.Decimal(14, 2)
   usedCost           Decimal           @db.Decimal(14, 2)
   excessCost         Decimal           @db.Decimal(14, 2)
@@ -1346,6 +1420,9 @@ model StockExcessRecord {
   excessQty          Decimal?          @db.Decimal(14, 4)
   supplierBillLine   SupplierBillLine? @relation(fields: [supplierBillLineId], references: [id])
   ticketLine         TicketLine?       @relation(fields: [ticketLineId], references: [id])
+  canonicalProduct   CanonicalProduct? @relation(fields: [canonicalProductId], references: [id])
+
+  @@index([canonicalProductId])
 }
 
 model ReallocationRecord {
@@ -1830,6 +1907,8 @@ model CanonicalProduct {
   substitutionMemberships SubstitutionFamilyMember[]
   supplyEvents            SupplyEvent[]
   uomConversions          UomConversion[]
+  ticketLines             TicketLine[]
+  stockExcessRecords      StockExcessRecord[]
 
   @@index([code])
   @@index([category])
@@ -1965,6 +2044,13 @@ model SupplyEvent {
   @@index([fulfilmentType])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPRECATED (2026-04-15). CommercialInvoice is a read-only Zoho
+// reconciliation mirror. All client invoicing flows through SalesInvoice
+// (/api/sales-invoices). Write routes on /api/commercial/invoices return
+// 410 Gone. Kept queryable for historical reconciliation only — do not
+// extend, do not migrate, do not delete.
+// ─────────────────────────────────────────────────────────────────────────────
 model CommercialInvoice {
   id            String                  @id @default(uuid())
   zohoInvoiceId String?                 @unique
@@ -2358,6 +2444,7 @@ enum InquiryStatus {
   CONVERTED
   CLOSED_LOST
   CLOSED_NO_ACTION
+  LEGACY_ORPHAN
 }
 
 enum CustomerPOType {
@@ -2927,6 +3014,23 @@ model BillIntakeCorrection {
   @@index([createdAt])
 }
 
+model MarginLockAudit {
+  id                 String   @id @default(uuid())
+  ticketId           String
+  ticketLineId       String?
+  actualCostTotal    Decimal? @db.Decimal(14, 2)
+  actualSaleTotal    Decimal? @db.Decimal(14, 2)
+  actualMarginTotal  Decimal? @db.Decimal(14, 2)
+  varianceTotal      Decimal? @db.Decimal(14, 2)
+  lockedAt           DateTime @default(now())
+  reason             String
+  supplierBillIds    String[] @default([])
+  salesInvoiceIds    String[] @default([])
+
+  @@index([ticketId])
+  @@index([ticketLineId])
+}
+
 model BillLineAllocation {
   id                   String             @id @default(uuid())
   supplierBillLineId   String
@@ -3067,6 +3171,38 @@ enum BillMatchAction {
   EXCEPTION
 }
 
+// Phase 3: canonical delivery-stop status for LogisticsEvent.
+// NOT_ARRIVED  — booked delivery never landed (failed stop)
+// BYPASSED     — driver skipped the stop (failed stop)
+// DEPARTED     — goods dispatched from supplier, in transit
+// DELIVERED    — goods arrived + accepted on site (terminal success)
+// UNKNOWN      — parsed event without a decisive signal; treated as pending
+enum LogisticsStopStatus {
+  NOT_ARRIVED
+  BYPASSED
+  DEPARTED
+  DELIVERED
+  UNKNOWN
+}
+
+// Phase 2: 3-way match outcome for a SupplierBill.
+// MATCHED            — PO exists, delivery confirmed, variance within threshold
+// DISPUTE            — PO exists, delivery explicitly BYPASSED / NOT_ARRIVED
+// VARIANCE           — PO + delivery confirmed, but £ variance > threshold
+// AWAITING_DELIVERY  — PO exists, no delivery signal yet (pre-Phase-3 safety)
+// AWAITING_BILL      — PO exists, delivery confirmed, bill not yet received
+// ORPHAN_BILL        — Bill with no CostAllocation → ProcurementOrder chain
+// PARTIAL            — Some linked POs delivered, others disputed/unknown
+enum BillMatchStatus {
+  MATCHED
+  DISPUTE
+  VARIANCE
+  AWAITING_DELIVERY
+  AWAITING_BILL
+  ORPHAN_BILL
+  PARTIAL
+}
+
 enum BillMatchCandidateType {
   TICKET_LINE
   PO_LINE
@@ -3181,4 +3317,23 @@ enum InboxLinkConfidence {
 enum InboxLinkSource {
   AUTO
   MANUAL
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduler: every external-cron tick that hits /api/scheduler/* is wrapped in
+// runJob() which writes a SchedulerLog row. One row per invocation, whether
+// it succeeds, fails, or partially succeeds. Status values: RUNNING, OK,
+// PARTIAL, FAILED. `summary` holds the per-step JSON returned by the dispatch.
+// ─────────────────────────────────────────────────────────────────────────────
+model SchedulerLog {
+  id         String    @id @default(uuid())
+  job        String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String
+  summary    Json?
+  error      String?
+
+  @@index([job, startedAt])
+  @@index([status])
 }

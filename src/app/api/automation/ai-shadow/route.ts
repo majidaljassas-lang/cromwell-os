@@ -20,6 +20,7 @@
 import { prisma } from "@/lib/prisma";
 import { callClaude, isAiEnabled, getModel, estimateTokens } from "@/lib/ai/anthropic";
 import { buildShadowContext } from "@/lib/ai/build-context";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -176,7 +177,9 @@ function parseClaudeJson(raw: string): ShadowResponse | null {
 // ---------------------------------------------------------------------------
 // Main handler
 // ---------------------------------------------------------------------------
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const started = Date.now();
 
   if (!isAiEnabled()) {

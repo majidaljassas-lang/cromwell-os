@@ -99,6 +99,8 @@ export async function PATCH(
           if (!fullTicket.siteId) {
             throw new Error("Invariant violated: ticket reached transactional state without siteId");
           }
+          const issuedAt = new Date();
+          const dueDate = new Date(issuedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
           const invoice = await prisma.salesInvoice.create({
             data: {
               ticketId: id,
@@ -109,6 +111,8 @@ export async function PATCH(
               poNo: poRef,
               invoiceType: "STANDARD",
               status: "DRAFT",
+              issuedAt,
+              dueDate,
               totalSell,
               notes: `Auto-drafted when ticket reached ${body.status}`,
             },

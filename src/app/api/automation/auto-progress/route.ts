@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * Auto-progress ticket status based on data conditions.
@@ -39,7 +40,9 @@ interface Transition {
   reason: string;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     // Fetch all active tickets (not CLOSED, not INVOICED).
     // Use select to avoid deserialising TicketLine.status, which may contain

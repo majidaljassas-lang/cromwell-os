@@ -21,6 +21,8 @@ export interface ParsedBill {
   billNo: string | null;
   billDate: string | null;       // ISO date string YYYY-MM-DD
   supplierName: string | null;
+  customerRef: string | null;    // Our PO/order ref echoed on supplier bill
+  siteRef: string | null;        // Site / delivery / job reference
   subtotal: number | null;
   vatTotal: number | null;
   grandTotal: number | null;
@@ -34,6 +36,8 @@ export function parseBillText(rawText: string): ParsedBill {
     billNo: null,
     billDate: null,
     supplierName: null,
+    customerRef: null,
+    siteRef: null,
     subtotal: null,
     vatTotal: null,
     grandTotal: null,
@@ -47,6 +51,8 @@ export function parseBillText(rawText: string): ParsedBill {
   result.billNo = extractBillNumber(lines);
   result.billDate = extractBillDate(lines);
   result.supplierName = extractSupplierName(lines);
+  result.customerRef = extractCustomerRef(lines);
+  result.siteRef = extractSiteRef(lines);
 
   // Extract totals
   const totals = extractTotals(lines);
@@ -189,6 +195,72 @@ function extractSupplierName(lines: string[]): string | null {
     }
   }
 
+  return null;
+}
+
+// ─── Customer / PO Reference Extraction ────────────────────────────────────
+// Supplier bills echo our reference back as "your ref", "customer PO",
+// "order number", etc. Collects every candidate, then prefers PO-like values
+// (alphanumeric, >=6 chars, containing digits).
+
+function extractCustomerRef(lines: string[]): string | null {
+  const inlinePatterns: RegExp[] = [
+    /(?:your\s*ref(?:erence)?|customer\s*(?:ref(?:erence)?|po|order)|your\s*order)\s*[:.\-#]?\s*([A-Z0-9][\w\-\/\.]{2,})/i,
+    /(?:po\s*(?:no|number|ref(?:erence)?)|p\.o\.)\s*[:.\-#]?\s*([A-Z0-9][\w\-\/\.]{2,})/i,
+    /(?:order\s*(?:no|number|ref(?:erence)?))\s*[:.\-#]?\s*([A-Z0-9][\w\-\/\.]{2,})/i,
+    /(?:our\s*ref(?:erence)?)\s*[:.\-#]?\s*([A-Z0-9][\w\-\/\.]{2,})/i,
+    /(?:^|\s)(?:reference|ref)\s*[:.\-#]?\s*([A-Z0-9][\w\-\/\.]{2,})/i,
+  ];
+  const labelOnlyPattern =
+    /^(?:your\s*ref(?:erence)?|customer\s*(?:ref(?:erence)?|po|order)|po\s*(?:no|number|ref(?:erence)?)|p\.o\.|order\s*(?:no|number|ref(?:erence)?)|our\s*ref(?:erence)?|reference|ref)\s*[:.\-]?\s*$/i;
+
+  const candidates: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const pattern of inlinePatterns) {
+      const m = line.match(pattern);
+      if (m && m[1] && !isRefLabelWord(m[1])) {
+        candidates.push(m[1].trim());
+        break;
+      }
+    }
+
+    if (labelOnlyPattern.test(line.trim())) {
+      for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        if (/^[A-Z0-9][\w\-\/\.]{3,}$/.test(next) && !isRefLabelWord(next)) {
+          candidates.push(next);
+        }
+        break;
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  const poLike = candidates.find((c) => c.length >= 6 && /\d/.test(c));
+  return poLike ?? candidates[0];
+}
+
+function isRefLabelWord(s: string): boolean {
+  return /^(ref|reference|number|no|po|order|our|your|customer|site|job)$/i.test(s);
+}
+
+// ─── Site / Delivery / Job Reference Extraction ────────────────────────────
+
+function extractSiteRef(lines: string[]): string | null {
+  const pattern =
+    /^(?:site\s*(?:ref(?:erence)?|name)?|deliver(?:y)?\s*(?:to|address)|ship\s*to|job\s*(?:ref(?:erence)?|number|no)|project\s*ref(?:erence)?)\s*[:.\-]?\s*(.+)$/i;
+  for (const line of lines) {
+    const m = line.trim().match(pattern);
+    if (m && m[1]) {
+      const value = m[1].trim();
+      if (value.length >= 3 && !/^(to|for|at|the|a)\b/i.test(value)) {
+        return value.slice(0, 120);
+      }
+    }
+  }
   return null;
 }
 

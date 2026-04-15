@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { parseBillText } from "@/lib/ingestion/bill-parser";
 import { processBill } from "@/lib/finance/bill-processor";
+import { runThreeWayMatch } from "@/lib/finance/three-way-match";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
+import { createBillNeedsReviewTask } from "@/lib/ingestion/auto-action";
 import fs from "fs";
 import path from "path";
 
@@ -19,6 +22,8 @@ export const maxDuration = 120;
  * Idempotent — safe to call repeatedly; duplicate bills are never created.
  */
 export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const startedAt = Date.now();
   const url = new URL(request.url);
   const limit = Math.min(Number(url.searchParams.get("limit") || 25), 100);
@@ -38,13 +43,36 @@ export async function POST(request: Request) {
     });
 
     if (events.length === 0) {
+      // Even with no new events, run 3-way match so prior AWAITING_DELIVERY
+      // bills can be promoted/demoted when delivery signals arrive separately.
+      let threeWayMatch: Awaited<ReturnType<typeof runThreeWayMatch>> | null = null;
+      try {
+        threeWayMatch = await runThreeWayMatch({ limit: 50 });
+      } catch (err) {
+        console.error("[process-bills] 3-way match (no-events branch) failed:", err);
+      }
       return Response.json({
-        ok: true,
+        ok: true && (threeWayMatch?.ok ?? true),
         scanned: 0,
         processed: 0,
         failed: 0,
         message: "No unprocessed BILL_DOCUMENT events",
         durationMs: Date.now() - startedAt,
+        threeWayMatch: threeWayMatch
+          ? {
+              scanned: threeWayMatch.scanned,
+              matched: threeWayMatch.matched,
+              disputed: threeWayMatch.disputed,
+              variance: threeWayMatch.variance,
+              awaitingDelivery: threeWayMatch.awaitingDelivery,
+              awaitingBill: threeWayMatch.awaitingBill,
+              orphanBill: threeWayMatch.orphanBill,
+              partial: threeWayMatch.partial,
+              failed: threeWayMatch.failed,
+              outcomes: threeWayMatch.outcomes,
+              errors: threeWayMatch.errors,
+            }
+          : { error: "3-way match step threw — see server logs" },
       });
     }
 
@@ -106,6 +134,10 @@ export async function POST(request: Request) {
             where: { id: event.id },
             data: { status: "NEEDS_REVIEW", errorMessage: "BILL_DOCUMENT classified but no text extractable" },
           });
+          await createBillNeedsReviewTask(
+            event.id, data.subject || "", fromEmail, fromName,
+            "no PDF text could be extracted from the email attachment",
+          );
           failed++;
           results.push({
             eventId: event.id,
@@ -125,6 +157,10 @@ export async function POST(request: Request) {
             where: { id: event.id },
             data: { status: "NEEDS_REVIEW", errorMessage: "Bill text parsed but no lines or bill number found" },
           });
+          await createBillNeedsReviewTask(
+            event.id, data.subject || "", fromEmail, fromName,
+            "bill parser returned no line items and no bill number",
+          );
           failed++;
           results.push({
             eventId: event.id,
@@ -146,6 +182,10 @@ export async function POST(request: Request) {
               errorMessage: `No supplier match for ${fromName} <${fromEmail}>`,
             },
           });
+          await createBillNeedsReviewTask(
+            event.id, data.subject || "", fromEmail, fromName,
+            `no supplier match for ${fromName || fromEmail || "sender"} (parsed billNo: ${parsed.billNo || "unknown"})`,
+          );
           failed++;
           results.push({
             eventId: event.id,
@@ -191,6 +231,8 @@ export async function POST(request: Request) {
               billDate,
               status: "PENDING",
               totalCost,
+              customerRef: parsed.customerRef ?? undefined,
+              siteRef: parsed.siteRef ?? undefined,
               sourceAttachmentRef: `ingestion:${event.id}`,
             },
           });
@@ -262,13 +304,40 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── Phase 2: 3-way match. Runs AFTER all bill-creation work in this
+    // invocation so any bill freshly created above is evaluated. Limit is
+    // scanned + 25 to also pick up stragglers (AWAITING_DELIVERY from prior
+    // runs that now have a delivery signal).
+    let threeWayMatch: Awaited<ReturnType<typeof runThreeWayMatch>> | null = null;
+    try {
+      threeWayMatch = await runThreeWayMatch({ limit: events.length + 25 });
+    } catch (err) {
+      console.error("[process-bills] 3-way match failed:", err);
+      threeWayMatch = null;
+    }
+
     return Response.json({
-      ok: failed === 0,
+      ok: failed === 0 && (threeWayMatch?.ok ?? true),
       scanned: events.length,
       processed,
       failed,
       durationMs: Date.now() - startedAt,
       results,
+      threeWayMatch: threeWayMatch
+        ? {
+            scanned: threeWayMatch.scanned,
+            matched: threeWayMatch.matched,
+            disputed: threeWayMatch.disputed,
+            variance: threeWayMatch.variance,
+            awaitingDelivery: threeWayMatch.awaitingDelivery,
+            awaitingBill: threeWayMatch.awaitingBill,
+            orphanBill: threeWayMatch.orphanBill,
+            partial: threeWayMatch.partial,
+            failed: threeWayMatch.failed,
+            outcomes: threeWayMatch.outcomes,
+            errors: threeWayMatch.errors,
+          }
+        : { error: "3-way match step threw — see server logs" },
     });
   } catch (error) {
     console.error("[process-bills] Fatal error:", error);

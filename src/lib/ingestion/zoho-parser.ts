@@ -72,7 +72,7 @@ export interface ParsedZohoBillLine {
 
 export function parseZohoBill(payload: ZohoBillPayload): ParsedZohoBill {
   const rawSiteRef = extractSiteRef(payload);
-  const customerRef = payload.vendor_name || null;
+  const customerRef = extractCustomerRef(payload);
 
   // Detect mixed-site references — split on / , & + "and" "mixed"
   const siteRefs = splitSiteReferences(rawSiteRef);
@@ -145,6 +145,35 @@ function parseZohoBillLine(
     sourceSiteTextRaw: siteRef,
     sourceCustomerTextRaw: customerRef,
   };
+}
+
+/**
+ * Extract the customer-side reference (our PO echoed on the supplier bill).
+ * Zoho exposes this via custom_fields labelled "Customer PO", "Your Ref",
+ * "Our Ref", etc. Never fall back to vendor_name — that's the supplier's own
+ * name and pollutes PO matching in bill-processor.matchViaPO.
+ */
+function extractCustomerRef(payload: ZohoBillPayload): string | null {
+  if (payload.custom_fields) {
+    const refField = payload.custom_fields.find((f) => {
+      const l = f.label.toLowerCase();
+      return (
+        l.includes("customer po") ||
+        l.includes("customer ref") ||
+        l.includes("your ref") ||
+        l.includes("our ref") ||
+        l === "po" ||
+        l === "po no" ||
+        l === "po number" ||
+        l === "po ref"
+      );
+    });
+    if (refField?.value) {
+      const v = refField.value.trim();
+      if (v.length >= 3) return v;
+    }
+  }
+  return null;
 }
 
 function extractSiteRef(payload: ZohoBillPayload): string | null {

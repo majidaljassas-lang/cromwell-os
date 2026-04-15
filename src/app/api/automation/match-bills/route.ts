@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * Auto-match supplier bills to ticket lines / POs.
@@ -18,7 +19,9 @@ import { prisma } from "@/lib/prisma";
  * Uses select-only queries on TicketLine to avoid deserialising legacy
  * TicketLine.status values that are missing from the current Prisma enum.
  */
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     // 1. Fetch all UNALLOCATED supplier bill lines.
     const unallocatedLines = await prisma.supplierBillLine.findMany({

@@ -20,6 +20,7 @@
 import { prisma } from "@/lib/prisma";
 import { parseAcknowledgementText } from "@/lib/procurement/parse-acknowledgement";
 import { anchorToTicket, type AnchorMatch } from "@/lib/procurement/site-alias";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 import {
   matchAckLines,
   type DemandLine,
@@ -174,6 +175,8 @@ interface RunDetail {
 // ─── Main POST handler ───────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const started = Date.now();
   const url = new URL(request.url);
   const debugMode = url.searchParams.get("debug") === "1";

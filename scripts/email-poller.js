@@ -1,9 +1,17 @@
-// Email poller + automation runner — runs every 10 minutes
+// Email poller + automation runner — runs every 2 minutes
 // 1. Sync Outlook (creates IngestionEvents + IntakeDocuments for bill PDFs/bodies)
 // 2. Tick the bills-intake queue (PDF parse → OCR fallback → bill extraction → match → allocate)
 // 3. Trickle-down chain (auto-progress, build-evidence, generate-tasks, legacy match-bills)
 // 4. Re-match sweep across post-cutover bills (picks up newly-seeded aliases / mappings / corrections)
 const BASE = "http://localhost:3000";
+const SECRET = process.env.SCHEDULER_SECRET;
+const SECRET_HEADERS = SECRET ? { "x-scheduler-secret": SECRET } : {};
+
+if (!SECRET) {
+  console.warn(
+    "[poller] SCHEDULER_SECRET not set in process env — /api/automation/* calls will 401. Source .env before starting."
+  );
+}
 
 async function safeJson(res) { try { return await res.json(); } catch { return null; } }
 
@@ -20,7 +28,10 @@ async function poll() {
       : " bank[skip]";
 
     // 1. Sync emails — populates IntakeDocument rows for any bill PDFs / supplier email bodies
-    await fetch(`${BASE}/api/automation/sync/outlook`, { method: "POST" });
+    await fetch(`${BASE}/api/automation/sync/outlook`, {
+      method: "POST",
+      headers: { ...SECRET_HEADERS },
+    });
 
     // 2. Drain the bills-intake queue end-to-end (parse → OCR → extract → match → allocate)
     const tickRes = await fetch(`${BASE}/api/intake/queue`, {
@@ -31,7 +42,10 @@ async function poll() {
     const tick = (await safeJson(tickRes)) || {};
 
     // 3. Legacy trickle-down chain (auto-progress, build-evidence, generate-tasks, match-bills)
-    const trickleRes = await fetch(`${BASE}/api/automation/trickle-down`, { method: "POST" });
+    const trickleRes = await fetch(`${BASE}/api/automation/trickle-down`, {
+      method: "POST",
+      headers: { ...SECRET_HEADERS },
+    });
     const trickle = ((await safeJson(trickleRes)) || {}).summary || {};
 
     // 4. Re-match sweep — picks up new aliases / corrections seeded since last cycle

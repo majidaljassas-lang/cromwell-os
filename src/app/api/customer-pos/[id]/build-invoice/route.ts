@@ -62,6 +62,8 @@ export async function POST(
     const totalSell = Number(po.totalValue ?? po.poLimitValue ?? 0);
 
     // Create invoice with lines from PO
+    const issuedAt = new Date();
+    const dueDate = new Date(issuedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
     const invoice = await prisma.$transaction(async (tx) => {
       const created = await tx.salesInvoice.create({
         data: {
@@ -73,6 +75,8 @@ export async function POST(
           poNo: po.poNo,
           invoiceType: "STANDARD",
           status: "DRAFT",
+          issuedAt,
+          dueDate,
           totalSell,
           notes: `Built from PO ${po.poNo}`,
         },

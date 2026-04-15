@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { resolveLink } from "@/lib/ingestion/link-resolver";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * POST /api/automation/link-resolve
  * Run link resolver on all unlinked InboundEvents.
  */
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     const events = await prisma.inboundEvent.findMany({
       where: { linkStatus: "UNPROCESSED" },

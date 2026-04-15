@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { refreshAccessToken } from "@/lib/microsoft/graph-client";
 import { processEmailAttachments } from "@/lib/ingestion/email-attachments";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,8 @@ export const maxDuration = 300;
  * directly to backfill on demand.
  */
 export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const startedAt = Date.now();
   const url = new URL(request.url);
   const limit = Math.min(Number(url.searchParams.get("limit") || 25), 100);

@@ -25,6 +25,51 @@ interface ActionResult {
   details: string;
 }
 
+/**
+ * Create a BILL_NEEDS_REVIEW Task so that a bill failing ingestion does not
+ * become a silent NEEDS_REVIEW event. The task is attached to the most
+ * recent ticket as a placeholder (Task.ticketId is required) so it surfaces
+ * in the command centre queue. Exported so the cron path
+ * (/api/automation/process-bills) can reuse the same helper.
+ */
+export async function createBillNeedsReviewTask(
+  eventId: string,
+  subject: string,
+  fromEmail: string,
+  fromName: string,
+  failureReason: string,
+): Promise<void> {
+  try {
+    const anyTicket = await prisma.ticket.findFirst({
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!anyTicket) return;
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    await prisma.task.create({
+      data: {
+        ticketId: anyTicket.id,
+        taskType: "BILL_NEEDS_REVIEW",
+        priority: "HIGH",
+        status: "OPEN",
+        dueAt: endOfToday,
+        generatedReason:
+          `Bill ingestion needs review: ${failureReason}. ` +
+          `Event ${eventId.slice(0, 8)} from ${fromName || fromEmail || "unknown sender"}. ` +
+          `Subject: ${subject || "(no subject)"}`,
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `[auto-action] createBillNeedsReviewTask failed for ${eventId}:`,
+      err,
+    );
+  }
+}
+
 export async function processClassifiedEvents(): Promise<ActionResult[]> {
   const results: ActionResult[] = [];
 
@@ -533,6 +578,10 @@ async function handleBillDocument(
       where: { id: eventId },
       data: { status: "NEEDS_REVIEW", errorMessage: "BILL_DOCUMENT classified but no text extractable" },
     });
+    await createBillNeedsReviewTask(
+      eventId, subject, fromEmail, fromName,
+      "no PDF text could be extracted from the email attachment",
+    );
     return {
       eventId,
       action: "BILL_DOCUMENT",
@@ -549,6 +598,10 @@ async function handleBillDocument(
       where: { id: eventId },
       data: { status: "NEEDS_REVIEW", errorMessage: "Bill text parsed but no lines or bill number found" },
     });
+    await createBillNeedsReviewTask(
+      eventId, subject, fromEmail, fromName,
+      "bill parser returned no line items and no bill number",
+    );
     return {
       eventId,
       action: "BILL_DOCUMENT",
@@ -568,6 +621,10 @@ async function handleBillDocument(
         errorMessage: `No supplier match for ${fromName} <${fromEmail}>. Bill: ${parsed.billNo || "unknown"}`,
       },
     });
+    await createBillNeedsReviewTask(
+      eventId, subject, fromEmail, fromName,
+      `no supplier match for ${fromName || fromEmail || "sender"} (parsed billNo: ${parsed.billNo || "unknown"})`,
+    );
     return {
       eventId,
       action: "BILL_DOCUMENT",
@@ -608,6 +665,8 @@ async function handleBillDocument(
         billDate,
         status: "PENDING",
         totalCost,
+        customerRef: parsed.customerRef ?? undefined,
+        siteRef: parsed.siteRef ?? undefined,
         sourceAttachmentRef: `ingestion:${eventId}`,
       },
     });

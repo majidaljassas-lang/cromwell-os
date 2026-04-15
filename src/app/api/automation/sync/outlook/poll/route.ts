@@ -1,3 +1,5 @@
+import { checkSchedulerSecret, schedulerSecretHeaders } from "@/lib/scheduler/secret";
+
 /**
  * GET /api/automation/sync/outlook/poll
  *
@@ -6,11 +8,17 @@
  * Returns immediately after triggering the first sync.
  */
 export async function GET(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
+
   const baseUrl = new URL(request.url).origin;
 
   // Trigger immediate sync
   try {
-    const res = await fetch(`${baseUrl}/api/automation/sync/outlook`, { method: "POST" });
+    const res = await fetch(`${baseUrl}/api/automation/sync/outlook`, {
+      method: "POST",
+      headers: { ...schedulerSecretHeaders() },
+    });
     const data = await res.json();
     return Response.json({
       message: "Sync triggered. Set up a cron job or use the /schedule skill to run every 10 minutes.",

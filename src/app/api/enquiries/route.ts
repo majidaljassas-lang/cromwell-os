@@ -1,5 +1,19 @@
 import { prisma } from "@/lib/prisma";
 
+const DEPRECATED = {
+  error:
+    "Enquiry creation is deprecated. The modern flow is IngestionEvent → InboxThread → Ticket. Use /api/inbox and /api/tickets.",
+  deprecatedSince: "2026-04-15",
+  replacement: "/api/inbox, /api/tickets",
+} as const;
+
+/**
+ * GET /api/enquiries
+ *
+ * Read-only list of legacy enquiries. The Enquiry pipeline is DEPRECATED
+ * as of 2026-04-15 (Phase 7) — all writes return 410. This handler stays
+ * functional for historical queries and the legacy enquiries table UI.
+ */
 export async function GET() {
   try {
     const enquiries = await prisma.enquiry.findMany({
@@ -20,38 +34,16 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { sourceType, rawText, enquiryType, receivedAt, status, ...rest } =
-      body;
-
-    if (!sourceType || !rawText || !enquiryType || !receivedAt || !status) {
-      return Response.json(
-        {
-          error:
-            "Missing required fields: sourceType, rawText, enquiryType, receivedAt, status",
-        },
-        { status: 400 }
-      );
-    }
-
-    const enquiry = await prisma.enquiry.create({
-      data: {
-        sourceType,
-        rawText,
-        enquiryType,
-        receivedAt: new Date(receivedAt),
-        status,
-        ...rest,
-      },
-    });
-    return Response.json(enquiry, { status: 201 });
-  } catch (error) {
-    console.error("Failed to create enquiry:", error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Failed to create enquiry" },
-      { status: 500 }
-    );
-  }
+// DEPRECATED 2026-04-15 (Phase 7)
+export async function POST(): Promise<Response> {
+  return Response.json(DEPRECATED, { status: 410 });
+}
+export async function PATCH(): Promise<Response> {
+  return Response.json(DEPRECATED, { status: 410 });
+}
+export async function PUT(): Promise<Response> {
+  return Response.json(DEPRECATED, { status: 410 });
+}
+export async function DELETE(): Promise<Response> {
+  return Response.json(DEPRECATED, { status: 410 });
 }

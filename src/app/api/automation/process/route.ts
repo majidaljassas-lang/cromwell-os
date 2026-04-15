@@ -1,10 +1,13 @@
 import { processClassifiedEvents } from "@/lib/ingestion/auto-action";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * POST /api/automation/process
  * Process all classified events through the auto-action pipeline.
  */
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     const results = await processClassifiedEvents();
 

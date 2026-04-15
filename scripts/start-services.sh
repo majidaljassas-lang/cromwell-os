@@ -5,6 +5,15 @@
 
 cd "$(dirname "$0")/.."
 
+# Source SCHEDULER_SECRET from .env for curl calls into /api/automation/*
+if [ -z "$SCHEDULER_SECRET" ] && [ -f .env ]; then
+  SCHEDULER_SECRET=$(grep ^SCHEDULER_SECRET .env | cut -d= -f2- | tr -d '"')
+fi
+if [ -z "$SCHEDULER_SECRET" ]; then
+  echo "⚠️  SCHEDULER_SECRET not set — /api/automation/* curls will 401"
+fi
+export SCHEDULER_SECRET
+
 echo "🔧 Starting Cromwell OS services..."
 
 # 1. Start Prisma dev DB (if not running)
@@ -30,8 +39,8 @@ WA_PID=$!
 echo "📧 Starting email poller (every 10 mins)..."
 (
   while true; do
-    curl -s -X POST http://localhost:3000/api/automation/sync/outlook > /dev/null 2>&1
-    curl -s -X POST http://localhost:3000/api/automation/process > /dev/null 2>&1
+    curl -s -X POST -H "x-scheduler-secret: $SCHEDULER_SECRET" http://localhost:3000/api/automation/sync/outlook > /dev/null 2>&1
+    curl -s -X POST -H "x-scheduler-secret: $SCHEDULER_SECRET" http://localhost:3000/api/automation/process > /dev/null 2>&1
     sleep 600
   done
 ) &

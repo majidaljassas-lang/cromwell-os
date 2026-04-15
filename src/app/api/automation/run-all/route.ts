@@ -1,17 +1,27 @@
 /**
- * General automation orchestrator.
+ * General automation orchestrator — Phase 11 final ordering.
  *
- * Runs ALL automation steps in sequence:
- *   1. Sync Outlook (pull new emails)
- *   2. Backfill attachments (ensure PDFs are downloaded + parsed)
- *   3. Classify unclassified events
- *   4. Process classified events (auto-action — including BILL_DOCUMENT)
- *   5. Process any remaining bill documents (standalone bill pipeline)
- *   6. Trickle-down (ack-matcher, monitor-threads, auto-progress, etc.)
+ *   1.  outlookSync              — pull new emails
+ *   2.  backfillAttachments      — ensure PDFs are downloaded + parsed
+ *   3.  bankDetailCheck          — fraud check FIRST (safety)
+ *   4.  threeWayMatch            — PO ↔ delivery ↔ bill reconciliation
+ *   5.  deliveryTracker          — LogisticsEvent sweep
+ *   6.  addressChangeDetection   — inbox postcode conflicts
+ *   7.  miscommDetection         — cross-contact instruction conflicts
+ *   8.  uninvoicedDeliveries     — client invoice trigger
+ *   9.  surplusMatcher           — stock cross-ticket transfer opportunities
+ *  10.  classify                 — classify PARSED events
+ *  11.  threadLinker             — re-score InboxThreads (null/LOW) against open tickets
+ *  12.  autoAction               — action classified events
+ *  13.  processBills             — standalone bill pipeline
+ *  14.  trickleDown              — ack-matcher, monitor-threads, auto-progress, etc.
  *
- * This is the single endpoint a cron job calls to run everything.
- * Each step is independent — one failure doesn't stop the others.
+ * All 14 fan-out endpoints are secret-guarded; the orchestrator forwards
+ * `x-scheduler-secret` via `schedulerSecretHeaders()`. Each step is
+ * independent — one failure does NOT stop the others.
  */
+
+import { checkSchedulerSecret, schedulerSecretHeaders } from "@/lib/scheduler/secret";
 
 const BASE =
   process.env.RUN_ALL_BASE ||
@@ -21,7 +31,15 @@ const BASE =
 type StepKey =
   | "outlookSync"
   | "backfillAttachments"
+  | "bankDetailCheck"
+  | "threeWayMatch"
+  | "deliveryTracker"
+  | "addressChangeDetection"
+  | "miscommDetection"
+  | "uninvoicedDeliveries"
+  | "surplusMatcher"
   | "classify"
+  | "threadLinker"
   | "autoAction"
   | "processBills"
   | "trickleDown";
@@ -45,17 +63,16 @@ async function runStep(
   try {
     const res = await fetch(`${BASE}${endpoint}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...schedulerSecretHeaders(),
+      },
       cache: "no-store",
     });
     const durationMs = Date.now() - started;
 
     let body: unknown = null;
-    try {
-      body = await res.json();
-    } catch {
-      body = null;
-    }
+    try { body = await res.json(); } catch { body = null; }
 
     return {
       step,
@@ -85,54 +102,33 @@ async function runStep(
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
+
   const started = Date.now();
 
-  // Step 1: Sync new emails from Outlook
-  const outlookSync = await runStep(
-    "outlookSync",
-    "/api/automation/sync/outlook"
-  );
-
-  // Step 2: Backfill attachments (download + parse PDFs for any events missing them)
-  const backfillAttachments = await runStep(
-    "backfillAttachments",
-    "/api/automation/sync/outlook/backfill-attachments?limit=25"
-  );
-
-  // Step 3: Classify any PARSED events that haven't been classified yet
-  const classify = await runStep(
-    "classify",
-    "/api/automation/classify"
-  );
-
-  // Step 4: Auto-action on classified events (PO, ORDER, BILL_DOCUMENT, etc.)
-  const autoAction = await runStep(
-    "autoAction",
-    "/api/automation/process"
-  );
-
-  // Step 5: Standalone bill processor (catches any BILL_DOCUMENT events
-  // that auto-action might have missed or that were reclassified)
-  const processBills = await runStep(
-    "processBills",
-    "/api/automation/process-bills"
-  );
-
-  // Step 6: Full trickle-down (ack-matcher, monitor-threads, auto-progress,
-  // evidence, tasks, match-bills)
-  const trickleDown = await runStep(
-    "trickleDown",
-    "/api/automation/trickle-down"
-  );
+  const outlookSync            = await runStep("outlookSync",            "/api/automation/sync/outlook");
+  const backfillAttachments    = await runStep("backfillAttachments",    "/api/automation/sync/outlook/backfill-attachments?limit=25");
+  const bankDetailCheck        = await runStep("bankDetailCheck",        "/api/automation/bank-detail-check");
+  const threeWayMatch          = await runStep("threeWayMatch",          "/api/automation/three-way-match");
+  const deliveryTracker        = await runStep("deliveryTracker",        "/api/automation/delivery-tracker");
+  const addressChangeDetection = await runStep("addressChangeDetection", "/api/automation/address-change-detection");
+  const miscommDetection       = await runStep("miscommDetection",       "/api/automation/miscomm-detection");
+  const uninvoicedDeliveries   = await runStep("uninvoicedDeliveries",   "/api/automation/uninvoiced-deliveries");
+  const surplusMatcher         = await runStep("surplusMatcher",         "/api/automation/surplus-matcher");
+  const classify               = await runStep("classify",               "/api/automation/classify");
+  const threadLinker           = await runStep("threadLinker",           "/api/automation/thread-linker");
+  const autoAction             = await runStep("autoAction",             "/api/automation/process");
+  const processBills           = await runStep("processBills",           "/api/automation/process-bills");
+  const trickleDown            = await runStep("trickleDown",            "/api/automation/trickle-down");
 
   const steps = [
-    outlookSync,
-    backfillAttachments,
-    classify,
-    autoAction,
-    processBills,
-    trickleDown,
+    outlookSync, backfillAttachments,
+    bankDetailCheck, threeWayMatch,
+    deliveryTracker, addressChangeDetection, miscommDetection,
+    uninvoicedDeliveries, surplusMatcher,
+    classify, threadLinker, autoAction, processBills, trickleDown,
   ];
   const allOk = steps.every((s) => s.ok);
 
@@ -145,7 +141,15 @@ export async function POST() {
       summary: {
         outlookSync: outlookSync.ok ? "synced" : outlookSync.error,
         backfillAttachments: backfillAttachments.ok ? "done" : backfillAttachments.error,
+        bankDetailCheck: bankDetailCheck.ok ? bankDetailCheck.result : bankDetailCheck.error,
+        threeWayMatch: threeWayMatch.ok ? threeWayMatch.result : threeWayMatch.error,
+        deliveryTracker: deliveryTracker.ok ? deliveryTracker.result : deliveryTracker.error,
+        addressChangeDetection: addressChangeDetection.ok ? addressChangeDetection.result : addressChangeDetection.error,
+        miscommDetection: miscommDetection.ok ? miscommDetection.result : miscommDetection.error,
+        uninvoicedDeliveries: uninvoicedDeliveries.ok ? uninvoicedDeliveries.result : uninvoicedDeliveries.error,
+        surplusMatcher: surplusMatcher.ok ? surplusMatcher.result : surplusMatcher.error,
         classify: classify.result,
+        threadLinker: threadLinker.ok ? threadLinker.result : threadLinker.error,
         autoAction: autoAction.result,
         processBills: processBills.result,
         trickleDown: trickleDown.ok ? "done" : trickleDown.error,

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 /**
  * Auto-parse WhatsApp messages for line items.
@@ -9,7 +10,9 @@ import { prisma } from "@/lib/prisma";
  *
  * Idempotent: messages already parsed for line items are skipped.
  */
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     // Find ParsedMessages from WhatsApp that haven't been processed for line items
     const parsedMessages = await prisma.parsedMessage.findMany({

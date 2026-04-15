@@ -7,6 +7,7 @@ import { looksLikeBillBody, subjectLooksLikeBill } from "@/lib/intake/email-body
 import { attachEventToThread } from "@/lib/inbox/thread-builder";
 import { resolveLink } from "@/lib/ingestion/link-resolver";
 import { CUTOVER_DATE } from "@/lib/sync-constants";
+import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
 
@@ -44,6 +45,8 @@ export const maxDuration = 120;
  * Can be triggered manually or by a cron job.
  */
 export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   try {
     // Optional override: ?since=YYYY-MM-DD (forces backfill from this date instead of lastSyncAt)
     const url = new URL(request.url);
@@ -331,7 +334,9 @@ export async function POST(request: Request) {
  * GET /api/automation/sync/outlook
  * Returns sync status for all Outlook sources.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const sources = await prisma.ingestionSource.findMany({
     where: { sourceType: "OUTLOOK" },
     select: { id: true, externalRef: true, displayName: true, status: true, lastSyncAt: true, isActive: true },

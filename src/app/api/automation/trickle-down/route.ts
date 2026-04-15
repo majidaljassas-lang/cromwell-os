@@ -11,6 +11,8 @@
  * so we only have one entry point to keep in sync.
  */
 
+import { checkSchedulerSecret, schedulerSecretHeaders } from "@/lib/scheduler/secret";
+
 const BASE =
   process.env.TRICKLE_DOWN_BASE ||
   process.env.INTERNAL_API_BASE ||
@@ -45,7 +47,10 @@ async function runStep(
   try {
     const res = await fetch(`${BASE}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...schedulerSecretHeaders(),
+      },
       cache: "no-store",
     });
     const durationMs = Date.now() - started;
@@ -85,7 +90,9 @@ async function runStep(
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = checkSchedulerSecret(request);
+  if (unauthorized) return unauthorized;
   const started = Date.now();
 
   // Run each step sequentially so later steps see the effects of earlier ones.

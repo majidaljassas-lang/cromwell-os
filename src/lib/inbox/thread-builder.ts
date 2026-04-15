@@ -399,7 +399,7 @@ async function buildScoringInputForThread(
  * Never creates a ticket — only links to existing ones.
  * Protects MANUAL links: once a human has linked a thread, we never touch it.
  */
-async function autoLinkThread(
+export async function autoLinkThread(
   threadId: string,
   channel: "EMAIL" | "WHATSAPP" | "WHATSAPP_GROUP" | "SMS" | "OTHER",
   conversationKey: string,
