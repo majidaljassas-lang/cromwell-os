@@ -167,12 +167,26 @@ function resolveSiteName(inv: Invoice): string {
 
 // ─── Margin helpers ───────────────────────────────────────────────────────
 
+/** Sum of every supplier-bill cost actually allocated to this ticket line. */
+function lineActualBillCost(line: InvoiceLine): number {
+  const allocs = (line.ticketLine as unknown as { costAllocations?: Array<{ totalCost: unknown }> })?.costAllocations ?? [];
+  return allocs.reduce((s, a) => s + num(a.totalCost), 0);
+}
+
 function lineCostUnit(line: InvoiceLine): number {
+  // Prefer actual cost from supplier bills if present; fall back to expected
+  const actualTotal = lineActualBillCost(line);
+  if (actualTotal > 0) {
+    const qty = num(line.qty);
+    return qty > 0 ? actualTotal / qty : 0;
+  }
   return num(line.ticketLine?.expectedCostUnit);
 }
 
 function lineCostTotal(line: InvoiceLine): number {
-  const costU = lineCostUnit(line);
+  const actualTotal = lineActualBillCost(line);
+  if (actualTotal > 0) return actualTotal;
+  const costU = num(line.ticketLine?.expectedCostUnit);
   if (costU > 0) return costU * num(line.qty);
   return num(line.ticketLine?.expectedCostTotal);
 }
@@ -416,7 +430,10 @@ export function InvoicesView({
             ) : (
               filtered.map((inv) => {
                 const isExpanded = expandedId === inv.id;
-                const allMatched = inv.lines.length > 0 && inv.lines.every((l) => l.poMatched);
+                const headerMatched = (inv.notes || "").includes("[PO_MATCHED_HEADER]");
+                const allMatched =
+                  (inv.lines.length > 0 && inv.lines.every((l) => l.poMatched)) ||
+                  (inv.lines.length === 0 && !!inv.poNo && headerMatched);
                 const blockers = inv.status === "DRAFT" ? getReadinessBlockers(inv) : [];
                 const days = daysSinceSent(inv);
 
@@ -557,6 +574,7 @@ export function InvoicesView({
                                       <TableHead className="text-right">Margin</TableHead>
                                       <TableHead className="text-right">Margin %</TableHead>
                                       <TableHead>PO Matched</TableHead>
+                                      <TableHead>Cost From</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -605,6 +623,24 @@ export function InvoicesView({
                                                   <Badge variant="outline">Unmatched</Badge>
                                                 )}
                                               </TableCell>
+                                              <TableCell className="text-xs">
+                                                {(() => {
+                                                  const allocs = (line.ticketLine as unknown as { costAllocations?: Array<{ totalCost: unknown; supplierBillLine: { supplierBill: { id: string; billNo: string; supplier: { name: string } } } }> })?.costAllocations ?? [];
+                                                  if (allocs.length === 0) return <span className="text-muted-foreground">—</span>;
+                                                  return (
+                                                    <div className="space-y-0.5">
+                                                      {allocs.map((a, i) => (
+                                                        <div key={i}>
+                                                          <a href={`/procurement?bill=${a.supplierBillLine.supplierBill.id}`} className="text-primary hover:underline">
+                                                            {a.supplierBillLine.supplierBill.supplier.name} {a.supplierBillLine.supplierBill.billNo}
+                                                          </a>
+                                                          <span className="text-muted-foreground"> £{num(a.totalCost).toFixed(2)}</span>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  );
+                                                })()}
+                                              </TableCell>
                                             </TableRow>
                                           );
                                         })}
@@ -630,6 +666,7 @@ export function InvoicesView({
                                           >
                                             {totalCost > 0 ? pct(totalMarginPct) : "\u2014"}
                                           </TableCell>
+                                          <TableCell />
                                           <TableCell />
                                         </TableRow>
                                       </>

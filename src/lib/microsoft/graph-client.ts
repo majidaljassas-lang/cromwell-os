@@ -83,6 +83,18 @@ export async function graphGet(accessToken: string, path: string) {
   return res.json();
 }
 
+/** Follow a fully-qualified Graph URL (used for @odata.nextLink pagination). */
+export async function graphGetByUrl(accessToken: string, fullUrl: string) {
+  const res = await fetch(fullUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Graph API error (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
 export async function fetchEmails(
   accessToken: string,
   opts: { folder?: string; since?: string; top?: number } = {}
@@ -132,4 +144,29 @@ export async function fetchUserProfile(accessToken: string) {
     mail: string;
     userPrincipalName: string;
   }>;
+}
+
+/**
+ * Download the raw bytes of a single Outlook attachment.
+ *
+ * Uses the `/$value` endpoint which returns the binary content directly
+ * (not base64-wrapped). Returns a Buffer ready for pdf-parse.
+ *
+ * Graph endpoint: GET /me/messages/{messageId}/attachments/{attachmentId}/$value
+ */
+export async function fetchAttachment(
+  accessToken: string,
+  messageId: string,
+  attachmentId: string
+): Promise<Buffer> {
+  const res = await fetch(
+    `${GRAPH_URL}/me/messages/${messageId}/attachments/${attachmentId}/$value`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Graph fetchAttachment failed (${res.status}): ${err}`);
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }

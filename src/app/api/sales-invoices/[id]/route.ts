@@ -70,6 +70,14 @@ export async function PATCH(
       },
     });
 
+    // Auto-run PO match if poNo changed or was set
+    if (poNo !== undefined && invoice.poNo) {
+      try {
+        const matchUrl = new URL(`/api/sales-invoices/${id}/match-po`, request.url);
+        await fetch(matchUrl.toString(), { method: "POST" }).catch(() => {});
+      } catch {}
+    }
+
     return Response.json(invoice);
   } catch (error) {
     console.error("Failed to update sales invoice:", error);

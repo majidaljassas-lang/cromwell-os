@@ -1,31 +1,42 @@
 // Email poller + automation runner — runs every 10 minutes
-// Syncs emails, then hits the single trickle-down endpoint which runs
-// auto-progress, build-evidence, generate-tasks, and match-bills in order.
+// 1. Sync Outlook (creates IngestionEvents + IntakeDocuments for bill PDFs/bodies)
+// 2. Tick the bills-intake queue (PDF parse → OCR fallback → bill extraction → match → allocate)
+// 3. Trickle-down chain (auto-progress, build-evidence, generate-tasks, legacy match-bills)
+// 4. Re-match sweep across post-cutover bills (picks up newly-seeded aliases / mappings / corrections)
 const BASE = "http://localhost:3000";
+
+async function safeJson(res) { try { return await res.json(); } catch { return null; } }
 
 async function poll() {
   const now = new Date().toLocaleTimeString("en-GB");
   try {
-    // Sync emails (no auto-link)
+    // 1. Sync emails — populates IntakeDocument rows for any bill PDFs / supplier email bodies
     await fetch(`${BASE}/api/automation/sync/outlook`, { method: "POST" });
 
-    // Run the full trickle-down chain in one call
-    const res = await fetch(`${BASE}/api/automation/trickle-down`, {
+    // 2. Drain the bills-intake queue end-to-end (parse → OCR → extract → match → allocate)
+    const tickRes = await fetch(`${BASE}/api/intake/queue`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "tick" }),
     });
-    let summary = "";
-    try {
-      const body = await res.json();
-      const s = body?.summary || {};
-      summary =
-        ` progressed=${s.autoProgress?.transitionsApplied ?? 0}` +
-        ` evidence=${s.buildEvidence?.evidenceCreated ?? 0}` +
-        ` tasks+=${s.generateTasks?.tasksCreated ?? 0}` +
-        ` tasks-=${s.generateTasks?.tasksClosed ?? 0}` +
-        ` bills=${s.matchBills?.matched ?? 0}`;
-    } catch {
-      /* ignore */
-    }
+    const tick = (await safeJson(tickRes)) || {};
+
+    // 3. Legacy trickle-down chain (auto-progress, build-evidence, generate-tasks, match-bills)
+    const trickleRes = await fetch(`${BASE}/api/automation/trickle-down`, { method: "POST" });
+    const trickle = ((await safeJson(trickleRes)) || {}).summary || {};
+
+    // 4. Re-match sweep — picks up new aliases / corrections seeded since last cycle
+    const rematchRes = await fetch(`${BASE}/api/intake/rematch-all`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const rematch = (await safeJson(rematchRes)) || {};
+
+    const summary =
+      ` intake[parse=${tick.parsed ?? 0} match=${tick.matched ?? 0} alloc=${tick.allocated ?? 0} err=${tick.errors ?? 0}]` +
+      ` legacy[prog=${trickle.autoProgress?.transitionsApplied ?? 0} bills=${trickle.matchBills?.matched ?? 0}]` +
+      ` rematch[scan=${rematch.scanned ?? 0} auto=${rematch.autoLinked ?? 0} sugg=${rematch.suggested ?? 0}]`;
 
     console.log(`[${now}] Poll complete${summary}`);
   } catch (e) {
@@ -33,8 +44,9 @@ async function poll() {
   }
 }
 
-// Run immediately, then every 10 minutes
+// Run immediately, then every 2 minutes — bills intake needs near-real-time signal
+const INTERVAL_MS = 2 * 60 * 1000;
 poll();
-setInterval(poll, 10 * 60 * 1000);
+setInterval(poll, INTERVAL_MS);
 
-console.log("Poller started — sync + trickle-down every 10 minutes");
+console.log(`Poller started — sync + intake-tick + trickle-down + rematch every ${INTERVAL_MS/60000} minutes (PID ${process.pid})`);

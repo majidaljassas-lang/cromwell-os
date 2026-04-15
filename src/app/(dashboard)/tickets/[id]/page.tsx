@@ -70,6 +70,28 @@ export default async function TicketDetailPage({
     include: { ticketLine: true, supplierBillLine: { include: { supplierBill: true } }, supplier: true },
     orderBy: { createdAt: "desc" },
   });
+  // Every supplier-bill line that points at this ticket — even ones not yet flowed via CostAllocation
+  // (auto-link can land siteId/customerId/ticketId without a CostAllocation row when status = SUGGESTED)
+  const supplierBills = await prisma.supplierBill.findMany({
+    where: {
+      OR: [
+        { lines: { some: { ticketId: id } } },
+        { lines: { some: { costAllocations: { some: { ticketLine: { ticketId: id } } } } } },
+      ],
+    },
+    include: {
+      supplier: true,
+      lines: {
+        where: {
+          OR: [
+            { ticketId: id },
+            { costAllocations: { some: { ticketLine: { ticketId: id } } } },
+          ],
+        },
+      },
+    },
+    orderBy: { billDate: "desc" },
+  });
   const absorbedCostAllocations = await prisma.absorbedCostAllocation.findMany({
     where: { ticketId: id },
     include: { supplierBillLine: true },
@@ -134,6 +156,7 @@ export default async function TicketDetailPage({
         customers={s(customers)}
         procurementOrders={s(procurementOrders)}
         costAllocations={s(costAllocations)}
+        supplierBills={s(supplierBills)}
         absorbedCostAllocations={s(absorbedCostAllocations)}
         suppliers={s(allSuppliers)}
         customerPOs={s(customerPOs)}

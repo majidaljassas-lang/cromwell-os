@@ -124,14 +124,21 @@ function parseZohoBillLine(
   // Classify the cost line
   const { classification, confidence } = classifyCostLine(line.description);
 
+  // Extract a manufacturer SKU from the description (Zoho often puts it on its own first line)
+  const skuMatch = line.description?.match(/^([A-Z][A-Z0-9./-]{2,})\b/);
+  const productCode = line.item_id || skuMatch?.[1] || undefined;
+
+  // Zoho can return amount=0 when sub_total/tax handling is unusual. Always fall back to qty * rate.
+  const lineTotal = line.amount && line.amount !== 0 ? line.amount : (line.quantity * line.rate);
+
   return {
     externalLineId: line.line_item_id,
     description: line.description,
     normalizedItemName: normaliseItemName(line.description),
-    productCode: line.item_id,
+    productCode,
     qty: line.quantity,
     unitCost: line.rate,
-    lineTotal: line.amount,
+    lineTotal,
     vat,
     costClassification: classification,
     classificationConfidence: confidence,

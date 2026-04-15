@@ -4,7 +4,10 @@ import { TicketsTable } from "@/components/tickets/tickets-table";
 export const dynamic = 'force-dynamic';
 
 export default async function TicketsPage() {
+  // Clean cutover: Cromwell OS is the sole system from 2026-04-01.
+  const CLEAN_CUTOVER = new Date("2026-04-01");
   const tickets = await prisma.ticket.findMany({
+    where: { createdAt: { gte: CLEAN_CUTOVER } },
     include: {
       payingCustomer: true,
       site: true,

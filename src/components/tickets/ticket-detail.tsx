@@ -126,6 +126,19 @@ const NUM_CLS = `${INPUT_CLS} w-20 text-right tabular-nums`;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+type PriceSuggestion = {
+  unitPrice: number;
+  qty: number | null;
+  basis: "CUSTOMER_HISTORY" | "FAMILY_HISTORY" | "ALL_CUSTOMERS" | "EXTRAPOLATED";
+  source: "INVOICE" | "QUOTE";
+  sourceRef: string | null;
+  sourceStatus: string | null;
+  customerName: string | null;
+  description: string | null;
+  observedAt: string | null;
+  confidence: number | null;
+};
+
 type BOMComponent = {
   id: string;
   description: string;
@@ -305,6 +318,60 @@ function InlineLineRow({
   const [bomSheetOpen, setBomSheetOpen] = useState(false);
   const [bomComponents, setBomComponents] = useState<Array<{ description: string; qty: string; unit: string; expectedCostUnit: string; supplierName: string }>>([]);
   const [bomSaving, setBomSaving] = useState(false);
+
+  // ── Price suggest ──
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<PriceSuggestion[] | null>(null);
+  const suggestRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!suggestOpen) return;
+    function handleOutside(e: MouseEvent) {
+      if (suggestRef.current && !suggestRef.current.contains(e.target as Node)) {
+        setSuggestOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [suggestOpen]);
+
+  async function openSuggest() {
+    if (!line.payingCustomerId) return;
+    setSuggestOpen(true);
+    if (suggestions !== null) return; // already loaded
+    setSuggestLoading(true);
+    setSuggestError(null);
+    try {
+      const res = await fetch("/api/pricing/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: line.payingCustomerId,
+          description: line.description,
+          qty: line.qty ? Number(line.qty) : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setSuggestions(data.suggestions ?? []);
+    } catch (err: unknown) {
+      setSuggestError(err instanceof Error ? err.message : "Failed to load suggestions");
+      setSuggestions([]);
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
+  function applySuggestedPrice(price: number) {
+    const rounded = Math.round(price * 100) / 100;
+    setSaleVal(String(rounded));
+    saveField("actualSaleUnit", rounded);
+    setSuggestOpen(false);
+    // Reset so next open re-fetches if description changes
+    setSuggestions(null);
+  }
 
   useEffect(() => {
     setDesc(line.description);
@@ -685,8 +752,79 @@ function InlineLineRow({
           {line.status.replace(/_/g, " ")}
         </Badge>
       </TableCell>
-      <TableCell className="p-1 w-16">
-        <div className="flex items-center gap-0.5">
+      <TableCell className="p-1 w-20">
+        <div className="flex items-center gap-0.5 relative" ref={suggestRef}>
+          {/* 💡 Suggest Price */}
+          <button
+            onClick={openSuggest}
+            disabled={!line.payingCustomerId}
+            className="p-0.5 text-[#888888] hover:text-[#FF9900] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Suggest price from history"
+          >
+            <span className="text-[11px] leading-none">💡</span>
+          </button>
+          {/* Suggest price popover */}
+          {suggestOpen && (
+            <div
+              className="absolute right-0 top-full mt-1 z-50 w-72 bg-[#1A1A1A] border border-[#333333] shadow-xl text-xs"
+              style={{ minWidth: "18rem" }}
+            >
+              <div className="px-3 py-2 border-b border-[#333333] flex items-center justify-between">
+                <span className="font-bold text-[#E0E0E0] uppercase tracking-wider text-[10px]">Suggest Price</span>
+                <button
+                  onClick={() => setSuggestOpen(false)}
+                  className="text-[#666666] hover:text-[#E0E0E0] text-xs leading-none"
+                >✕</button>
+              </div>
+              {suggestLoading && (
+                <div className="px-3 py-4 text-center text-[#888888]">Loading…</div>
+              )}
+              {suggestError && (
+                <div className="px-3 py-3 text-[#FF3333] text-[11px]">{suggestError}</div>
+              )}
+              {!suggestLoading && !suggestError && suggestions !== null && (() => {
+                const customer = suggestions.filter(s => s.basis === "CUSTOMER_HISTORY");
+                const family = suggestions.filter(s => s.basis === "FAMILY_HISTORY");
+                const others = suggestions.filter(s => s.basis === "ALL_CUSTOMERS").slice(0, 3);
+                if (suggestions.length === 0) {
+                  return (
+                    <div className="px-3 py-4 text-[#888888] text-[11px]">
+                      No history — quote from supplier cost + margin.
+                    </div>
+                  );
+                }
+                function SuggestSection({ label, items, accent }: { label: string; items: PriceSuggestion[]; accent: string }) {
+                  if (items.length === 0) return null;
+                  return (
+                    <div className="border-b border-[#2A2A2A] last:border-b-0">
+                      <div className={`px-3 pt-2 pb-1 text-[9px] uppercase tracking-widest font-bold ${accent}`}>{label}</div>
+                      {items.map((s, i) => (
+                        <button
+                          key={i}
+                          className="w-full text-left px-3 py-1.5 hover:bg-[#252525] flex items-center justify-between gap-2 transition-colors"
+                          onClick={() => applySuggestedPrice(s.unitPrice)}
+                        >
+                          <span className="text-[#00CC66] font-bold tabular-nums">£{s.unitPrice.toFixed(2)}</span>
+                          <span className="text-[#888888] text-[10px] truncate flex-1 text-right">
+                            {s.sourceRef && <span className="mr-1">{s.sourceRef}</span>}
+                            {s.observedAt && <span>{new Date(s.observedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}</span>}
+                          </span>
+                          <span className="text-[#555555] text-[9px] uppercase shrink-0">{s.source}</span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <SuggestSection label="From this customer" items={customer} accent="text-[#FF6600]" />
+                    <SuggestSection label="Customer family" items={family} accent="text-[#FF9900]" />
+                    <SuggestSection label="Other customers (reference)" items={others} accent="text-[#888888]" />
+                  </>
+                );
+              })()}
+            </div>
+          )}
           {line.isBomParent && (
             <button
               onClick={() => setBomExpanded(!bomExpanded)}
@@ -957,6 +1095,7 @@ export function TicketDetail({
   sites = [],
   commercialLinks = [],
   stockItems = [],
+  supplierBills = [],
 }: {
   ticket: TicketData;
   quotes?: QuoteData[];
@@ -971,6 +1110,7 @@ export function TicketDetail({
   sites?: SiteOption[];
   commercialLinks?: CommercialLinkOption[];
   stockItems?: any[];
+  supplierBills?: any[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState<{
@@ -2425,7 +2565,7 @@ export function TicketDetail({
             ticketTitle={ticket.title}
             ticketStatus={ticket.status}
             procurementOrders={procurementOrders}
-            supplierBills={[]}
+            supplierBills={supplierBills}
             costAllocations={costAllocations}
             absorbedCosts={absorbedCostAllocations}
             suppliers={suppliers}

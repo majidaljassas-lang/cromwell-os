@@ -12,13 +12,33 @@ function fmt(val: unknown): string {
   return `£${Number(val).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function termsToDays(terms: string | null | undefined): number {
+  if (!terms) return 30;
+  const t = terms.toLowerCase().replace(/\s+/g, "");
+  if (t.includes("net7")) return 7;
+  if (t.includes("net14")) return 14;
+  if (t.includes("net30")) return 30;
+  if (t.includes("net45")) return 45;
+  if (t.includes("net60")) return 60;
+  if (t.includes("eom") || t.includes("endofmonth")) {
+    // due last day of current month
+    return -1; // sentinel — handled below
+  }
+  if (t.includes("endofnext") || t.includes("eonm")) return -2; // due last day of next month
+  if (t.includes("cash") || t.includes("onreceipt")) return 0;
+  if (t.includes("proforma")) return 0;
+  const m = t.match(/net(\d+)/);
+  if (m) return parseInt(m[1]);
+  return 30;
+}
+
 function buildHtml(invoice: {
   invoiceNo: string | null;
   invoiceType: string;
   issuedAt: Date | null;
   poNo: string | null;
   notes: string | null;
-  customer: { name: string; billingAddress?: string | null };
+  customer: { name: string; billingAddress?: string | null; paymentTerms?: string | null };
   site: { siteName: string } | null;
   ticket: { title: string };
   lines: Array<{
@@ -31,10 +51,24 @@ function buildHtml(invoice: {
 }, totalSale: number, fontBase64: string): string {
   const invoiceDate = invoice.issuedAt ? new Date(invoice.issuedAt) : new Date();
   const dateStr = invoiceDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-  const dueDate = new Date(invoiceDate);
-  if (invoice.invoiceType !== "PROFORMA") {
-    dueDate.setDate(dueDate.getDate() + 30);
+
+  // Determine payment terms (proforma overrides customer terms)
+  const customerTerms = invoice.customer.paymentTerms || "Net 30";
+  const termsLabel = invoice.invoiceType === "PROFORMA" ? "Pro-Forma" : customerTerms;
+  const termsDays = invoice.invoiceType === "PROFORMA" ? 0 : termsToDays(customerTerms);
+
+  // Compute due date
+  let dueDate = new Date(invoiceDate);
+  if (termsDays === -1) {
+    // EOM = end of current month
+    dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 1, 0);
+  } else if (termsDays === -2) {
+    // End of next month
+    dueDate = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth() + 2, 0);
+  } else {
+    dueDate.setDate(dueDate.getDate() + termsDays);
   }
+
   const dueDateStr = invoice.invoiceType === "PROFORMA"
     ? "On Receipt"
     : dueDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -108,7 +142,7 @@ function buildHtml(invoice: {
   <div style="text-align:right;font-size:11px;line-height:1.8">
     <div><span style="color:#888">Date:</span> ${dateStr}</div>
     <div><span style="color:#888">Due:</span> ${dueDateStr}</div>
-    <div><span style="color:#888">Terms:</span> ${invoice.invoiceType === "PROFORMA" ? "Pro-Forma" : "Net 30"}</div>
+    <div><span style="color:#888">Terms:</span> ${termsLabel}</div>
     ${invoice.poNo ? `<div><span style="color:#888">PO:</span> <strong>${invoice.poNo}</strong></div>` : ""}
     ${invoice.site ? `<div><span style="color:#888">Site:</span> ${invoice.site.siteName}</div>` : ""}
   </div>

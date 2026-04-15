@@ -91,10 +91,13 @@ export async function GET(
     const totalStockExcess = round2(stockExcess.reduce((s, r) => s + Number(r.excessCost), 0));
     const totalAbsorbed = round2(absorbedCosts.reduce((s, r) => s + Number(r.amount), 0));
 
-    // Compute totals — deduct stock excess and absorbed from job cost
+    // Compute totals
+    // - grossCost = sum of line costs (allocated or expected)
+    // - + absorbed costs (delivery, overheads — REAL costs to add)
+    // - - stock excess (qty over-ordered that went to stock — deduct from job)
     const totalSale = round2(lineDetails.reduce((s, l) => s + l.sale, 0));
     const grossCost = round2(lineDetails.reduce((s, l) => s + (l.allocatedCost > 0 ? l.allocatedCost : l.expectedCost), 0));
-    const totalCost = round2(grossCost - totalStockExcess);
+    const totalCost = round2(grossCost + totalAbsorbed - totalStockExcess);
     const totalMargin = round2(totalSale - totalCost);
     const totalMarginPct = totalSale > 0 ? round2((totalMargin / totalSale) * 100) : 0;
     const totalExpectedCost = round2(lineDetails.reduce((s, l) => s + l.expectedCost, 0));

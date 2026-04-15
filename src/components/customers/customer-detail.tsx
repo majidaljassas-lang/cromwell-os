@@ -60,14 +60,28 @@ type Customer = {
   customerPOs: Array<{ id: string; poNo: string; poType: string; status: string; totalValue: number | null }>;
 };
 
+type SupplierBillLineRow = {
+  id: string;
+  description: string;
+  qty: number | string;
+  unitCost: number | string;
+  lineTotal: number | string;
+  allocationStatus: string;
+  supplierBill: { id: string; billNo: string; billDate: string; supplier: { id: string; name: string } };
+  ticket: { id: string; ticketNo: number; title: string } | null;
+  site: { id: string; siteName: string } | null;
+};
+
 export function CustomerDetail({
   customer,
   allSites,
   allCustomers,
+  supplierBillLines = [],
 }: {
   customer: Customer;
   allSites: Array<{ id: string; siteName: string }>;
   allCustomers: Array<{ id: string; name: string }>;
+  supplierBillLines?: SupplierBillLineRow[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -280,6 +294,7 @@ export function CustomerDetail({
           <TabsTrigger value="sites">Sites ({customer.siteCommercialLinks.length})</TabsTrigger>
           <TabsTrigger value="tickets">Tickets ({customer.ticketsAsPayer.length})</TabsTrigger>
           <TabsTrigger value="contacts">Contacts ({customer.siteContactLinks.length})</TabsTrigger>
+          <TabsTrigger value="bills">Supplier Bills ({supplierBillLines.length})</TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW */}
@@ -634,6 +649,60 @@ export function CustomerDetail({
               </Table>
             </div>
           )}
+        </TabsContent>
+
+        {/* Supplier Bills Tab — every bill line landed on this customer (or family) */}
+        <TabsContent value="bills" className="mt-4">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
+            {supplierBillLines.length === 0 ? (
+              <p className="text-sm text-[#888888] p-6">No supplier bill lines allocated to this customer yet.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    <TableHead>Bill #</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Site</TableHead>
+                    <TableHead>Ticket</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Line Total</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {supplierBillLines.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell className="text-xs text-[#888888]">
+                        {new Date(l.supplierBill.billDate).toLocaleDateString("en-GB")}
+                      </TableCell>
+                      <TableCell>{l.supplierBill.supplier.name}</TableCell>
+                      <TableCell>
+                        <a href={`/procurement?bill=${l.supplierBill.id}`} className="text-[#FF6600] hover:underline">
+                          {l.supplierBill.billNo}
+                        </a>
+                      </TableCell>
+                      <TableCell className="text-xs max-w-md truncate" title={l.description}>{l.description}</TableCell>
+                      <TableCell className="text-xs">
+                        {l.site ? (
+                          <a href={`/sites/${l.site.id}`} className="text-[#FF6600] hover:underline">{l.site.siteName}</a>
+                        ) : <span className="text-[#888888]">—</span>}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {l.ticket ? (
+                          <a href={`/tickets/${l.ticket.id}`} className="text-[#FF6600] hover:underline">#{l.ticket.ticketNo}</a>
+                        ) : <span className="text-[#888888]">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{Number(l.qty).toFixed(2)}</TableCell>
+                      <TableCell className="text-right tabular-nums">£{Number(l.lineTotal).toFixed(2)}</TableCell>
+                      <TableCell><Badge variant="outline">{l.allocationStatus}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

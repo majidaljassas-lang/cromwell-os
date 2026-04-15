@@ -1078,6 +1078,58 @@ export function TicketProcurementTab({
                 <div className="px-3 py-2 border-b border-[#00CC66]/15 flex items-center gap-2">
                   <Badge className="text-[9px] bg-[#3399FF]/15 text-[#3399FF]">{supplier}</Badge>
                   <span className="text-[10px] text-[#888888]">{lines.length} items</span>
+                  <Button
+                    size="sm"
+                    className="ml-auto h-6 text-[10px] bg-[#FF6600] text-black hover:bg-[#CC5500]"
+                    onClick={async () => {
+                      const expressInput = prompt("Express delivery charge (£) — leave blank for none:");
+                      const expressCharge = Number(expressInput) || 0;
+                      // Find or create a ProcurementOrder for this supplier
+                      const sup = suppliers.find(s => s.name === supplier);
+                      if (!sup) { alert("Supplier not in suppliers list"); return; }
+                      // Find ANY existing PO for this supplier on this ticket — don't create duplicates
+                      const existing = procurementOrders.find(po => po.supplier?.id === sup.id);
+                      let poId = existing?.id;
+                      if (!poId) {
+                        // Create a new PO
+                        const poNo = `PO-${Date.now()}-${supplier.substring(0, 4).toUpperCase().replace(/\s/g, "")}`;
+                        const res = await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            ticketId,
+                            supplierId: sup.id,
+                            poNo,
+                            lines: lines.map(l => ({
+                              ticketLineId: l.id,
+                              description: l.description,
+                              qty: Number(l.qty?.toString() || 1),
+                              unitCost: Number(l.expectedCostUnit?.toString() || 0),
+                              lineTotal: Number(l.qty?.toString() || 1) * Number(l.expectedCostUnit?.toString() || 0),
+                            })),
+                          }),
+                        });
+                        if (!res.ok) { alert("Failed to create PO"); return; }
+                        const created = await res.json();
+                        poId = created.id;
+                      }
+                      // Generate PDF
+                      const pdfRes = await fetch(`/api/procurement-orders/${poId}/generate-pdf`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ expressCharge }),
+                      });
+                      if (pdfRes.ok) {
+                        window.open(`/api/procurement-orders/${poId}/generate-pdf`, "_blank");
+                        router.refresh();
+                      } else {
+                        alert("Failed to generate PDF");
+                      }
+                    }}
+                  >
+                    <FileText className="size-3 mr-1" />
+                    Generate PO PDF
+                  </Button>
                 </div>
                 <Table>
                   <TableHeader>

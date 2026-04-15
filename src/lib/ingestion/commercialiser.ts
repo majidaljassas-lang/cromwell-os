@@ -13,6 +13,8 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "./audit";
 import { validateBillLine } from "./validation";
 import { autoAllocate, suggestAllocations } from "./auto-allocator";
+import { autoLinkBillLine } from "./auto-link-bill-line";
+import { matchBillLine } from "@/lib/intake/match-engine";
 
 export interface CommercialiseResult {
   success: boolean;
@@ -178,7 +180,29 @@ export async function commercialiseZohoBill(
   result.success = true;
   result.createdObjects.push({ type: "SupplierBill", id: bill.id });
 
-  // Fix 2: Auto-allocate BILLABLE lines with high confidence
+  // System layer: auto-link every line by SKU/description against existing tickets/POs/invoices
+  // (source-agnostic — runs the same regardless of where the bill came from)
+  const allLines = await prisma.supplierBillLine.findMany({
+    where: { supplierBillId: bill.id },
+    select: { id: true },
+  });
+  for (const l of allLines) {
+    try {
+      const link = await autoLinkBillLine(l.id, options.actor ?? "SYSTEM");
+      if (link.action === "AUTO_LINKED") result.createdObjects.push({ type: "AutoLink_Bill", id: l.id });
+      if (link.action === "SUGGESTED")  result.warnings.push(`Line ${l.id}: suggested → ${link.candidate?.source} ${link.candidate?.recordId} (conf ${link.candidate?.confidence})`);
+    } catch (e) {
+      result.warnings.push(`Line ${l.id}: auto-link failed — ${e instanceof Error ? e.message : "unknown"}`);
+    }
+    // Multi-signal match engine runs alongside the legacy linker — writes BillLineMatch rows
+    try {
+      await matchBillLine(l.id);
+    } catch (e) {
+      result.warnings.push(`Line ${l.id}: match-engine failed — ${e instanceof Error ? e.message : "unknown"}`);
+    }
+  }
+
+  // Legacy CostAllocation pass — only on lines with confirmed VAT (kept for ticket P&L flow)
   const createdLines = await prisma.supplierBillLine.findMany({
     where: { supplierBillId: bill.id, costClassification: "BILLABLE", commercialStatus: { not: "BLOCKED_VAT_UNKNOWN" } },
     select: { id: true },

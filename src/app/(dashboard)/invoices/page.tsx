@@ -4,7 +4,11 @@ import { InvoicesView } from "@/components/invoices/invoices-view";
 export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
+  // Clean cutover: Cromwell OS is the sole system from 2026-04-01.
+  // Default operational view = post-cutover. Legacy invoices still in DB but never default.
+  const CLEAN_CUTOVER = new Date("2026-04-01");
   const invoices = await prisma.salesInvoice.findMany({
+    where: { OR: [{ issuedAt: { gte: CLEAN_CUTOVER } }, { createdAt: { gte: CLEAN_CUTOVER } }] },
     include: {
       ticket: {
         include: {
@@ -22,6 +26,31 @@ export default async function InvoicesPage() {
               expectedCostTotal: true,
               actualCostTotal: true,
               createdAt: true,
+              // every supplier-bill cost that landed on this ticket line
+              costAllocations: {
+                select: {
+                  id: true,
+                  totalCost: true,
+                  qtyAllocated: true,
+                  unitCost: true,
+                  allocationStatus: true,
+                  confidenceScore: true,
+                  supplierBillLine: {
+                    select: {
+                      id: true,
+                      description: true,
+                      supplierBill: {
+                        select: {
+                          id: true,
+                          billNo: true,
+                          billDate: true,
+                          supplier: { select: { id: true, name: true } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
         },

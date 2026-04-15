@@ -42,9 +42,21 @@ export default async function SiteDetailPage({
     select: { id: true, name: true },
   });
 
+  // All supplier bill lines that landed on this site (via auto-link or manual)
+  const supplierBillLines = await prisma.supplierBillLine.findMany({
+    where: { siteId: id },
+    include: {
+      supplierBill: { include: { supplier: { select: { id: true, name: true } } } },
+      ticket:   { select: { id: true, ticketNo: true, title: true } },
+      customer: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const s = (v: unknown) => JSON.parse(JSON.stringify(v));
   return (
     <div className="p-8">
-      <SiteDetail site={site} customers={customers} />
+      <SiteDetail site={s(site)} customers={s(customers)} supplierBillLines={s(supplierBillLines)} />
     </div>
   );
 }

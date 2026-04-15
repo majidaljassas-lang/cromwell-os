@@ -51,11 +51,31 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     orderBy: { name: "asc" },
   });
 
+  // Bills landed on any ticket for this customer (or family)
+  const familyIds: string[] = [id];
+  if (customer.parentEntity?.id) familyIds.push(customer.parentEntity.id);
+  for (const sub of customer.subsidiaries ?? []) familyIds.push(sub.id);
+
+  const supplierBillLines = await prisma.supplierBillLine.findMany({
+    where: { customerId: { in: familyIds } },
+    include: {
+      supplierBill: { include: { supplier: { select: { id: true, name: true } } } },
+      ticket:       { select: { id: true, ticketNo: true, title: true } },
+      site:         { select: { id: true, siteName: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
     <div className="p-4 space-y-4">
-      <CustomerDetail customer={s(customer)} allSites={s(allSites)} allCustomers={s(allCustomers)} />
+      <CustomerDetail
+        customer={s(customer)}
+        allSites={s(allSites)}
+        allCustomers={s(allCustomers)}
+        supplierBillLines={s(supplierBillLines)}
+      />
     </div>
   );
 }

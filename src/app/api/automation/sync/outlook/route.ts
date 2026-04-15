@@ -1,7 +1,31 @@
 import { prisma } from "@/lib/prisma";
-import { refreshAccessToken, fetchEmails } from "@/lib/microsoft/graph-client";
+import { refreshAccessToken, fetchEmails, fetchAttachments, graphGetByUrl } from "@/lib/microsoft/graph-client";
 import { processEmailAttachments } from "@/lib/ingestion/email-attachments";
 import { classifyMessage } from "@/lib/ingestion/classifier";
+import { enqueueDocument } from "@/lib/intake/queue";
+import { looksLikeBillBody, subjectLooksLikeBill } from "@/lib/intake/email-body-detector";
+
+const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
+
+/**
+ * Return true when an attachment is a candidate for the bills intake engine.
+ * Mirror of Majid's Outlook "Accounts Payable" rule: subject-driven, with
+ * filename as a secondary signal. Sender domain is no longer used.
+ */
+function looksLikeBill(
+  attachment: { name: string; contentType: string },
+  emailSubject: string
+): boolean {
+  if (attachment.contentType !== "application/pdf" && !attachment.name.toLowerCase().endsWith(".pdf")) {
+    return false;
+  }
+  // Primary: subject matches the Outlook accounts-payable rule
+  if (subjectLooksLikeBill(emailSubject)) return true;
+  // Secondary: filename itself contains a bill keyword
+  const nameLower = attachment.name.toLowerCase();
+  if (BILL_FILENAME_KEYWORDS.some((kw) => nameLower.includes(kw))) return true;
+  return false;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +40,12 @@ export const maxDuration = 120;
  *
  * Can be triggered manually or by a cron job.
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // Optional override: ?since=YYYY-MM-DD (forces backfill from this date instead of lastSyncAt)
+    const url = new URL(request.url);
+    const sinceOverride = url.searchParams.get("since");
+
     // Get all active Outlook sources
     const sources = await prisma.ingestionSource.findMany({
       where: { sourceType: "OUTLOOK", isActive: true, refreshToken: { not: null } },
@@ -44,20 +72,30 @@ export async function POST() {
           },
         });
 
-        // Fetch emails since last sync (or last 7 days for first sync)
-        const since = source.lastSyncAt
-          ? source.lastSyncAt.toISOString()
-          : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        // Fetch emails since: explicit override > lastSyncAt > 7 days ago
+        const since = sinceOverride
+          ? new Date(sinceOverride).toISOString()
+          : source.lastSyncAt
+            ? source.lastSyncAt.toISOString()
+            : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-        // Pull from both inbox AND sent items
-        const [inboxData, sentData] = await Promise.all([
-          fetchEmails(tokens.access_token, { folder: "inbox", since, top: 50 }),
-          fetchEmails(tokens.access_token, { folder: "sentitems", since, top: 50 }),
-        ]);
-        const emails = [
-          ...(inboxData.value || []).map((e) => ({ ...e, _folder: "INBOX" as const })),
-          ...(sentData.value || []).map((e) => ({ ...e, _folder: "SENT" as const })),
-        ];
+        // Page through inbox + sent items (follow @odata.nextLink — Graph caps each page at 1000)
+        async function pullAll(folder: "inbox") {
+          const out: Array<Record<string, unknown>> = [];
+          let page = await fetchEmails(tokens.access_token, { folder, since, top: 200 });
+          out.push(...(page.value || []));
+          // Bound the loop so we never spin forever — 50 pages × 200 = 10k cap
+          let safety = 50;
+          while (page["@odata.nextLink"] && safety-- > 0) {
+            page = await graphGetByUrl(tokens.access_token, page["@odata.nextLink"] as string) as typeof page;
+            out.push(...(page.value || []));
+          }
+          return out;
+        }
+        // INBOX only — the Outlook "Accounts Payable" rule routes incoming mail; sent items
+        // are out of scope for the bills intake engine.
+        const inboxList = await pullAll("inbox");
+        const emails = inboxList.map((e) => ({ ...e, _folder: "INBOX" as const }));
 
         // Deduplicate against existing ingestion events
         const existingIds = new Set(
@@ -79,6 +117,9 @@ export async function POST() {
 
           const folder = (email as any)._folder || "INBOX";
           const isSent = folder === "SENT";
+          const senderEmail = isSent
+            ? (email.toRecipients?.[0]?.emailAddress?.address ?? "")
+            : (email.from?.emailAddress?.address ?? "");
 
           // Create ingestion event FIRST so we have an id for attachment filenames
           const event = await prisma.ingestionEvent.create({
@@ -107,6 +148,56 @@ export async function POST() {
               attachmentCount = result.count;
             } catch (err) {
               console.error(`Attachment processing failed for ${event.id}:`, err);
+            }
+
+            // Bills intake: enqueue any PDF attachments that look like supplier bills
+            try {
+              const attachData = await fetchAttachments(tokens.access_token, email.id);
+              for (const att of attachData.value || []) {
+                if (att.isInline) continue;
+                if (!looksLikeBill(att, email.subject ?? "")) continue;
+
+                // enqueueDocument is idempotent on (ingestionEventId, fileRef)
+                await enqueueDocument({
+                  sourceType:       "EMAIL",
+                  sourceRef:        email.subject ?? null,
+                  fileRef:          att.id,        // Outlook attachment ID — resolved in pdf-parser
+                  rawText:          bodyText ?? null,
+                  ingestionEventId: event.id,
+                }).catch((err) =>
+                  console.error(`enqueueDocument failed for attachment ${att.id} on event ${event.id}:`, err)
+                );
+              }
+            } catch (err) {
+              console.error(`Bill intake enqueueing failed for event ${event.id}:`, err);
+            }
+          }
+
+          // Body-bill path: no PDF attachments, but the email body itself looks like a bill.
+          // Status is set to PARSED immediately — rawText is already available; skip the parser.
+          if (!email.hasAttachments && looksLikeBillBody(bodyText, senderEmail)) {
+            try {
+              // Idempotency: one body-bill doc per ingestion event (fileRef is null for this path).
+              const existingBodyDoc = await prisma.intakeDocument.findFirst({
+                where: { ingestionEventId: event.id, fileRef: null },
+                select: { id: true },
+              });
+              if (!existingBodyDoc) {
+                const { doc } = await enqueueDocument({
+                  sourceType:       "EMAIL",
+                  sourceRef:        email.subject ?? null,
+                  fileRef:          null,
+                  rawText:          bodyText,
+                  ingestionEventId: event.id,
+                });
+                // Advance immediately to PARSED — body text is the full content
+                await prisma.intakeDocument.update({
+                  where: { id: doc.id },
+                  data: { status: "PARSED" },
+                });
+              }
+            } catch (err) {
+              console.error(`Body-bill enqueue failed for event ${event.id}:`, err);
             }
           }
 

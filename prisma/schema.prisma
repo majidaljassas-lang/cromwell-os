@@ -110,6 +110,7 @@ model Site {
   supplierBillLines   SupplierBillLine[]
   tickets             Ticket[]
   ticketLines         TicketLine[]
+  billLineAllocations BillLineAllocation[] @relation("BillLineAllocationSite")
 
   @@index([siteName])
   @@index([siteCode])
@@ -150,6 +151,7 @@ model Customer {
   ticketLinesAsPayer     TicketLine[]         @relation("TicketLinePayingCustomer")
   salesCreditNotes       SalesCreditNote[]
   backlogCases           BacklogCase[]
+  billLineAllocations    BillLineAllocation[] @relation("BillLineAllocationCustomer")
 
   @@index([name])
 }
@@ -553,11 +555,12 @@ model TicketLine {
   components            TicketLine[]             @relation("BOMComponents")
   isBomParent           Boolean                  @default(false)
 
-  siteCommercialLink    SiteCommercialLink?      @relation(fields: [siteCommercialLinkId], references: [id])
-  site                  Site?                    @relation(fields: [siteId], references: [id])
-  supplier              Supplier?                @relation("TicketLineSupplier", fields: [supplierId], references: [id])
-  ticket                Ticket                   @relation(fields: [ticketId], references: [id])
-  ticketPhase           TicketPhase?             @relation(fields: [ticketPhaseId], references: [id])
+  siteCommercialLink SiteCommercialLink? @relation(fields: [siteCommercialLinkId], references: [id])
+  site               Site?               @relation(fields: [siteId], references: [id])
+  supplier           Supplier?           @relation("TicketLineSupplier", fields: [supplierId], references: [id])
+  ticket             Ticket              @relation(fields: [ticketId], references: [id])
+  ticketPhase        TicketPhase?        @relation(fields: [ticketPhaseId], references: [id])
+  billLineAllocations BillLineAllocation[] @relation("BillLineAllocationTicketLine")
 
   @@index([ticketId])
   @@index([status])
@@ -711,7 +714,7 @@ model QuoteLine {
 }
 
 model Supplier {
-  id                String             @id @default(uuid())
+  id                String                   @id @default(uuid())
   name              String
   legalName         String?
   email             String?
@@ -723,8 +726,10 @@ model Supplier {
   returns           Return[]
   supplierBills     SupplierBill[]
   options           SupplierOption[]
-  ticketLines       TicketLine[]       @relation("TicketLineSupplier")
+  ticketLines       TicketLine[]             @relation("TicketLineSupplier")
   paymentsMade      PaymentMade[]
+  aliases           SupplierAlias[]
+  productMappings   SupplierProductMapping[]
 
   @@index([name])
 }
@@ -780,23 +785,32 @@ model ProcurementOrderLine {
 }
 
 model SupplierBill {
-  id                  String             @id @default(uuid())
+  id                  String                  @id @default(uuid())
   supplierId          String
   billNo              String
   billDate            DateTime
   siteRef             String?
   customerRef         String?
   status              String
-  totalCost           Decimal            @db.Decimal(14, 2)
+  totalCost           Decimal                 @db.Decimal(14, 2)
   sourceAttachmentRef String?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  ingestionLinks         IngestionLink[]
-  supplier               Supplier           @relation(fields: [supplierId], references: [id])
-  lines                  SupplierBillLine[]
-  paymentAllocations     PaymentMadeAllocation[]
+  intakeDocumentId    String?
+  duplicateOfBillId   String?
+  duplicateStatus     String?
+  checksum            String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  ingestionLinks      IngestionLink[]
+  supplier            Supplier                @relation(fields: [supplierId], references: [id])
+  lines               SupplierBillLine[]
+  paymentAllocations  PaymentMadeAllocation[]
+  intakeDocument      IntakeDocument?         @relation(fields: [intakeDocumentId], references: [id])
+  duplicateOf         SupplierBill?           @relation("BillDuplicates", fields: [duplicateOfBillId], references: [id])
+  duplicates          SupplierBill[]          @relation("BillDuplicates")
 
   @@index([billNo])
+  @@index([checksum])
+  @@index([intakeDocumentId])
 }
 
 model SupplierBillLine {
@@ -823,6 +837,11 @@ model SupplierBillLine {
   commercialStatus      String?
   sourceSiteTextRaw     String?
   sourceCustomerTextRaw String?
+  parseConfidence       Decimal?                 @db.Decimal(5, 2)
+  originalUom           String?
+  packSize              Int?
+  extractedSku          String?
+  intakeDocumentId      String?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   absorbedAllocations   AbsorbedCostAllocation[]
@@ -830,14 +849,19 @@ model SupplierBillLine {
   ingestionLinks        IngestionLink[]
   returnLines           ReturnLine[]
   stockExcessRecords    StockExcessRecord[]
+  billLineAllocations   BillLineAllocation[]
+  billLineMatches       BillLineMatch[]
+  billIntakeCorrections BillIntakeCorrection[]
   customer              Customer?                @relation(fields: [customerId], references: [id])
   siteCommercialLink    SiteCommercialLink?      @relation(fields: [siteCommercialLinkId], references: [id])
   site                  Site?                    @relation(fields: [siteId], references: [id])
   supplierBill          SupplierBill             @relation(fields: [supplierBillId], references: [id])
   ticket                Ticket?                  @relation(fields: [ticketId], references: [id])
+  intakeDocument        IntakeDocument?          @relation(fields: [intakeDocumentId], references: [id])
 
   @@index([allocationStatus])
   @@index([ticketId])
+  @@index([intakeDocumentId])
 }
 
 model CostAllocation {
@@ -1391,6 +1415,8 @@ model SiteAlias {
   isActive          Boolean     @default(true)
   confidenceDefault Decimal?    @db.Decimal(5, 2)
   manualConfirmed   Boolean     @default(false)
+  observationCount  Int         @default(0)
+  lastSeenAt        DateTime?
   createdAt         DateTime    @default(now())
   site              Site        @relation(fields: [siteId], references: [id])
 
@@ -1672,6 +1698,11 @@ model BacklogTicketLine {
   baseUnit          String?
   notes             String?
   status            String                @default("MESSAGE_LINKED")
+  estimatedRate     Decimal?              @db.Decimal(14, 4)
+  estimatedAmount   Decimal?              @db.Decimal(14, 2)
+  pricingSource     String?
+  pricingConfidence String?
+  pricingNotes      String?
   createdAt         DateTime              @default(now())
   invoiceMatches    BacklogInvoiceMatch[]
   orderThread       BacklogOrderThread?   @relation(fields: [orderThreadId], references: [id])
@@ -2645,8 +2676,8 @@ model ChartOfAccount {
   id              String           @id @default(uuid())
   accountCode     String           @unique
   accountName     String
-  accountType     String           // ASSET, LIABILITY, EQUITY, INCOME, EXPENSE
-  accountSubType  String?          // BANK, CURRENT_ASSET, FIXED_ASSET, CURRENT_LIABILITY, EQUITY, REVENUE, COST_OF_GOODS_SOLD, OPERATING_EXPENSE
+  accountType     String // ASSET, LIABILITY, EQUITY, INCOME, EXPENSE
+  accountSubType  String? // BANK, CURRENT_ASSET, FIXED_ASSET, CURRENT_LIABILITY, EQUITY, REVENUE, COST_OF_GOODS_SOLD, OPERATING_EXPENSE
   parentId        String?
   description     String?
   isSystemAccount Boolean          @default(false)
@@ -2665,32 +2696,32 @@ model ChartOfAccount {
 }
 
 model TaxRate {
-  id              String   @id @default(uuid())
-  name            String
-  rate            Decimal  @db.Decimal(5, 2)
-  taxType         String   // OUTPUT, INPUT, NONE
-  isDefault       Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  hmrcBoxNumber   Int?
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  name          String
+  rate          Decimal  @db.Decimal(5, 2)
+  taxType       String // OUTPUT, INPUT, NONE
+  isDefault     Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  hmrcBoxNumber Int?
+  createdAt     DateTime @default(now())
 
   @@index([taxType])
 }
 
 model JournalEntry {
-  id              String        @id @default(uuid())
-  entryDate       DateTime
-  reference       String?
-  description     String
-  sourceType      String        // SALES_INVOICE, SUPPLIER_BILL, PAYMENT_RECEIVED, PAYMENT_MADE, BANK_TRANSFER, MANUAL_JOURNAL, OPENING_BALANCE, VAT_PAYMENT, SALES_CREDIT_NOTE, SUPPLIER_CREDIT_NOTE
-  sourceId        String?
-  isAdjustment    Boolean       @default(false)
-  isReversed      Boolean       @default(false)
-  reversedById    String?
-  status          String        @default("POSTED") // DRAFT, POSTED, REVERSED
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  lines           JournalLine[]
+  id           String        @id @default(uuid())
+  entryDate    DateTime
+  reference    String?
+  description  String
+  sourceType   String // SALES_INVOICE, SUPPLIER_BILL, PAYMENT_RECEIVED, PAYMENT_MADE, BANK_TRANSFER, MANUAL_JOURNAL, OPENING_BALANCE, VAT_PAYMENT, SALES_CREDIT_NOTE, SUPPLIER_CREDIT_NOTE
+  sourceId     String?
+  isAdjustment Boolean       @default(false)
+  isReversed   Boolean       @default(false)
+  reversedById String?
+  status       String        @default("POSTED") // DRAFT, POSTED, REVERSED
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  lines        JournalLine[]
 
   @@index([sourceType, sourceId])
   @@index([entryDate])
@@ -2698,14 +2729,14 @@ model JournalEntry {
 }
 
 model JournalLine {
-  id              String         @id @default(uuid())
-  journalEntryId  String
-  accountId       String
-  description     String?
-  debit           Decimal        @default(0) @db.Decimal(14, 2)
-  credit          Decimal        @default(0) @db.Decimal(14, 2)
-  journalEntry    JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  account         ChartOfAccount @relation(fields: [accountId], references: [id])
+  id             String         @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  description    String?
+  debit          Decimal        @default(0) @db.Decimal(14, 2)
+  credit         Decimal        @default(0) @db.Decimal(14, 2)
+  journalEntry   JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        ChartOfAccount @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
@@ -2735,23 +2766,23 @@ model BankAccount {
 }
 
 model BankTransaction {
-  id                    String   @id @default(uuid())
-  bankAccountId         String
-  transactionDate       DateTime
-  amount                Decimal  @db.Decimal(14, 2)
-  transactionType       String   // DEPOSIT, WITHDRAWAL, TRANSFER, BANK_CHARGE, INTEREST
-  description           String
-  reference             String?
-  fitId                 String?
-  runningBalance        Decimal? @db.Decimal(14, 2)
-  reconciliationStatus  String   @default("UNRECONCILED") // UNRECONCILED, MATCHED, RECONCILED, EXCLUDED
-  matchedPaymentId      String?
-  matchedJournalId      String?
-  notes                 String?
-  importedAt            DateTime?
-  reconciledAt          DateTime?
-  createdAt             DateTime @default(now())
-  bankAccount           BankAccount @relation(fields: [bankAccountId], references: [id])
+  id                   String      @id @default(uuid())
+  bankAccountId        String
+  transactionDate      DateTime
+  amount               Decimal     @db.Decimal(14, 2)
+  transactionType      String // DEPOSIT, WITHDRAWAL, TRANSFER, BANK_CHARGE, INTEREST
+  description          String
+  reference            String?
+  fitId                String?
+  runningBalance       Decimal?    @db.Decimal(14, 2)
+  reconciliationStatus String      @default("UNRECONCILED") // UNRECONCILED, MATCHED, RECONCILED, EXCLUDED
+  matchedPaymentId     String?
+  matchedJournalId     String?
+  notes                String?
+  importedAt           DateTime?
+  reconciledAt         DateTime?
+  createdAt            DateTime    @default(now())
+  bankAccount          BankAccount @relation(fields: [bankAccountId], references: [id])
 
   @@unique([bankAccountId, fitId])
   @@index([transactionDate])
@@ -2760,52 +2791,52 @@ model BankTransaction {
 }
 
 model PaymentMade {
-  id              String       @id @default(uuid())
-  supplierId      String
-  bankAccountId   String?
-  paymentDate     DateTime
-  amount          Decimal      @db.Decimal(14, 2)
-  paymentMethod   String?
-  reference       String?
-  notes           String?
-  journalEntryId  String?      @unique
-  createdAt       DateTime     @default(now())
-  supplier        Supplier     @relation(fields: [supplierId], references: [id])
-  allocations     PaymentMadeAllocation[]
+  id             String                  @id @default(uuid())
+  supplierId     String
+  bankAccountId  String?
+  paymentDate    DateTime
+  amount         Decimal                 @db.Decimal(14, 2)
+  paymentMethod  String?
+  reference      String?
+  notes          String?
+  journalEntryId String?                 @unique
+  createdAt      DateTime                @default(now())
+  supplier       Supplier                @relation(fields: [supplierId], references: [id])
+  allocations    PaymentMadeAllocation[]
 
   @@index([supplierId])
   @@index([paymentDate])
 }
 
 model PaymentMadeAllocation {
-  id              String       @id @default(uuid())
-  paymentMadeId   String
-  supplierBillId  String
-  amount          Decimal      @db.Decimal(14, 2)
-  paymentMade     PaymentMade  @relation(fields: [paymentMadeId], references: [id], onDelete: Cascade)
-  supplierBill    SupplierBill @relation(fields: [supplierBillId], references: [id])
+  id             String       @id @default(uuid())
+  paymentMadeId  String
+  supplierBillId String
+  amount         Decimal      @db.Decimal(14, 2)
+  paymentMade    PaymentMade  @relation(fields: [paymentMadeId], references: [id], onDelete: Cascade)
+  supplierBill   SupplierBill @relation(fields: [supplierBillId], references: [id])
 
   @@index([paymentMadeId])
   @@index([supplierBillId])
 }
 
 model SalesCreditNote {
-  id              String                @id @default(uuid())
-  creditNoteNo    String?
-  customerId      String
-  salesInvoiceId  String?
-  issueDate       DateTime
-  reason          String?
-  subtotal        Decimal               @db.Decimal(14, 2)
-  vatAmount       Decimal               @db.Decimal(14, 2)
-  total           Decimal               @db.Decimal(14, 2)
-  status          String                @default("DRAFT")
-  journalEntryId  String?               @unique
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  customer        Customer              @relation(fields: [customerId], references: [id])
-  salesInvoice    SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
-  lines           SalesCreditNoteLine[]
+  id             String                @id @default(uuid())
+  creditNoteNo   String?
+  customerId     String
+  salesInvoiceId String?
+  issueDate      DateTime
+  reason         String?
+  subtotal       Decimal               @db.Decimal(14, 2)
+  vatAmount      Decimal               @db.Decimal(14, 2)
+  total          Decimal               @db.Decimal(14, 2)
+  status         String                @default("DRAFT")
+  journalEntryId String?               @unique
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  customer       Customer              @relation(fields: [customerId], references: [id])
+  salesInvoice   SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
+  lines          SalesCreditNoteLine[]
 
   @@index([creditNoteNo])
   @@index([customerId])
@@ -2825,24 +2856,24 @@ model SalesCreditNoteLine {
 }
 
 model VATReturn {
-  id              String   @id @default(uuid())
-  periodStart     DateTime
-  periodEnd       DateTime
-  status          String   @default("DRAFT") // DRAFT, CALCULATED, SUBMITTED, ACCEPTED
-  box1            Decimal  @default(0) @db.Decimal(14, 2)
-  box2            Decimal  @default(0) @db.Decimal(14, 2)
-  box3            Decimal  @default(0) @db.Decimal(14, 2)
-  box4            Decimal  @default(0) @db.Decimal(14, 2)
-  box5            Decimal  @default(0) @db.Decimal(14, 2)
-  box6            Decimal  @default(0) @db.Decimal(14, 2)
-  box7            Decimal  @default(0) @db.Decimal(14, 2)
-  box8            Decimal  @default(0) @db.Decimal(14, 2)
-  box9            Decimal  @default(0) @db.Decimal(14, 2)
-  submittedAt     DateTime?
-  hmrcRef         String?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id          String    @id @default(uuid())
+  periodStart DateTime
+  periodEnd   DateTime
+  status      String    @default("DRAFT") // DRAFT, CALCULATED, SUBMITTED, ACCEPTED
+  box1        Decimal   @default(0) @db.Decimal(14, 2)
+  box2        Decimal   @default(0) @db.Decimal(14, 2)
+  box3        Decimal   @default(0) @db.Decimal(14, 2)
+  box4        Decimal   @default(0) @db.Decimal(14, 2)
+  box5        Decimal   @default(0) @db.Decimal(14, 2)
+  box6        Decimal   @default(0) @db.Decimal(14, 2)
+  box7        Decimal   @default(0) @db.Decimal(14, 2)
+  box8        Decimal   @default(0) @db.Decimal(14, 2)
+  box9        Decimal   @default(0) @db.Decimal(14, 2)
+  submittedAt DateTime?
+  hmrcRef     String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([periodStart, periodEnd])
   @@index([status])
@@ -2852,4 +2883,193 @@ model SystemSetting {
   id    String @id @default(uuid())
   key   String @unique
   value String
+}
+
+// ──────────────────────────────────────────────────────────────
+// Bills Intake Engine — new models
+// ──────────────────────────────────────────────────────────────
+
+model BillIntakeCorrection {
+  id                 String             @id @default(uuid())
+  supplierBillLineId String
+  correctionType     BillCorrectionType
+  beforeJson         Json?
+  afterJson          Json?
+  userId             String?
+  reason             String?
+  createdAt          DateTime           @default(now())
+  supplierBillLine   SupplierBillLine   @relation(fields: [supplierBillLineId], references: [id])
+
+  @@index([supplierBillLineId])
+  @@index([correctionType])
+  @@index([createdAt])
+}
+
+model BillLineAllocation {
+  id                   String             @id @default(uuid())
+  supplierBillLineId   String
+  allocationType       BillAllocationType
+  ticketLineId         String?
+  ticketId             String?
+  siteId               String?
+  customerId           String?
+  supplierBillId       String?
+  qtyAllocated         Decimal            @db.Decimal(14, 4)
+  costAllocated        Decimal            @db.Decimal(14, 2)
+  confidence           Decimal?           @db.Decimal(5, 2)
+  reason               String?
+  stockExcessRecordId  String?
+  returnId             String?
+  absorbedAllocationId String?
+  costAllocationId     String?
+  createdBy            String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  supplierBillLine     SupplierBillLine   @relation(fields: [supplierBillLineId], references: [id])
+  ticketLine           TicketLine?        @relation("BillLineAllocationTicketLine", fields: [ticketLineId], references: [id])
+  site                 Site?              @relation("BillLineAllocationSite",       fields: [siteId],       references: [id])
+  customer             Customer?          @relation("BillLineAllocationCustomer",   fields: [customerId],   references: [id])
+
+  @@index([supplierBillLineId])
+  @@index([ticketLineId])
+  @@index([allocationType])
+  @@index([supplierBillId])
+}
+
+model BillLineMatch {
+  id                 String                 @id @default(uuid())
+  supplierBillLineId String
+  candidateType      BillMatchCandidateType
+  candidateId        String
+  supplierConfidence Decimal?               @db.Decimal(5, 2)
+  productConfidence  Decimal?               @db.Decimal(5, 2)
+  ticketConfidence   Decimal?               @db.Decimal(5, 2)
+  siteConfidence     Decimal?               @db.Decimal(5, 2)
+  entityConfidence   Decimal?               @db.Decimal(5, 2)
+  overallConfidence  Decimal?               @db.Decimal(5, 2)
+  reasons            Json?
+  action             BillMatchAction
+  createdAt          DateTime               @default(now())
+  supplierBillLine   SupplierBillLine       @relation(fields: [supplierBillLineId], references: [id])
+
+  @@index([supplierBillLineId])
+  @@index([candidateType, candidateId])
+  @@index([action])
+}
+
+model IntakeDocument {
+  id                String              @id @default(uuid())
+  sourceType        String
+  sourceRef         String?
+  fileRef           String?
+  rawText           String?
+  status            DocumentQueueStatus @default(NEW)
+  parseConfidence   Decimal?            @db.Decimal(5, 2)
+  errorMessage      String?
+  retryCount        Int                 @default(0)
+  checksum          String?
+  ingestionEventId  String?
+  supplierBillId    String?
+  nextAttemptAt     DateTime?
+  lastAttemptAt     DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  supplierBills     SupplierBill[]
+  supplierBillLines SupplierBillLine[]
+
+  @@index([status])
+  @@index([sourceType])
+  @@index([checksum])
+  @@index([nextAttemptAt])
+}
+
+model SupplierAlias {
+  id               String              @id @default(uuid())
+  supplierId       String
+  alias            String
+  source           SupplierAliasSource
+  confidence       Decimal?            @db.Decimal(5, 2)
+  observationCount Int                 @default(0)
+  lastSeenAt       DateTime?
+  createdAt        DateTime            @default(now())
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+
+  @@unique([supplierId, alias])
+  @@index([alias])
+}
+
+model SupplierProductMapping {
+  id                  String    @id @default(uuid())
+  supplierId          String
+  supplierSku         String?
+  supplierDescription String?
+  canonicalName       String?
+  normalizedItemName  String?
+  defaultUom          String?
+  defaultPackSize     Int?
+  observationCount    Int       @default(0)
+  lastSeenAt          DateTime?
+  lastUnitCost        Decimal?  @db.Decimal(14, 4)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  supplier            Supplier  @relation(fields: [supplierId], references: [id])
+
+  @@unique([supplierId, supplierSku])
+  @@index([supplierId])
+  @@index([normalizedItemName])
+}
+
+enum BillAllocationType {
+  TICKET_LINE
+  STOCK
+  RETURNS_CANDIDATE
+  OVERHEAD
+  UNRESOLVED
+}
+
+enum BillCorrectionType {
+  SUPPLIER_REASSIGNED
+  TICKET_REASSIGNED
+  SITE_REASSIGNED
+  SKU_MAPPED
+  SPLIT_ALLOCATION
+  SURPLUS_ROUTED
+  DUPLICATE_FLAGGED
+  REJECTED
+}
+
+enum BillMatchAction {
+  AUTO_LINKED
+  SUGGESTED
+  REJECTED
+  EXCEPTION
+}
+
+enum BillMatchCandidateType {
+  TICKET_LINE
+  PO_LINE
+  INVOICE_LINE
+  STOCK
+  RETURNS
+}
+
+enum DocumentQueueStatus {
+  NEW
+  DOWNLOADED
+  OCR_REQUIRED
+  PARSED
+  MATCH_PENDING
+  AUTO_MATCHED
+  REVIEW_REQUIRED
+  APPROVED
+  POSTED
+  ERROR
+  DEAD_LETTER
+}
+
+enum SupplierAliasSource {
+  USER
+  EMAIL_DOMAIN
+  VAT
+  SYSTEM
 }

@@ -118,12 +118,27 @@ const ticketStatusVariant: Record<string, "default" | "secondary" | "destructive
   CLOSED: "outline",
 };
 
+type SupplierBillLineRow = {
+  id: string;
+  description: string;
+  qty: number | string;
+  unitCost: number | string;
+  lineTotal: number | string;
+  allocationStatus: string;
+  costClassification: string;
+  supplierBill: { id: string; billNo: string; billDate: string; supplier: { id: string; name: string } };
+  ticket: { id: string; ticketNo: number; title: string } | null;
+  customer: { id: string; name: string } | null;
+};
+
 export function SiteDetail({
   site,
   customers,
+  supplierBillLines = [],
 }: {
   site: Site;
   customers: Customer[];
+  supplierBillLines?: SupplierBillLineRow[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -250,6 +265,9 @@ export function SiteDetail({
           </TabsTrigger>
           <TabsTrigger value="tickets">
             Tickets ({site.tickets.length})
+          </TabsTrigger>
+          <TabsTrigger value="bills">
+            Supplier Bills ({supplierBillLines.length})
           </TabsTrigger>
         </TabsList>
 
@@ -710,6 +728,58 @@ export function SiteDetail({
                 )}
               </TableBody>
             </Table>
+          </div>
+        </TabsContent>
+
+        {/* Supplier Bills Tab — every bill line landed on this site */}
+        <TabsContent value="bills" className="mt-4">
+          <div className="border border-[#333333] bg-[#1A1A1A]">
+            {supplierBillLines.length === 0 ? (
+              <p className="text-sm text-[#888888] p-6">No supplier bill lines allocated to this site yet.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    <TableHead>Bill #</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Ticket</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Line Total</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {supplierBillLines.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {new Date(l.supplierBill.billDate).toLocaleDateString("en-GB")}
+                      </TableCell>
+                      <TableCell>{l.supplierBill.supplier.name}</TableCell>
+                      <TableCell>
+                        <a href={`/procurement?bill=${l.supplierBill.id}`} className="text-primary hover:underline">
+                          {l.supplierBill.billNo}
+                        </a>
+                      </TableCell>
+                      <TableCell className="text-xs max-w-md truncate" title={l.description}>{l.description}</TableCell>
+                      <TableCell>
+                        {l.ticket ? (
+                          <a href={`/tickets/${l.ticket.id}`} className="text-primary hover:underline text-xs">
+                            #{l.ticket.ticketNo}
+                          </a>
+                        ) : <span className="text-muted-foreground text-xs">—</span>}
+                      </TableCell>
+                      <TableCell className="text-xs">{l.customer?.name ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{Number(l.qty).toFixed(2)}</TableCell>
+                      <TableCell className="text-right tabular-nums">£{Number(l.lineTotal).toFixed(2)}</TableCell>
+                      <TableCell><Badge variant="outline">{l.allocationStatus}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </TabsContent>
       </Tabs>

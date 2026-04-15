@@ -5,8 +5,96 @@ export const dynamic = "force-dynamic";
 
 export default async function ProcurementPage() {
   // Sequential queries to avoid connection exhaustion on Prisma dev server
+  // Clean cutover: Cromwell OS is the sole system from 2026-04-01.
+  // All operational views default to >= cutover. Legacy data stays in DB but never default.
+  const CLEAN_CUTOVER = new Date("2026-04-01");
   const supplierBills = await prisma.supplierBill.findMany({
-    include: { supplier: true, lines: true, _count: { select: { lines: true } } },
+    where: { billDate: { gte: CLEAN_CUTOVER } },
+    include: {
+      supplier: true,
+      duplicateOf: { select: { id: true, billNo: true } },
+      lines: {
+        include: {
+          site: { select: { id: true, siteName: true } },
+          customer: { select: { id: true, name: true } },
+          // Pull the matched ticket AND every invoice line on that ticket so the renderer can
+          // find the matching sale even when no CostAllocation was written (SUGGESTED state).
+          ticket: {
+            select: {
+              id: true,
+              ticketNo: true,
+              title: true,
+              invoices: {
+                select: {
+                  id: true,
+                  invoiceNo: true,
+                  status: true,
+                  lines: {
+                    select: {
+                      id: true,
+                      ticketLineId: true,
+                      description: true,
+                      qty: true,
+                      unitPrice: true,
+                      lineTotal: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          // Multi-allocation engine output — one bill line → many destinations
+          billLineAllocations: {
+            include: {
+              ticketLine: { select: { id: true, description: true, ticket: { select: { id: true, ticketNo: true, title: true } } } },
+              site:       { select: { id: true, siteName: true } },
+              customer:   { select: { id: true, name: true } },
+            },
+          },
+          // Per-axis confidence breakdown from the multi-signal match engine
+          billLineMatches: {
+            orderBy: { overallConfidence: "desc" },
+            take: 5,
+            select: {
+              id: true,
+              candidateType: true,
+              candidateId: true,
+              supplierConfidence: true,
+              productConfidence: true,
+              ticketConfidence: true,
+              siteConfidence: true,
+              entityConfidence: true,
+              overallConfidence: true,
+              action: true,
+              reasons: true,
+            },
+          },
+          // Cost allocations remain the precise path when present
+          costAllocations: {
+            include: {
+              ticketLine: {
+                select: {
+                  id: true,
+                  description: true,
+                  invoiceLines: {
+                    select: {
+                      id: true,
+                      qty: true,
+                      unitPrice: true,
+                      lineTotal: true,
+                      salesInvoice: {
+                        select: { id: true, invoiceNo: true, status: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      _count: { select: { lines: true } },
+    },
     orderBy: { billDate: "desc" },
   });
   const unresolvedAllocations = await prisma.costAllocation.findMany({

@@ -260,12 +260,18 @@ function extractLineItems(lines: string[]): ParsedBillLine[] {
     }
   }
 
-  // Step 2: Fallback — generic tabular parsing
+  // Step 2: Pipe-separated table format (email body bills from Toolstation, Selco, etc.)
+  // Example: "| 2 | 15mm Copper Elbow | £0.48 | £0.96 |"
+  if (parsed.length === 0) {
+    parsePipeSeparated(lines, parsed);
+  }
+
+  // Step 3: Fallback — generic tabular parsing
   if (parsed.length === 0) {
     parseGenericTabular(lines, parsed);
   }
 
-  // Step 3: Fallback — Zoho-style concatenated numbers
+  // Step 4: Fallback — Zoho-style concatenated numbers
   if (parsed.length === 0) {
     parseZohoStyle(lines, parsed);
   }
@@ -609,6 +615,127 @@ function cleanDescription(desc: string): string {
   // Remove leading product code reference if duplicated (e.g., "K09933 - Galvanised Band")
   // Keep the human-readable part
   return desc.replace(/^[A-Z]\d{4,}\s*[-–]\s*/, "").replace(/\s+/g, " ").trim();
+}
+
+// ─── Pipe-separated table format (email body bills) ─────────────────────────
+// Handles Markdown-style and plain pipe tables as found in Toolstation / Selco
+// order-confirmation emails, e.g.:
+//   | QTY | Description          | Unit  | Total  |
+//   |-----|----------------------|-------|--------|
+//   |  2  | 15mm Copper Elbow    | £0.48 | £0.96  |
+//
+// Currency symbols (£, $, €) are stripped before parsing numbers.
+
+function parsePipeSeparated(lines: string[], parsed: ParsedBillLine[]) {
+  // Only activate if we detect at least two pipe-delimited lines.
+  const pipeLines = lines.filter((l) => l.includes("|") && l.split("|").length >= 3);
+  if (pipeLines.length < 2) return;
+
+  // Identify the header row to determine column order.
+  let headerCols: string[] | null = null;
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.includes("|")) continue;
+    const cols = l.split("|").map((c) => c.trim().toLowerCase()).filter(Boolean);
+    const hasDesc = cols.some((c) => /description|item|product|material/.test(c));
+    const hasQty  = cols.some((c) => /qty|quantity|quant/.test(c));
+    const hasPrice = cols.some((c) => /price|cost|rate|unit/.test(c));
+    const hasTotal = cols.some((c) => /total|amount|value|ext/.test(c));
+    if (hasDesc && (hasQty || hasPrice || hasTotal)) {
+      headerCols = cols;
+      headerIdx  = i;
+      break;
+    }
+  }
+
+  // Helper: strip currency symbols and commas, then parse float.
+  function parseMoney(s: string): number {
+    return parseFloat(s.replace(/[£$€,]/g, "")) || 0;
+  }
+
+  if (headerCols) {
+    // Column index lookup
+    const qtyIdx   = headerCols.findIndex((c) => /qty|quantity|quant/.test(c));
+    const descIdx  = headerCols.findIndex((c) => /description|item|product|material/.test(c));
+    const unitIdx  = headerCols.findIndex((c) => /price|cost|rate|unit/.test(c));
+    const totalIdx = headerCols.findIndex((c) => /total|amount|value|ext/.test(c));
+    const vatIdx   = headerCols.findIndex((c) => /vat|tax/.test(c));
+    const codeIdx  = headerCols.findIndex((c) => /code|sku|part|ref/.test(c));
+
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.includes("|")) continue;
+      // Skip separator rows like "|---|---|"
+      if (/^\s*\|[\s\-|]+\|\s*$/.test(l)) continue;
+
+      const cells = l.split("|").map((c) => c.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+      if (cells.length < 2) continue;
+
+      // Stop at totals
+      if (cells.some((c) => /^(sub\s*total|grand\s*total|total|vat|balance|thank)/i.test(c))) break;
+
+      const desc  = descIdx  >= 0 && descIdx  < cells.length ? cells[descIdx]  : "";
+      const raw   = totalIdx >= 0 && totalIdx < cells.length ? cells[totalIdx] : "";
+      const unit  = unitIdx  >= 0 && unitIdx  < cells.length ? cells[unitIdx]  : "";
+      const qtyS  = qtyIdx   >= 0 && qtyIdx   < cells.length ? cells[qtyIdx]   : "";
+      const vatS  = vatIdx   >= 0 && vatIdx   < cells.length ? cells[vatIdx]   : "";
+      const code  = codeIdx  >= 0 && codeIdx  < cells.length ? cells[codeIdx]  : "";
+
+      if (!desc || desc.length < 2) continue;
+
+      const lineTotal = parseMoney(raw  || unit);
+      const unitCost  = parseMoney(unit || raw);
+      const qty       = parseFloat(qtyS) || 1;
+      const vatAmt    = vatS ? parseMoney(vatS) : null;
+
+      if (lineTotal <= 0 && unitCost <= 0) continue;
+
+      parsed.push({
+        description: desc,
+        productCode: code || null,
+        qty,
+        unitCost: unitCost || (qty > 0 ? Math.round((lineTotal / qty) * 100) / 100 : lineTotal),
+        lineTotal: lineTotal || unitCost * qty,
+        vatAmount: vatAmt,
+      });
+    }
+  } else {
+    // No recognised header — try to parse each pipe line directly by position.
+    // Assume: col0=qty, col1=description, col2=unitCost, col3=lineTotal (or col0=desc, col1=qty, col2=price)
+    for (const l of pipeLines) {
+      if (/^\s*\|[\s\-|]+\|\s*$/.test(l)) continue; // separator row
+      const cells = l.split("|").map((c) => c.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+      if (cells.length < 3) continue;
+      if (cells.some((c) => /^(sub\s*total|grand\s*total|total|vat|balance|thank)/i.test(c))) continue;
+
+      // Find the first cell that looks like a number (quantity)
+      const numericIdx = cells.findIndex((c) => /^[£$€]?[\d,]+\.?\d*$/.test(c));
+      if (numericIdx < 0) continue;
+
+      const descIdx2 = numericIdx > 0 ? 0 : 1;
+      const desc2 = cells[descIdx2] ?? "";
+      if (!desc2 || desc2.length < 2) continue;
+
+      const numericCells = cells.filter((c) => /[£$€]?[\d,]+\.?\d*/.test(c)).map((c) => parseFloat(c.replace(/[£$€,]/g, "")) || 0);
+      if (numericCells.length < 2) continue;
+
+      const qty2       = numericCells[0] < numericCells[numericCells.length - 1] ? numericCells[0] : 1;
+      const lineTotal2 = numericCells[numericCells.length - 1];
+      const unitCost2  = numericCells.length >= 3 ? numericCells[1] : (qty2 > 0 ? Math.round((lineTotal2 / qty2) * 100) / 100 : lineTotal2);
+
+      if (lineTotal2 <= 0) continue;
+
+      parsed.push({
+        description: desc2,
+        productCode: null,
+        qty: qty2,
+        unitCost: unitCost2,
+        lineTotal: lineTotal2,
+        vatAmount: null,
+      });
+    }
+  }
 }
 
 // ─── Fallback: Generic Tabular ──────────────────────────────────────────────

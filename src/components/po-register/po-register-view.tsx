@@ -90,7 +90,7 @@ type CustomerPOData = {
   _count: { labourDrawdowns: number; materialsDrawdowns: number };
 };
 
-type CustomerOption = { id: string; name: string };
+type CustomerOption = { id: string; name: string; parentCustomerEntityId?: string | null; parentEntity?: { id: string; name: string } | null };
 type SiteOption = { id: string; siteName: string };
 type TicketOption = { id: string; ticketNo: number; title: string; payingCustomerId?: string; siteId?: string | null };
 type ContactOption = { id: string; fullName: string };
@@ -162,14 +162,94 @@ export function PORegisterView({
   const [ticketId, setTicketId] = useState("");
   const [addIssuedBy, setAddIssuedBy] = useState("");
 
+  // Sort state
+  const [sortBy, setSortBy] = useState<"poNo" | "customer" | "site" | "ticket" | "poDate" | "received" | "value" | "status">("received");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(field: typeof sortBy) {
+    if (sortBy === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDir("asc");
+    }
+  }
+
+  function SortHeader({ field, label, align }: { field: typeof sortBy; label: string; align?: string }) {
+    const isActive = sortBy === field;
+    return (
+      <button
+        onClick={() => toggleSort(field)}
+        className={`inline-flex items-center gap-1 hover:text-[#FF6600] transition-colors ${align === "right" ? "ml-auto" : ""} ${isActive ? "text-[#FF6600]" : ""}`}
+      >
+        {label}
+        {isActive && <span className="text-[10px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
+      </button>
+    );
+  }
+
   // Edit PO state
   const [editPO, setEditPO] = useState<CustomerPOData | null>(null);
   const [editPoType, setEditPoType] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [editSiteId, setEditSiteId] = useState("");
   const [editTicketId, setEditTicketId] = useState("");
+  const [editCustomerId, setEditCustomerId] = useState("");
   const [editIssuedBy, setEditIssuedBy] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Build Invoice from PO state
+  const [invoicePO, setInvoicePO] = useState<CustomerPOData | null>(null);
+  const [invoiceLines, setInvoiceLines] = useState<Array<{ description: string; qty: string; unitPrice: string }>>([]);
+  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+
+  function openBuildInvoice(po: CustomerPOData) {
+    setInvoicePO(po);
+    // Pre-populate from PO lines if any
+    if (po.lines && po.lines.length > 0) {
+      setInvoiceLines(po.lines.map(l => ({
+        description: l.description,
+        qty: String(Number(l.qty || 1)),
+        unitPrice: String(Number(l.agreedUnitPrice || 0)),
+      })));
+    } else {
+      // Empty starting line
+      setInvoiceLines([{ description: "", qty: "1", unitPrice: String(Number(po.totalValue ?? po.poLimitValue ?? 0)) }]);
+    }
+  }
+
+  async function handleBuildInvoice() {
+    if (!invoicePO) return;
+    setInvoiceSubmitting(true);
+    try {
+      const lines = invoiceLines.filter(l => l.description.trim());
+      if (lines.length === 0) { alert("Add at least one line"); setInvoiceSubmitting(false); return; }
+
+      // Build invoice with lines passed directly
+      const res = await fetch(`/api/customer-pos/${invoicePO.id}/build-invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lines: lines.map(l => ({
+            description: l.description,
+            qty: Number(l.qty) || 1,
+            unitPrice: Number(l.unitPrice) || 0,
+          })),
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        alert(`Invoice ${result.invoiceNo} created`);
+        setInvoicePO(null);
+        router.refresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to create invoice");
+      }
+    } finally {
+      setInvoiceSubmitting(false);
+    }
+  }
 
   // Upload PO
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -253,6 +333,7 @@ export function PORegisterView({
       poNo: fd.get("poNo") as string,
       poType: editPoType,
       status: editStatus,
+      customerId: editCustomerId || undefined,
       siteId: editSiteId || undefined,
       ticketId: editTicketId || undefined,
       issuedBy: (fd.get("issuedBy") as string) || null,
@@ -413,6 +494,7 @@ export function PORegisterView({
     setEditStatus(po.status);
     setEditSiteId(po.site?.id || "");
     setEditTicketId(po.ticket?.id || "");
+    setEditCustomerId(po.customer?.id || "");
     setEditIssuedBy(po.issuedBy || "");
   }
 
@@ -431,13 +513,56 @@ export function PORegisterView({
     router.refresh();
   }
 
+  // Build customer family map: filtering by parent should include all subsidiaries
+  function getCustomerFamilyIds(customerId: string): Set<string> {
+    const ids = new Set<string>([customerId]);
+    const target = customers.find(c => c.id === customerId);
+    if (!target) return ids;
+    // If target is a parent, find all its subsidiaries
+    customers.forEach(c => {
+      if (c.parentCustomerEntityId === customerId) ids.add(c.id);
+    });
+    // If target has a parent, also include parent + siblings (filter by group)
+    if (target.parentEntity?.id) {
+      ids.add(target.parentEntity.id);
+      customers.forEach(c => {
+        if (c.parentCustomerEntityId === target.parentEntity!.id) ids.add(c.id);
+      });
+    }
+    return ids;
+  }
+
   // Filter POs
-  const filtered = customerPOs.filter((po) => {
+  const unsorted = customerPOs.filter((po) => {
     if (po.poType !== activeTab) return false;
-    if (filterCustomer !== "ALL" && po.customer.id !== filterCustomer)
-      return false;
+    if (filterCustomer !== "ALL") {
+      const familyIds = getCustomerFamilyIds(filterCustomer);
+      if (!familyIds.has(po.customer.id)) return false;
+    }
     if (filterStatus !== "ALL" && po.status !== filterStatus) return false;
     return true;
+  });
+
+  // Sort POs
+  const filtered = [...unsorted].sort((a, b) => {
+    let cmp = 0;
+    switch (sortBy) {
+      case "poNo": cmp = (a.poNo || "").localeCompare(b.poNo || ""); break;
+      case "customer": cmp = (a.customer?.name || "").localeCompare(b.customer?.name || ""); break;
+      case "site": {
+        const as = a.site?.siteName || a.ticket?.site?.siteName || "";
+        const bs = b.site?.siteName || b.ticket?.site?.siteName || "";
+        cmp = as.localeCompare(bs);
+        break;
+      }
+      case "ticket": cmp = (a.ticket?.ticketNo || 0) - (b.ticket?.ticketNo || 0); break;
+      case "poDate": cmp = (a.poDate ? new Date(a.poDate).getTime() : 0) - (b.poDate ? new Date(b.poDate).getTime() : 0); break;
+      case "received": cmp = (a.createdAt ? new Date(a.createdAt).getTime() : 0) - (b.createdAt ? new Date(b.createdAt).getTime() : 0); break;
+      case "value": cmp = n(a.totalValue ?? a.poLimitValue) - n(b.totalValue ?? b.poLimitValue); break;
+      case "status": cmp = (a.status || "").localeCompare(b.status || ""); break;
+      default: cmp = (a.createdAt ? new Date(a.createdAt).getTime() : 0) - (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    }
+    return sortDir === "asc" ? cmp : -cmp;
   });
 
   // Summary calculations
@@ -1013,24 +1138,25 @@ export function PORegisterView({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8" />
-                <TableHead>PO No</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Site</TableHead>
-                <TableHead>Ticket</TableHead>
+                <TableHead><SortHeader field="poNo" label="PO No" /></TableHead>
+                <TableHead><SortHeader field="customer" label="Customer" /></TableHead>
+                <TableHead><SortHeader field="site" label="Site" /></TableHead>
+                <TableHead><SortHeader field="ticket" label="Ticket" /></TableHead>
                 <TableHead>Quote</TableHead>
-                <TableHead>PO Date</TableHead>
+                <TableHead><SortHeader field="poDate" label="PO Date" /></TableHead>
+                <TableHead><SortHeader field="received" label="Received" /></TableHead>
                 <TableHead>Issuer</TableHead>
                 <TableHead className="text-right">Costs</TableHead>
-                <TableHead className="text-right">Ex VAT</TableHead>
+                <TableHead className="text-right"><SortHeader field="value" label="Ex VAT" /></TableHead>
                 <TableHead className="text-right">Inc VAT</TableHead>
                 <TableHead>Invoice</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead><SortHeader field="status" label="Status" /></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-center py-8 text-[#888888]">
+                  <TableCell colSpan={14} className="text-center py-8 text-[#888888]">
                     No standard POs found.
                   </TableCell>
                 </TableRow>
@@ -1062,6 +1188,12 @@ export function PORegisterView({
                               <Pencil className="size-3" />
                             </Button>
                             <Button size="sm" variant="outline"
+                              className="h-5 px-1.5 text-[9px] bg-[#00CC66]/10 text-[#00CC66] border-[#00CC66]/30 hover:bg-[#00CC66]/20"
+                              onClick={(e) => { e.stopPropagation(); openBuildInvoice(po); }}
+                              title="Build invoice from this PO">
+                              INV
+                            </Button>
+                            <Button size="sm" variant="outline"
                               className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
                               onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
                               <Trash2 className="size-3" />
@@ -1081,6 +1213,9 @@ export function PORegisterView({
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-xs text-[#888888]">
                           {po.poDate ? new Date(po.poDate).toLocaleDateString("en-GB") : "\u2014"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-[#888888]">
+                          {po.createdAt ? new Date(po.createdAt).toLocaleDateString("en-GB") : "\u2014"}
                         </TableCell>
                         <TableCell className="max-w-[100px] truncate text-[#888888]">
                           {po.issuedBy || "\u2014"}
@@ -1184,6 +1319,12 @@ export function PORegisterView({
                               <Pencil className="size-3" />
                             </Button>
                             <Button size="sm" variant="outline"
+                              className="h-5 px-1.5 text-[9px] bg-[#00CC66]/10 text-[#00CC66] border-[#00CC66]/30 hover:bg-[#00CC66]/20"
+                              onClick={(e) => { e.stopPropagation(); openBuildInvoice(po); }}
+                              title="Build invoice from this PO">
+                              INV
+                            </Button>
+                            <Button size="sm" variant="outline"
                               className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
                               onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
                               <Trash2 className="size-3" />
@@ -1247,6 +1388,93 @@ export function PORegisterView({
         </div>
       )}
 
+      {/* Build Invoice from PO Sheet */}
+      <Sheet open={!!invoicePO} onOpenChange={(open) => { if (!open) setInvoicePO(null); }}>
+        <SheetContent side="right" className="w-[600px] sm:max-w-[600px]">
+          <SheetHeader>
+            <SheetTitle>Build Invoice from PO {invoicePO?.poNo}</SheetTitle>
+            <SheetDescription>
+              Customer: {invoicePO?.customer?.name} · Total: £{Number(invoicePO?.totalValue ?? invoicePO?.poLimitValue ?? 0).toFixed(2)}
+            </SheetDescription>
+          </SheetHeader>
+          {invoicePO && (
+            <div className="flex flex-col gap-3 px-4 flex-1 overflow-y-auto">
+              <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold">Invoice Lines</div>
+              {invoiceLines.map((line, idx) => (
+                <div key={idx} className="border border-[#333333] p-2 space-y-2 bg-[#222222]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase text-[#888888] font-bold">Line {idx + 1}</span>
+                    {invoiceLines.length > 1 && (
+                      <button
+                        onClick={() => setInvoiceLines(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-[#666666] hover:text-[#FF3333] text-[10px]"
+                      >Remove</button>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="Description"
+                    value={line.description}
+                    onChange={(e) => setInvoiceLines(prev => prev.map((l, i) => i === idx ? { ...l, description: e.target.value } : l))}
+                    className="h-7 text-xs"
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Qty</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={line.qty}
+                        onChange={(e) => setInvoiceLines(prev => prev.map((l, i) => i === idx ? { ...l, qty: e.target.value } : l))}
+                        className="h-7 text-xs text-right"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Unit Price (£)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={line.unitPrice}
+                        onChange={(e) => setInvoiceLines(prev => prev.map((l, i) => i === idx ? { ...l, unitPrice: e.target.value } : l))}
+                        className="h-7 text-xs text-right"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[9px] text-[#888888]">Line Total</Label>
+                      <div className="h-7 px-2 flex items-center text-xs text-right tabular-nums text-[#E0E0E0] bg-[#1A1A1A] border border-[#333333]">
+                        £{((Number(line.qty) || 0) * (Number(line.unitPrice) || 0)).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setInvoiceLines(prev => [...prev, { description: "", qty: "1", unitPrice: "0" }])}
+                className="border-dashed border-[#555555] text-[#888888] hover:text-[#E0E0E0] h-7 text-xs"
+              >
+                <Plus className="size-3 mr-1" /> Add Line
+              </Button>
+              <div className="border-t border-[#333333] pt-2 mt-2 flex items-center justify-between">
+                <span className="text-xs text-[#888888]">Invoice Total:</span>
+                <span className="text-sm font-bold text-[#E0E0E0]">
+                  £{invoiceLines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unitPrice) || 0), 0).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )}
+          <SheetFooter className="px-4">
+            <Button
+              onClick={handleBuildInvoice}
+              disabled={invoiceSubmitting}
+              className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
+            >
+              {invoiceSubmitting ? "Building..." : "Create Invoice"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
       {/* Edit PO Sheet */}
       <Sheet open={!!editPO} onOpenChange={(open) => { if (!open) setEditPO(null); }}>
         <SheetContent side="right">
@@ -1275,6 +1503,36 @@ export function PORegisterView({
                 </div>
               </div>
               <div className="space-y-1.5">
+                <Label>Customer</Label>
+                {(() => {
+                  const current = customers.find(c => c.id === editCustomerId);
+                  // Find the parent (either current is parent, or current has parentEntity)
+                  const parentId = current?.parentEntity?.id || current?.id;
+                  // All customers in the family: parent + all children of that parent
+                  const family = customers.filter(c => c.id === parentId || c.parentCustomerEntityId === parentId);
+                  const hasFamily = family.length > 1;
+                  return (
+                    <>
+                      <Select value={editCustomerId} onValueChange={(v) => setEditCustomerId(v ?? "")}>
+                        <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
+                        <SelectContent>
+                          {(hasFamily ? family : customers).map((c) => {
+                            const isParent = !c.parentCustomerEntityId;
+                            const label = isParent ? c.name : `↳ ${c.name}`;
+                            return <SelectItem key={c.id} value={c.id} label={c.name}>{label}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {hasFamily && (
+                        <p className="text-[10px] text-[#3399FF]">
+                          {family.length} entities in {customers.find(c => c.id === parentId)?.name} group — switch between parent &amp; subsidiaries
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <div className="space-y-1.5">
                 <Label>PO Type</Label>
                 <Select value={editPoType} onValueChange={(v) => setEditPoType(v ?? "")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1287,14 +1545,32 @@ export function PORegisterView({
               </div>
               <div className="space-y-1.5">
                 <Label>Site</Label>
-                <Select value={editSiteId} onValueChange={(v) => setEditSiteId(v ?? "")}>
-                  <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
-                  <SelectContent>
-                    {sites.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.siteName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {(() => {
+                  const customerSites = editPO.customerId
+                    ? commercialLinks.filter((cl) => cl.customerId === editPO.customerId).map((cl) => cl.site)
+                    : sites;
+                  const hasLinkedSites = customerSites.length > 0;
+                  return (
+                    <>
+                      <Select value={editSiteId} onValueChange={(v) => setEditSiteId(v ?? "")}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={hasLinkedSites ? "Select site" : "No sites linked to customer"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customerSites.map((s) => (
+                            <SelectItem key={s.id} value={s.id} label={s.siteName}>{s.siteName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {editPO.customerId && !hasLinkedSites && (
+                        <p className="text-[10px] text-[#FF9900]">No sites linked to this customer. Add one in Customers → Sites.</p>
+                      )}
+                      {editPO.customerId && hasLinkedSites && (
+                        <p className="text-[10px] text-[#666666]">Filtered to {customerSites.length} site{customerSites.length !== 1 ? "s" : ""} linked to this customer.</p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div className="space-y-1.5">
                 <Label>Ticket</Label>
