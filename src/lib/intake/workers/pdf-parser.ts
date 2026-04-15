@@ -160,6 +160,19 @@ export async function runPdfParser(docId: string): Promise<"PARSED" | "OCR_REQUI
 
     await prisma.intakeDocument.update({ where: { id: docId }, data: { rawText: text } });
     await markStatus(docId, "DOWNLOADED", { errorMessage: null });
+
+    // Async content-matcher rescore — upgrades the owning InboxThread's link
+    // confidence if the new attachment text unlocks a stronger signal.
+    try {
+      const doc = await prisma.intakeDocument.findUnique({ where: { id: docId }, select: { ingestionEventId: true } });
+      if (doc?.ingestionEventId) {
+        const { reconsiderThreadMatchForEvent } = await import("@/lib/inbox/content-matcher");
+        await reconsiderThreadMatchForEvent(doc.ingestionEventId);
+      }
+    } catch (rescoreErr) {
+      console.warn(`[pdf-parser] rescore failed for doc ${docId}:`, rescoreErr instanceof Error ? rescoreErr.message : rescoreErr);
+    }
+
     return "PARSED"; // next worker (bill-extractor) will transition DOWNLOADED → PARSED
   } catch (e) {
     await bumpRetry(docId, e instanceof Error ? e.message : "pdf-parser failed");

@@ -250,6 +250,18 @@ async function ocrDocument(
       data: { rawText: fullText },
     });
     await markStatus(docId, "PARSED", { errorMessage: null });
+
+    // Async content-matcher rescore — same hook as the PDF text path
+    try {
+      const doc = await prisma.intakeDocument.findUnique({ where: { id: docId }, select: { ingestionEventId: true } });
+      if (doc?.ingestionEventId) {
+        const { reconsiderThreadMatchForEvent } = await import("@/lib/inbox/content-matcher");
+        await reconsiderThreadMatchForEvent(doc.ingestionEventId);
+      }
+    } catch (rescoreErr) {
+      console.warn(`[ocr-runner] rescore failed for doc ${docId}:`, rescoreErr instanceof Error ? rescoreErr.message : rescoreErr);
+    }
+
     return "PARSED";
   } catch (e) {
     await bumpRetry(docId, e instanceof Error ? e.message : "OCR failed");
