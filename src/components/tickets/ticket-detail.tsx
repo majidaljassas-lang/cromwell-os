@@ -296,6 +296,7 @@ type TicketData = {
 
 function InlineLineRow({
   line,
+  ticketId,
   selected,
   onToggleSelect,
   onSaved,
@@ -303,6 +304,7 @@ function InlineLineRow({
   supplierLookup,
 }: {
   line: TicketLine;
+  ticketId: string;
   selected: boolean;
   onToggleSelect: () => void;
   onSaved: () => void;
@@ -331,6 +333,37 @@ function InlineLineRow({
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<PriceSuggestion[] | null>(null);
   const suggestRef = React.useRef<HTMLDivElement>(null);
+  const [stockOpen, setStockOpen] = useState(false);
+  const [stockSuggestions, setStockSuggestions] = useState<Array<{ id: string; description: string; qtyOnHand: number; costPerUnit: number; supplierName: string | null; score: number }>>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const stockRef = React.useRef<HTMLDivElement>(null);
+
+  async function openStockAlloc() {
+    setStockOpen(true);
+    setStockLoading(true);
+    try {
+      const r = await fetch(`/api/tickets/${ticketId}/lines/${line.id}/allocate-stock`);
+      if (r.ok) {
+        const d = await r.json();
+        setStockSuggestions(d.suggestions ?? []);
+      }
+    } finally { setStockLoading(false); }
+  }
+
+  async function doAllocate(stockItemId: string) {
+    const r = await fetch(`/api/tickets/${ticketId}/lines/${line.id}/allocate-stock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stockItemId }),
+    });
+    if (r.ok) {
+      setStockOpen(false);
+      router.refresh();
+    } else {
+      const d = await r.json();
+      alert(d.error ?? "Allocation failed");
+    }
+  }
 
   useEffect(() => {
     if (!suggestOpen) return;
@@ -813,6 +846,46 @@ function InlineLineRow({
       </TableCell>
       <TableCell className="p-1 w-20">
         <div className="flex items-center gap-0.5 relative" ref={suggestRef}>
+          {/* 📦 Allocate from Stock */}
+          <div className="relative" ref={stockRef}>
+            <button
+              onClick={openStockAlloc}
+              className="p-0.5 text-[#888888] hover:text-[#00CC66] transition-colors"
+              title="Allocate from stock"
+            >
+              <span className="text-[11px] leading-none">📦</span>
+            </button>
+            {stockOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-[#1A1A1A] border border-[#333] shadow-xl text-xs" style={{ minWidth: "20rem" }}>
+                <div className="px-3 py-2 border-b border-[#333] flex justify-between items-center">
+                  <span className="font-bold text-[10px] uppercase tracking-wider text-[#00CC66]">Allocate from Stock</span>
+                  <button onClick={() => setStockOpen(false)} className="text-[#666] hover:text-[#ccc]">✕</button>
+                </div>
+                {stockLoading ? (
+                  <div className="px-3 py-4 text-[#888] text-center">Searching stock...</div>
+                ) : stockSuggestions.length === 0 ? (
+                  <div className="px-3 py-4 text-[#888] text-center">No matching stock found</div>
+                ) : (
+                  <div className="max-h-48 overflow-auto">
+                    {stockSuggestions.map((s) => (
+                      <div key={s.id} className="px-3 py-2 border-b border-[#222] hover:bg-[#222] flex justify-between items-center">
+                        <div>
+                          <div className="text-[#ccc]">{s.description}</div>
+                          <div className="text-[10px] text-[#888]">{s.qtyOnHand} available · £{s.costPerUnit.toFixed(2)}/unit · {s.supplierName ?? "—"}</div>
+                        </div>
+                        <button
+                          onClick={() => doAllocate(s.id)}
+                          className="text-[10px] bg-[#00CC66] text-black px-2 py-1 rounded font-bold hover:bg-[#00AA55]"
+                        >
+                          Use
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {/* 💡 Suggest Price */}
           <button
             onClick={openSuggest}
@@ -2549,6 +2622,7 @@ export function TicketDetail({
                       <InlineLineRow
                         key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
                         line={line}
+                        ticketId={ticket.id}
                         selected={selectedLineIds.has(line.id)}
                         onToggleSelect={() => toggleSelectLine(line.id)}
                         onSaved={() => {
