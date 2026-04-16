@@ -170,3 +170,64 @@ When a WhatsApp or email message arrives from a known supplier contact and conta
 - Creates `TicketLinePrice` rows — never overwrites existing prices from other suppliers
 - If match confidence is LOW, creates a `REVIEW_SUPPLIER_QUOTE` task instead of auto-linking
 - Message text is preserved in `TicketLinePrice.notes` for audit trail
+
+## Phase 14 — Stock Register (NOT YET BUILT)
+
+Physical stock register tracking qty on hand per product. Stock depletes when allocated to ticket lines, replenishes from MOQ overages and returns. Visible on command centre dashboard.
+
+### Core model
+
+- `StockRegisterItem` — one row per distinct product held in stock
+  - `canonicalProductId` (FK, nullable — linked when product is identified)
+  - `description`, `productCode` (BES code, supplier SKU, etc.)
+  - `qtyOnHand` — current physical quantity
+  - `unit` (EA, M, LENGTH, PACK, etc.)
+  - `avgCostPerUnit` — weighted average from purchase history
+  - `totalCostValue` — qtyOnHand × avgCostPerUnit
+  - `costConfirmed` — true if backed by a matched SupplierBill line, false if cost is estimated
+  - `location` (warehouse, van, site — free text for now)
+  - `lastCountedAt` — date of last physical count
+  - `minQty` / `reorderQty` — optional reorder triggers
+
+### Movements (audit trail)
+
+- `StockMovement` — every in/out recorded with reason
+  - `type`: `RECEIVED` | `ALLOCATED` | `RETURNED` | `ADJUSTED` | `TRANSFERRED`
+  - `qty` (positive = in, negative = out)
+  - `ticketLineId` — which job consumed it (for ALLOCATED)
+  - `supplierBillLineId` — which bill brought it in (for RECEIVED)
+  - `returnLineId` — link to return (for RETURNED)
+  - `reason` — free text or auto-generated
+
+### Depletion (ticket line → stock)
+
+1. User marks ticket line as `FROM STOCK` (sets `fromStock > 0`)
+2. System finds matching `StockRegisterItem` by `canonicalProductId` or `productCode`
+3. Creates `StockMovement` type=ALLOCATED, decrements `qtyOnHand`
+4. If `qtyOnHand` goes negative → creates `Task` STOCK_DISCREPANCY (more used than recorded)
+
+### Replenishment
+
+1. **MOQ overage**: when `TicketLine.qty` ordered > qty needed, excess flows to stock via `StockExcessRecord` → `StockRegisterItem` with type=RECEIVED
+2. **Returns received**: supplier credit note processed → returned qty added back with type=RETURNED
+3. **Manual adjustment**: physical count correction with type=ADJUSTED
+
+### Cost confirmation
+
+- When stock is used on a job (`fromStock > 0`), the system checks if the original purchase has a matched `SupplierBill` line
+- If no bill match → `costConfirmed = false` → creates `Task` STOCK_COST_UNCONFIRMED
+- Prevents margin calculation errors from estimated costs flowing into quotes/invoices
+
+### Command centre integration
+
+- **Stock value card**: total £ value of stock on hand
+- **Unconfirmed cost alert**: count of items where `costConfirmed = false`
+- **Low stock alerts**: items where `qtyOnHand < minQty`
+- **Stock age**: items not allocated in 30+ days → candidates for return to supplier
+
+### Constraints
+
+- Stock register is Cromwell Plumbing only (not CF — CF has no physical stock)
+- `StockItem` (existing model) tracks individual excess items per ticket; `StockRegisterItem` is the aggregate register across all jobs
+- Never auto-deplete without user confirming `FROM STOCK` — no silent stock movements
+- avgCostPerUnit recalculated on every RECEIVED movement using weighted average
