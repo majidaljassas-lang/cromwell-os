@@ -444,8 +444,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ticketId: body.ticketId,
       evidenceCreated: evidenceCount,
       eventsCreated: eventCount,
-      taskCreated: taskType,
-      taskId,
+      tasksCreated,
     });
   }
 

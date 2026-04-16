@@ -183,7 +183,7 @@ function readJsonBody(req) {
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth3" }),
-  puppeteer: { headless: true, args: ["--no-sandbox"] },
+  puppeteer: { headless: false, args: ["--no-sandbox"], protocolTimeout: 300000 },
 });
 
 client.on("qr", async (qr) => {
