@@ -191,7 +191,34 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       where: { id },
       data: { status: "LINKED", linkedTicketId: body.ticketId, triagedAt: new Date() },
     });
-    return Response.json({ ok: true, status: "LINKED", ticketId: body.ticketId });
+
+    // Log every message in the thread as an event on the ticket
+    const allMessages = await prisma.inboxThreadMessage.findMany({
+      where: { threadId: id },
+      orderBy: { occurredAt: "asc" },
+      select: { sender: true, snippet: true, occurredAt: true, hasAttachments: true },
+    });
+
+    for (const msg of allMessages) {
+      const isSent = (msg.sender ?? "").toLowerCase().includes("majid");
+      await prisma.event.create({
+        data: {
+          ticketId: body.ticketId,
+          eventType: "COMMS_RECEIVED",
+          timestamp: msg.occurredAt,
+          notes: `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`,
+          sourceRef: `thread:${id}`,
+        },
+      });
+    }
+
+    // Update ticket lastActivityAt
+    await prisma.ticket.update({
+      where: { id: body.ticketId },
+      data: { lastActivityAt: new Date() },
+    });
+
+    return Response.json({ ok: true, status: "LINKED", ticketId: body.ticketId, eventsCreated: allMessages.length });
   }
 
   if (body.action === "ACCEPT") {
