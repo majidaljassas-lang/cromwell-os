@@ -19,6 +19,10 @@ export default async function TicketDetailPage({
         include: {
           payingCustomer: true,
           components: { orderBy: { createdAt: "asc" } },
+          prices: {
+            include: { supplier: { select: { id: true, name: true } } },
+            orderBy: { costTotal: "asc" },
+          },
           stockUsages: {
             select: {
               id: true, qtyUsed: true, costPerUnit: true, totalCost: true, stockItemId: true,

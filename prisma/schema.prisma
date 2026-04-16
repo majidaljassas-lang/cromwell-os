@@ -584,12 +584,32 @@ model TicketLine {
   ticket              Ticket               @relation(fields: [ticketId], references: [id])
   ticketPhase         TicketPhase?         @relation(fields: [ticketPhaseId], references: [id])
   billLineAllocations BillLineAllocation[] @relation("BillLineAllocationTicketLine")
+  prices              TicketLinePrice[]
 
   @@index([ticketId])
   @@index([status])
   @@index([payingCustomerId])
   @@index([parentLineId])
   @@index([canonicalProductId])
+}
+
+model TicketLinePrice {
+  id           String     @id @default(uuid())
+  ticketLineId String
+  supplierName String
+  supplierId   String?
+  costPerUnit  Decimal    @db.Decimal(14, 4)
+  costTotal    Decimal    @db.Decimal(14, 2)
+  leadTimeDays Int?
+  notes        String?
+  isWinner     Boolean    @default(false)
+  isManual     Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  ticketLine   TicketLine @relation(fields: [ticketLineId], references: [id])
+  supplier     Supplier?  @relation(fields: [supplierId], references: [id])
+
+  @@index([ticketLineId])
 }
 
 model SalesBundle {
@@ -759,6 +779,7 @@ model Supplier {
   supplierBills     SupplierBill[]
   options           SupplierOption[]
   ticketLines       TicketLine[]             @relation("TicketLineSupplier")
+  ticketLinePrices  TicketLinePrice[]
   paymentsMade      PaymentMade[]
   aliases           SupplierAlias[]
   productMappings   SupplierProductMapping[]

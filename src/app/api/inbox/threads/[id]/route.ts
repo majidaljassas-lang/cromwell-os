@@ -61,7 +61,45 @@ async function deriveCustomerFromThread(thread: {
   }
 
   if (contactIds.length === 0) {
-    return { ok: false, error: "sender not in Contacts — add the contact first, or use LINK to attach to an existing ticket" };
+    // Auto-create contact + customer from sender details
+    const senderEmail = (thread.participants || []).find((p) => p.includes("@"))?.trim().toLowerCase();
+    const senderName = senderEmail
+      ? senderEmail.split("@")[0]!.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : thread.conversationKey.split("@")[0] ?? "Unknown";
+
+    const contact = await prisma.contact.create({
+      data: {
+        fullName: senderName,
+        email: senderEmail ?? null,
+        phone: thread.channel !== "EMAIL" ? thread.conversationKey.split("@")[0] : null,
+
+        isActive: true,
+      },
+    });
+
+    const customer = await prisma.customer.create({
+      data: {
+        name: `${senderName} (auto-intake)`,
+        isBillingEntity: false,
+      },
+    });
+
+    // SiteContactLink requires a siteId — find or create a placeholder site
+    let site = await prisma.site.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!site) {
+      site = await prisma.site.create({ data: { siteName: "Unassigned", isActive: true } });
+    }
+
+    await prisma.siteContactLink.create({
+      data: {
+        contact: { connect: { id: contact.id } },
+        customer: { connect: { id: customer.id } },
+        site: { connect: { id: site.id } },
+        isActive: true,
+      },
+    });
+
+    return { ok: true, customerId: customer.id };
   }
 
   const links = await prisma.siteContactLink.findMany({
@@ -71,7 +109,34 @@ async function deriveCustomerFromThread(thread: {
   const customerIds = Array.from(new Set(links.map((l) => l.customerId!).filter(Boolean)));
 
   if (customerIds.length === 0) {
-    return { ok: false, error: "sender's Contact has no Customer link — link them in Contacts, or use LINK" };
+    // Contact exists but has no customer link — auto-create customer and link
+    const senderEmail = (thread.participants || []).find((p) => p.includes("@"))?.trim().toLowerCase();
+    const senderName = senderEmail
+      ? senderEmail.split("@")[0]!.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : thread.conversationKey.split("@")[0] ?? "Unknown";
+
+    const customer = await prisma.customer.create({
+      data: {
+        name: `${senderName} (auto-intake)`,
+        isBillingEntity: false,
+      },
+    });
+
+    let site2 = await prisma.site.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!site2) {
+      site2 = await prisma.site.create({ data: { siteName: "Unassigned", isActive: true } });
+    }
+
+    await prisma.siteContactLink.create({
+      data: {
+        contact: { connect: { id: contactIds[0] } },
+        customer: { connect: { id: customer.id } },
+        site: { connect: { id: site2.id } },
+        isActive: true,
+      },
+    });
+
+    return { ok: true, customerId: customer.id };
   }
   if (customerIds.length > 1) {
     return { ok: false, error: `sender resolves to ${customerIds.length} customers — use LINK to specify which ticket` };

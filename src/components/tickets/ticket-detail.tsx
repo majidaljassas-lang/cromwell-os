@@ -57,6 +57,7 @@ import { QuotePanel } from "@/components/quotes/quote-panel";
 import { TicketProcurementTab } from "@/components/procurement/ticket-procurement-tab";
 import { RfqExploder } from "@/components/tickets/rfq-exploder";
 import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
+import { ComparisonPricing } from "@/components/tickets/comparison-pricing";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -1200,6 +1201,7 @@ export function TicketDetail({
   // ── RFQ Extract collapsible state ──
   const [rfqOpen, setRfqOpen] = useState(false);
   const [compSheetOpen, setCompSheetOpen] = useState(false);
+  const [comparisonPricingOpen, setComparisonPricingOpen] = useState(false);
 
   // ── Quote button state ──
   const [creatingQuote, setCreatingQuote] = useState(false);
@@ -1971,6 +1973,34 @@ export function TicketDetail({
             {compSheetOpen && (
               <div className="border-t border-[#333333] p-3">
                 <CompetitiveBidPanel ticketId={ticket.id} />
+              </div>
+            )}
+          </div>
+
+          {/* Comparison Pricing — per-line supplier price comparison */}
+          <div className="border border-[#333333] rounded-md bg-[#0D0D0D] overflow-hidden">
+            <button
+              onClick={() => setComparisonPricingOpen(!comparisonPricingOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#1A1A1A] cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-[#3399FF]">
+                  {comparisonPricingOpen ? "▼" : "▶"} SUPPLIER PRICING
+                </span>
+                <span className="text-[10px] text-[#888888]">
+                  Compare supplier costs per line — auto-picks best price
+                </span>
+              </div>
+            </button>
+            {comparisonPricingOpen && (
+              <div className="border-t border-[#333333] p-3">
+                <ComparisonPricing
+                  ticketId={ticket.id}
+                  lines={ticket.lines}
+                  suppliers={suppliers.map((s) => ({ id: s.id, name: s.name }))}
+                  competitorTarget={null}
+                  defaultMarginPct={20}
+                />
               </div>
             )}
           </div>

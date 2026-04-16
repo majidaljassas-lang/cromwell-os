@@ -81,11 +81,15 @@ function deriveMeta(event: IngestionEventLike) {
       ?? "").toString().slice(0, 240);
   } else if (sourceType === "WHATSAPP") {
     // Accept snake_case (live-ingest shape) or camelCase (raw lib shape).
-    sender = (raw.sender_phone as string | undefined)
+    // Prefer display name over raw phone number for sender.
+    const senderName = (raw.sender_name as string | undefined);
+    const senderPhone = (raw.sender_phone as string | undefined)
       ?? (raw.from as string | undefined)
       ?? (raw.author as string | undefined)
       ?? null;
-    if (sender) participants.add(sender);
+    sender = (senderName && senderName !== senderPhone) ? senderName : senderPhone;
+    if (senderPhone) participants.add(senderPhone);
+    if (senderName && senderName !== senderPhone) participants.add(senderName);
     const body = (raw.message_text as string | undefined) ?? (raw.body as string | undefined);
     snippet = body ? body.slice(0, 240) : null;
     subject = (raw.chat_name as string | undefined) ?? (snippet ? snippet.slice(0, 80) : null);
