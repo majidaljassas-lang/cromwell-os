@@ -192,24 +192,115 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       data: { status: "LINKED", linkedTicketId: body.ticketId, triagedAt: new Date() },
     });
 
-    // Log every message in the thread as an event on the ticket
+    // Get all messages + classify the thread content
     const allMessages = await prisma.inboxThreadMessage.findMany({
       where: { threadId: id },
       orderBy: { occurredAt: "asc" },
-      select: { sender: true, snippet: true, occurredAt: true, hasAttachments: true },
+      select: { id: true, sender: true, snippet: true, occurredAt: true, hasAttachments: true, ingestionEventId: true },
     });
+
+    const fullText = allMessages.map(m => m.snippet ?? "").join(" ").toLowerCase();
+
+    // Detect what type of communication this is
+    // Maps to EvidenceType enum: INSTRUCTION, APPROVAL, PRICING, DELIVERY, DISPUTE,
+    // PO_REQUEST, PO_RECEIVED, SUPPLIER_CONFIRMATION, PHOTO, CALL_NOTE
+    let evidenceType: string = "INSTRUCTION";
+    let taskType: string | null = null;
+    let taskPriority = "MEDIUM";
+    let taskReason = "";
+
+    if (/order\s*ack|acknowledgement|order\s*confirm|we confirm your order|your order has been/i.test(fullText)) {
+      evidenceType = "SUPPLIER_CONFIRMATION";
+      taskType = "CHECK_DELIVERY_DATE";
+      taskReason = "Supplier order acknowledgement received — check expected delivery date";
+    } else if (/dispatch|dispatched|shipped|tracking|out for delivery|delivery.*monday|delivery.*tuesday|delivery.*wednesday|delivery.*thursday|delivery.*friday|deliver.*tomorrow|collection.*ready/i.test(fullText)) {
+      evidenceType = "DELIVERY";
+      taskType = "CONFIRM_DELIVERY_RECEIPT";
+      taskReason = "Delivery update received — confirm goods arrive on site";
+    } else if (/invoice|bill|amount due|payment terms|net total|inv[\s-]*no/i.test(fullText)) {
+      evidenceType = "INSTRUCTION";
+      taskType = "MATCH_BILL_TO_TICKET";
+      taskPriority = "HIGH";
+      taskReason = "Supplier bill received — match to PO, check costs, allocate";
+    } else if (/approved|go ahead|proceed|confirm.*order|send.*po|place.*order/i.test(fullText)) {
+      evidenceType = "APPROVAL";
+      taskType = "PLACE_ORDER_WITH_SUPPLIER";
+      taskPriority = "HIGH";
+      taskReason = "Customer approval received — place order with supplier";
+    } else if (/quote|quotation|pricing|price list|we can offer/i.test(fullText)) {
+      evidenceType = "PRICING";
+      taskType = "REVIEW_SUPPLIER_PRICING";
+      taskReason = "Supplier pricing received — review and update ticket costs";
+    } else if (/please.*order|can you.*supply|need.*asap|urgent.*order|please.*send/i.test(fullText)) {
+      evidenceType = "INSTRUCTION";
+      taskType = "PLACE_ORDER_WITH_SUPPLIER";
+      taskPriority = "HIGH";
+      taskReason = "Customer order received — source from supplier and confirm";
+    } else if (/po|purchase order/i.test(fullText)) {
+      evidenceType = "PO_RECEIVED";
+      taskType = "LINK_PO";
+      taskReason = "Purchase order reference received — link to ticket";
+    } else if (/dispute|wrong|damaged|missing|short|incorrect/i.test(fullText)) {
+      evidenceType = "DISPUTE";
+      taskType = "REVIEW_DISPUTE";
+      taskPriority = "HIGH";
+      taskReason = "Dispute or issue flagged — review and resolve";
+    }
+
+    // Create Evidence + Event + Task for each message
+    let evidenceCount = 0;
+    let eventCount = 0;
 
     for (const msg of allMessages) {
       const isSent = (msg.sender ?? "").toLowerCase().includes("majid");
+      const sourceType = thread.channel === "EMAIL" ? "OUTLOOK" : "WHATSAPP";
+      const msgText = `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`;
+
+      // 1. Evidence — the actual message as proof
+      await prisma.evidenceFragment.create({
+        data: {
+          ticketId: body.ticketId,
+          sourceType,
+          fragmentType: evidenceType as any,
+          fragmentText: msgText,
+          sourceRef: `msg:${msg.id}`,
+          timestamp: msg.occurredAt,
+          isPrimaryEvidence: !isSent,
+        },
+      });
+      evidenceCount++;
+
+      // 2. Event — what happened on the timeline
       await prisma.event.create({
         data: {
           ticketId: body.ticketId,
           eventType: "COMMS_RECEIVED",
           timestamp: msg.occurredAt,
-          notes: `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`,
-          sourceRef: `thread:${id}`,
+          notes: msgText,
+          sourceRef: `thread:${id}:msg:${msg.id}`,
         },
       });
+      eventCount++;
+    }
+
+    // 3. Task — what needs doing next (one per thread, not per message)
+    let taskId: string | null = null;
+    if (taskType) {
+      const existingTask = await prisma.task.findFirst({
+        where: { ticketId: body.ticketId, taskType, status: "OPEN" },
+      });
+      if (!existingTask) {
+        const task = await prisma.task.create({
+          data: {
+            ticketId: body.ticketId,
+            taskType,
+            priority: taskPriority,
+            status: "OPEN",
+            generatedReason: taskReason,
+          },
+        });
+        taskId = task.id;
+      }
     }
 
     // Update ticket lastActivityAt
@@ -218,7 +309,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       data: { lastActivityAt: new Date() },
     });
 
-    return Response.json({ ok: true, status: "LINKED", ticketId: body.ticketId, eventsCreated: allMessages.length });
+    return Response.json({
+      ok: true,
+      status: "LINKED",
+      ticketId: body.ticketId,
+      evidenceCreated: evidenceCount,
+      eventsCreated: eventCount,
+      taskCreated: taskType,
+      taskId,
+    });
   }
 
   if (body.action === "ACCEPT") {
