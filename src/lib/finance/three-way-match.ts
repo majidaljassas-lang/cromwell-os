@@ -315,6 +315,9 @@ export async function threeWayMatchBill(
     });
   }
 
+  // ── All delivered — check for MOQ overages before final verdict ──
+  await detectAndCreateStockOverages(bill);
+
   // ── All delivered — variance check ──
   const expectedTotal = sumExpected(linkedPOs);
   const variance = billedTotal - expectedTotal;
@@ -534,6 +537,91 @@ function describeDeliveryState(s: {
     parts.push(`Delivered: ${s.deliveredPOs.join(", ")}`);
   }
   return parts.join("; ");
+}
+
+// ─── MOQ overage → stock register ────────────────────────────────────────
+
+/**
+ * For each bill line with a CostAllocation → ProcurementOrderLine → TicketLine,
+ * compare PO qty vs ticket qty. If PO qty > ticket qty, the excess is MOQ
+ * overage → create StockItem with sourceType=MOQ_OVERAGE.
+ *
+ * This is the ONLY entry path for stock — every StockItem traces to a
+ * real bill line with a real cost and a real job.
+ */
+async function detectAndCreateStockOverages(bill: {
+  id: string;
+  billNo: string;
+  lines: Array<{
+    id: string;
+    lineTotal: unknown;
+    amountExVat: unknown;
+    costAllocations: Array<{
+      totalCost: unknown;
+      procurementLine: {
+        id: string;
+        lineTotal: unknown;
+        procurementOrder: {
+          id: string;
+          poNo: string;
+          ticketId: string;
+          totalCostExpected: unknown;
+        };
+      } | null;
+    }>;
+  }>;
+  supplier: { id: string; name: string };
+}) {
+  for (const billLine of bill.lines) {
+    for (const alloc of billLine.costAllocations) {
+      const po = alloc.procurementLine?.procurementOrder;
+      if (!po || !alloc.procurementLine) continue;
+
+      const poLine = await prisma.procurementOrderLine.findUnique({
+        where: { id: alloc.procurementLine.id },
+        select: {
+          qty: true,
+          unitCost: true,
+          description: true,
+          ticketLineId: true,
+          ticketLine: { select: { id: true, qty: true, description: true, productCode: true } },
+        },
+      });
+      if (!poLine?.ticketLine) continue;
+
+      const billQty = Number(poLine.qty || 0);
+      const ticketQty = Number(poLine.ticketLine.qty || 0);
+      const unitCost = Number(poLine.unitCost || 0);
+      const excess = billQty - ticketQty;
+
+      if (excess <= 0 || unitCost <= 0) continue;
+
+      // Idempotent — don't create duplicate stock items for the same bill line
+      const existing = await prisma.stockItem.findFirst({
+        where: { originBillId: bill.id, description: poLine.ticketLine.description || poLine.description || "" },
+      });
+      if (existing) continue;
+
+      await prisma.stockItem.create({
+        data: {
+          description: poLine.ticketLine.description || poLine.description || "Unknown",
+          productCode: poLine.ticketLine.productCode,
+          qtyOnHand: excess,
+          qtyOriginal: excess,
+          unit: "EA",
+          costPerUnit: unitCost,
+          supplierName: bill.supplier.name,
+          originBillId: bill.id,
+          originBillNo: bill.billNo,
+          originTicketId: po.ticketId,
+          originTicketTitle: `T-${po.poNo}`,
+          sourceType: "MOQ_OVERAGE",
+          outcome: "HOLDING",
+          notes: `MOQ overage: ordered ${billQty}, needed ${ticketQty}, excess ${excess}. From bill ${bill.billNo}, job ticket ${po.ticketId}.`,
+        },
+      });
+    }
+  }
 }
 
 async function writeOutcome(
