@@ -4,11 +4,11 @@
 This version (16.2.2) has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Automation map (Phases 1-11, 2026-04-15)
+# Automation map (Phases 1-12, 2026-04-16)
 
 External cron → `/api/scheduler` (5 min) and `/api/scheduler/daily-sweep` (07:00). Both require `x-scheduler-secret`. Every automation endpoint under `/api/automation/*` is secret-guarded; `run-all` and `trickle-down` forward the header. Every scheduled job wraps its work in `runJob()` which writes a `SchedulerLog` row with status + summary JSON.
 
-## `/api/automation/run-all` — 14 steps in order
+## `/api/automation/run-all` — 16 steps in order
 
 | # | Step | Purpose | Lib module |
 |---|---|---|---|
@@ -22,10 +22,61 @@ External cron → `/api/scheduler` (5 min) and `/api/scheduler/daily-sweep` (07:
 | 8 | `uninvoicedDeliveries` | **Phase 4** — find delivered TicketLines with no SalesInvoiceLine | `src/lib/finance/invoice-trigger.ts` |
 | 9 | `surplusMatcher` | **Phase 6** — cross-ticket transfer opportunities for unresolved surplus | `src/lib/stock/surplus-matcher.ts` |
 | 10 | `classify` | Classify PARSED events; WhatsApp NEEDS_TRIAGE bridge; stale NEEDS_TRIAGE backfill | existing |
-| 11 | `threadLinker` | Re-score InboxThreads with null/LOW confidence against open tickets; phone-history fallback | `src/lib/inbox/thread-linker.ts` |
-| 12 | `autoAction` | Auto-action classified events (PO / ORDER / BILL_DOCUMENT) | existing |
-| 13 | `processBills` | Standalone bill pipeline + inline 3-way match on newly created bills | existing + `three-way-match.ts` |
-| 14 | `trickleDown` | ack-matcher → monitor-threads → auto-progress → evidence → tasks → match-bills | existing |
+| 11 | `aiAnalyse` | **Phase 12** — AI classify unanalysed InboxThreads via Claude; extract entities + summary | `src/lib/intelligence/ai-classifier.ts` |
+| 12 | `threadLinker` | Re-score InboxThreads with null/LOW confidence against open tickets; phone-history fallback | `src/lib/inbox/thread-linker.ts` |
+| 13 | `autoCreateTickets` | **Phase 12** — create Tickets + TicketLines from high-confidence AI-analysed threads | `src/lib/inbox/auto-ticket-creator.ts` |
+| 14 | `autoAction` | Auto-action classified events (PO / ORDER / BILL_DOCUMENT) | existing |
+| 15 | `processBills` | Standalone bill pipeline + inline 3-way match on newly created bills | existing + `three-way-match.ts` |
+| 16 | `trickleDown` | ack-matcher → monitor-threads → auto-progress → evidence → tasks → match-bills | existing |
+
+## Phase 12 — Autonomous intake (2026-04-16)
+
+**Principle:** AI suggests, human decides. Nothing the AI does is irreversible.
+
+### Pipeline flow
+
+```
+Email/WhatsApp arrives
+  → IngestionEvent (step 1: outlookSync)
+  → InboxThread (thread-builder.ts: attachEventToThread)
+  → AI classification + entity extraction (step 11: aiAnalyse)
+  → Thread-to-ticket linking (step 12: threadLinker)
+  → Auto-create ticket if confidence ≥75 (step 13: autoCreateTickets)
+  → Subsequent messages auto-append to linked ticket (thread-appender.ts)
+```
+
+### AI classifier (`src/lib/intelligence/ai-classifier.ts`)
+
+- Uses Claude (via `src/lib/ai/anthropic.ts`) to classify InboxThreads
+- Classifications: ORDER, QUOTE_REQUEST, COMPETITIVE_BID, SPEC_DRIVEN, APPROVAL, DELIVERY_UPDATE, BILL_DOCUMENT, DISPUTE, SCHEDULE, NOISE
+- Returns structured JSON: classification, confidence (0-100), summary (20 words), entities (siteName, customerName, poRef, amounts, products, deliveryDate, contactIntent)
+- Cost controls: skip if <20 chars, skip if manualMode=true, skip if analysed <24h ago with no new messages, skip if keyword confidence ≥80
+- Fallback: keyword classifier if AI disabled or errors
+
+### Auto-ticket creator (`src/lib/inbox/auto-ticket-creator.ts`)
+
+- Processes threads where: status=NEW, unlinked, manualMode=false, aiConfidence ≥75, commercial classification
+- Creates Ticket with autoCreatedByAi=true + TicketLines extracted by AI
+- Line extraction: second Claude call extracts products with description/qty/unit from thread text
+- Customer resolution: Contact→SiteContactLink→Customer, then AI name match, then email domain, then auto-create with (auto-intake) tag
+- Site resolution: aiEntities.siteName fuzzy-matched against Site.siteName/aliases
+- Creates REVIEW_AUTO_TICKET task (MEDIUM priority) for human review
+- Confidence 50-74: no ticket, boost dealScore for inbox surfacing
+
+### Thread appender (`src/lib/inbox/thread-appender.ts`)
+
+- Wired into `attachEventToThread()` in `thread-builder.ts`
+- When a new message lands on a thread with linkedTicketId: creates Event (COMMS_RECEIVED), EvidenceFragment if attachments, Task if signal detected (APPROVAL_RECEIVED, DISPUTE_FLAG, DELIVERY_UPDATE_RECEIVED)
+- Respects manualMode on thread and ticket; skips closed/invoiced/locked tickets
+- Idempotent: checks sourceRef before creating
+
+### Manual override rules
+
+- `InboxThread.manualMode` (Boolean, default false) — when true, AI never re-analyses or re-classifies
+- `Ticket.manualMode` (Boolean, default false) — when true, automation never touches that ticket
+- `linkSource = MANUAL` always wins — automation never overwrites manual links
+- Auto-created tickets flagged with `autoCreatedByAi = true` — shown as "AI" badge in UI
+- User can delete, edit, reassign, or promote any AI-created ticket
 
 ## `/api/scheduler/daily-sweep` — 11 categories at 07:00
 
@@ -43,7 +94,7 @@ Each category runs in its own try/catch; one failure does not abort the others. 
 10. `bankDetailSweep` — delegates to `runBankDetailSweep`
 11. `bankDetailAlerts` — escalates any `BANK_DETAIL_CHANGE_ALERT` task ≥1d old to CRITICAL
 
-## Lib modules built across Phases 1-11
+## Lib modules built across Phases 1-12
 
 | File | Purpose | Schema models touched |
 |---|---|---|
@@ -56,6 +107,9 @@ Each category runs in its own try/catch; one failure does not abort the others. 
 | `src/lib/stock/surplus-matcher.ts` | canonical-product resolution + cross-ticket match | writes `TicketLine.canonicalProductId`, `StockExcessRecord.canonicalProductId`, creates `Task` SURPLUS_MATCH_AVAILABLE |
 | `src/lib/intelligence/miscomm-detector.ts` | conflict detector across InboxThreadMessages | writes `SiteContactLink.inferredRole`, creates `Task` MISCOMM_DETECTED |
 | `src/lib/suppliers/bank-detail-monitor.ts` | fraud-detect bank changes in supplier docs | creates `Task` BANK_DETAIL_CHANGE_ALERT / STORE_BANK_DETAILS, writes `IngestionAuditLog` |
+| `src/lib/intelligence/ai-classifier.ts` | **Phase 12** — Claude-powered thread classification + entity extraction | writes `InboxThread.aiClassification/aiConfidence/aiSummary/aiEntities/aiAnalysedAt` |
+| `src/lib/inbox/auto-ticket-creator.ts` | **Phase 12** — auto-create Tickets + TicketLines from high-confidence threads | creates `Ticket`, `TicketLine`, `Task` REVIEW_AUTO_TICKET, `Event` TICKET_CREATED; writes `InboxThread.status=AUTO_TICKETED` |
+| `src/lib/inbox/thread-appender.ts` | **Phase 12** — auto-append comms to linked tickets | creates `Event` COMMS_RECEIVED, `EvidenceFragment`, `Task` (signal-based) |
 
 ## Schema migrations applied
 
@@ -69,6 +123,7 @@ Each category runs in its own try/catch; one failure does not abort the others. 
 | 7 | `20260415190000_phase_7_legacy_orphan_enum` | InquiryStatus.LEGACY_ORPHAN |
 | 8 | `20260415200000_phase_8_site_contact_inferred_role` | SiteContactLink.inferredRole |
 | 9 | `20260415210000_phase_9_supplier_bank_fields` | Supplier.bankAccount/sortCode/iban/bankLastVerifiedAt/bankLastVerifiedBy |
+| 12 | `20260416120000_phase_12_autonomous_intake` | InboxThread: aiClassification/aiConfidence/aiSummary/aiEntities/aiAnalysedAt/autoCreatedTicket/manualMode. Ticket: autoCreatedByAi/manualMode/aiSummary. InboxThreadStatus: AUTO_TICKETED. EventType: COMMS_RECEIVED/TICKET_CREATED |
 
 ## Deprecated — do not touch
 
@@ -80,8 +135,9 @@ Each category runs in its own try/catch; one failure does not abort the others. 
 
 `/command-centre` is the default landing after login (root redirects there). Data API at `/api/command-centre`. System-level summary at `/api/system/health`.
 
-## Known Phase 11 gaps (wiring not yet done)
+## Known gaps (wiring not yet done)
 
 - **`stopStatus` write-back** — no code currently parses supplier delivery emails to write `LogisticsEvent.stopStatus`. Delivery tracker + 3-way match will remain dormant until a writer is added (ack-matcher parses delivery confirmations today but only writes `eventType`; extending it to write `stopStatus` alongside is the natural hook).
 - **Sidebar nav link** — root redirect goes to command-centre but the sidebar still shows "Dashboard" as the primary label. Cosmetic update.
-- **Final migration consolidation** — each phase applied its own migration via `prisma db execute` (because `prisma dev` shadow DB returns P1017). Running `prisma migrate dev --name phase-8-to-11-final` would collapse them but is unnecessary and risks DB divergence.
+- **Final migration consolidation** — each phase applied its own migration via `prisma db execute` (because `prisma dev` shadow DB returns P1017). Running `prisma migrate dev --name consolidate` would collapse them but is unnecessary and risks DB divergence.
+- **AI badge in inbox UI** — `autoCreatedByAi` and `aiSummary` fields are persisted but the InboxThreadsPanel does not yet render the AI badge or summary. Cosmetic wiring.

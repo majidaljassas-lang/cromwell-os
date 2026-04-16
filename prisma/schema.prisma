@@ -444,6 +444,10 @@ model Ticket {
   // Phase 3: set true when any LogisticsEvent on this ticket reports
   // BYPASSED or NOT_ARRIVED. Cleared when a later DELIVERED event lands.
   deliveryFailed            Boolean                  @default(false)
+  // ── Phase 12: AI autonomous intake ──
+  autoCreatedByAi           Boolean                  @default(false) // Flagged in UI as "AI" badge; user can promote or delete
+  manualMode                Boolean                  @default(false) // When true, automation never touches this ticket
+  aiSummary                 String?                  // AI-generated summary from intake
   ticketNo                  Int                      @unique @default(autoincrement())
   absorbedCostAllocations   AbsorbedCostAllocation[]
   cashSales                 CashSale[]
@@ -2571,6 +2575,9 @@ enum EventType {
   AUTO_INVOICE_DRAFTED
   AUTO_STATUS_PROGRESSED
   AUTO_BILL_MATCHED
+  // Phase 12: autonomous intake
+  COMMS_RECEIVED
+  TICKET_CREATED
 }
 
 enum OrderEventType {
@@ -3262,6 +3269,14 @@ model InboxThread {
   // unlinked.
   dealScore       Int                  @default(0)
   dealReasons     String[]             @default([])
+  // ── Phase 12: AI autonomous intake ──
+  aiClassification  String?              // AI-assigned classification (ORDER, QUOTE_REQUEST, etc.)
+  aiConfidence      Int?                 // AI confidence 0-100
+  aiSummary         String?              // One-liner from Claude (max ~20 words)
+  aiEntities        Json?                // Structured entities: siteName, customerName, poRef, amounts, products, deliveryDate, contactIntent
+  aiAnalysedAt      DateTime?            // When AI last analysed this thread
+  autoCreatedTicket Boolean              @default(false) // Thread was auto-promoted to a ticket by Phase 12
+  manualMode        Boolean              @default(false) // When true, AI never re-analyses or re-classifies
   noisedAt        DateTime?
   triagedAt       DateTime?
   triagedBy       String?
@@ -3306,6 +3321,7 @@ enum InboxThreadStatus {
   LINKED
   NOISE
   ARCHIVED
+  AUTO_TICKETED
 }
 
 enum InboxLinkConfidence {

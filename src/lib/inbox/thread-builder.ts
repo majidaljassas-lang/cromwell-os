@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { TicketStatus } from "@/generated/prisma";
 import { scoreOpenTicketsForText, type LinkCandidate } from "@/lib/ingestion/link-resolver";
 import { scoreDealRelevance } from "@/lib/inbox/deal-scorer";
+import { appendToLinkedTicket } from "@/lib/inbox/thread-appender";
 
 const CLOSED_TICKET_STATUSES: TicketStatus[] = [
   TicketStatus.CLOSED,
@@ -274,6 +275,31 @@ export async function attachEventToThread(eventId: string): Promise<string | nul
 
   await autoLinkThread(thread.id, key.channel, key.conversationKey, meta.sender);
   await scoreThreadDealRelevance(thread.id);
+
+  // Phase 12: if thread is linked to a ticket, auto-append this message
+  // as an Event + EvidenceFragment on the ticket. Re-read thread to get
+  // the freshest linkedTicketId (autoLinkThread may have just set it).
+  try {
+    const freshThread = await prisma.inboxThread.findUnique({
+      where: { id: thread.id },
+      select: { linkedTicketId: true, channel: true },
+    });
+    if (freshThread?.linkedTicketId) {
+      await appendToLinkedTicket({
+        threadId: thread.id,
+        linkedTicketId: freshThread.linkedTicketId,
+        messageSnippet: meta.snippet,
+        sender: meta.sender,
+        hasAttachments: meta.hasAttachments,
+        occurredAt: event.receivedAt,
+        ingestionEventId: eventId,
+        channel: freshThread.channel,
+      });
+    }
+  } catch (err) {
+    // Non-fatal: thread was still created, append is best-effort
+    console.warn(`[thread-builder] appendToLinkedTicket failed for event ${eventId}:`, err instanceof Error ? err.message : err);
+  }
 
   return thread.id;
 }

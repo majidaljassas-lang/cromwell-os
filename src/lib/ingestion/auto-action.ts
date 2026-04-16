@@ -405,7 +405,7 @@ async function handleDispute(eventId: string, subject: string, text: string, fro
         taskType: "REVIEW_DISPUTE",
         priority: "HIGH",
         status: "OPEN",
-        reason: `Dispute/issue from ${fromName}: ${subject.substring(0, 150)}`,
+        generatedReason: `Dispute/issue from ${fromName}: ${subject.substring(0, 150)}`,
       },
     });
     await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });

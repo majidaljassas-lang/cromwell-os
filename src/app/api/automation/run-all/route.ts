@@ -1,5 +1,5 @@
 /**
- * General automation orchestrator — Phase 11 final ordering.
+ * General automation orchestrator — Phase 12 final ordering.
  *
  *   1.  outlookSync              — pull new emails
  *   2.  backfillAttachments      — ensure PDFs are downloaded + parsed
@@ -11,12 +11,14 @@
  *   8.  uninvoicedDeliveries     — client invoice trigger
  *   9.  surplusMatcher           — stock cross-ticket transfer opportunities
  *  10.  classify                 — classify PARSED events
- *  11.  threadLinker             — re-score InboxThreads (null/LOW) against open tickets
- *  12.  autoAction               — action classified events
- *  13.  processBills             — standalone bill pipeline
- *  14.  trickleDown              — ack-matcher, monitor-threads, auto-progress, etc.
+ *  11.  aiAnalyse                — AI classify unanalysed threads (Phase 12)
+ *  12.  threadLinker             — re-score InboxThreads (null/LOW) against open tickets
+ *  13.  autoCreateTickets        — create tickets from high-confidence threads (Phase 12)
+ *  14.  autoAction               — action classified events
+ *  15.  processBills             — standalone bill pipeline
+ *  16.  trickleDown              — ack-matcher, monitor-threads, auto-progress, etc.
  *
- * All 14 fan-out endpoints are secret-guarded; the orchestrator forwards
+ * All 16 fan-out endpoints are secret-guarded; the orchestrator forwards
  * `x-scheduler-secret` via `schedulerSecretHeaders()`. Each step is
  * independent — one failure does NOT stop the others.
  */
@@ -39,7 +41,9 @@ type StepKey =
   | "uninvoicedDeliveries"
   | "surplusMatcher"
   | "classify"
+  | "aiAnalyse"
   | "threadLinker"
+  | "autoCreateTickets"
   | "autoAction"
   | "processBills"
   | "trickleDown";
@@ -118,7 +122,9 @@ export async function POST(request: Request) {
   const uninvoicedDeliveries   = await runStep("uninvoicedDeliveries",   "/api/automation/uninvoiced-deliveries");
   const surplusMatcher         = await runStep("surplusMatcher",         "/api/automation/surplus-matcher");
   const classify               = await runStep("classify",               "/api/automation/classify");
+  const aiAnalyse              = await runStep("aiAnalyse",              "/api/automation/ai-analyse");
   const threadLinker           = await runStep("threadLinker",           "/api/automation/thread-linker");
+  const autoCreateTickets      = await runStep("autoCreateTickets",      "/api/automation/auto-create-tickets");
   const autoAction             = await runStep("autoAction",             "/api/automation/process");
   const processBills           = await runStep("processBills",           "/api/automation/process-bills");
   const trickleDown            = await runStep("trickleDown",            "/api/automation/trickle-down");
@@ -128,7 +134,8 @@ export async function POST(request: Request) {
     bankDetailCheck, threeWayMatch,
     deliveryTracker, addressChangeDetection, miscommDetection,
     uninvoicedDeliveries, surplusMatcher,
-    classify, threadLinker, autoAction, processBills, trickleDown,
+    classify, aiAnalyse, threadLinker, autoCreateTickets,
+    autoAction, processBills, trickleDown,
   ];
   const allOk = steps.every((s) => s.ok);
 
@@ -149,7 +156,9 @@ export async function POST(request: Request) {
         uninvoicedDeliveries: uninvoicedDeliveries.ok ? uninvoicedDeliveries.result : uninvoicedDeliveries.error,
         surplusMatcher: surplusMatcher.ok ? surplusMatcher.result : surplusMatcher.error,
         classify: classify.result,
+        aiAnalyse: aiAnalyse.ok ? aiAnalyse.result : aiAnalyse.error,
         threadLinker: threadLinker.ok ? threadLinker.result : threadLinker.error,
+        autoCreateTickets: autoCreateTickets.ok ? autoCreateTickets.result : autoCreateTickets.error,
         autoAction: autoAction.result,
         processBills: processBills.result,
         trickleDown: trickleDown.ok ? "done" : trickleDown.error,

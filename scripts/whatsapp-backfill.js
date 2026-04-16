@@ -1,8 +1,12 @@
 /**
- * WhatsApp backfill — pulls recent messages from all chats and sends to ingestion.
- * Run in a separate terminal while whatsapp-qr-server.js is running.
+ * WhatsApp backfill — pulls recent messages via Store.Msg direct read.
+ *
+ * The high-level chat.fetchMessages() API is broken in whatsapp-web.js@1.34.6
+ * (waitForChatLoading no longer exists). This script reads Store.Msg directly
+ * from the Puppeteer page context — same approach as whatsapp-qr-server.js.
  *
  * Usage: node scripts/whatsapp-backfill.js
+ * NOTE: Kill the whatsapp-listener.js process first — only one session at a time.
  */
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { CUTOVER_DATE } = require("../src/lib/sync-constants");
@@ -11,7 +15,7 @@ const API_BASE = "http://localhost:3000";
 const SINCE = CUTOVER_DATE;
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth3" }),
+  authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth" }),
   puppeteer: { headless: true, args: ["--no-sandbox"] },
 });
 
@@ -21,66 +25,102 @@ client.on("qr", () => {
 });
 
 client.on("ready", async () => {
-  console.log("✅ Connected. Pulling chats...\n");
+  console.log("✅ Connected. Reading Store.Msg...\n");
 
   try {
-    const chats = await client.getChats();
-    console.log(`Found ${chats.length} chats. Scanning for messages since ${SINCE.toLocaleDateString("en-GB")}...\n`);
+    // Store.Msg direct read — bypasses broken chat.fetchMessages() which
+    // calls waitForChatLoading (no longer exists in current WhatsApp Web).
+    // See commits c90bfdf and 4f1b15c.
+    const sinceUnix = Math.floor(SINCE.getTime() / 1000);
+    const extracted = await client.pupPage.evaluate((sinceUnix) => {
+      const Store = window.Store;
+      if (!Store || !Store.Msg) return { error: "Store.Msg unavailable", messages: [] };
+      const msgs = typeof Store.Msg.getModelsArray === "function"
+        ? Store.Msg.getModelsArray()
+        : (Store.Msg.models || []);
 
-    let total = 0;
+      const out = [];
+      for (const m of msgs) {
+        try {
+          const t = m.t || 0;
+          if (t < sinceUnix) continue;
+
+          const remote = m.id && m.id.remote
+            ? (typeof m.id.remote === "string" ? m.id.remote : m.id.remote._serialized || "")
+            : "";
+          const msgId = m.id && m.id._serialized ? m.id._serialized : "";
+          if (!msgId || !remote) continue;
+          if (remote === "status@broadcast") continue;
+
+          const body = m.body || "";
+          const type = m.type || "chat";
+          const hasMedia = !!(m.mediaType || m.mediaObject || m.isMedia);
+          if (!body && !hasMedia) continue;
+
+          const chat = Store.Chat && typeof Store.Chat.get === "function" ? Store.Chat.get(remote) : null;
+          const chatName = chat && chat.name ? chat.name : "";
+          const isGroup = remote.endsWith("@g.us");
+
+          const fromField = m.from && typeof m.from !== "string" && m.from._serialized
+            ? m.from._serialized
+            : (m.from || "");
+
+          let senderName = "";
+          try {
+            const senderJid = isGroup && m.author
+              ? (typeof m.author === "string" ? m.author : m.author._serialized || "")
+              : fromField;
+            if (senderJid && Store.Contact && typeof Store.Contact.get === "function") {
+              const contact = Store.Contact.get(senderJid);
+              if (contact) senderName = contact.pushname || contact.name || contact.formattedName || "";
+            }
+          } catch {}
+
+          out.push({
+            message_id: msgId,
+            chat_id: remote,
+            chat_name: chatName,
+            sender_phone: fromField,
+            sender_name: senderName || fromField,
+            timestamp: new Date(t * 1000).toISOString(),
+            message_text: body,
+            is_sent: !!m.fromMe,
+            is_group: isGroup,
+            has_media: hasMedia,
+            media_type: type !== "chat" ? type : null,
+          });
+        } catch { /* skip malformed */ }
+      }
+      return { error: null, messages: out };
+    }, sinceUnix);
+
+    if (extracted.error) {
+      console.warn(`⚠ Store.Msg extraction error: ${extracted.error}`);
+    }
+
+    const payloads = extracted.messages || [];
+    const distinctChats = new Set(payloads.map((p) => p.chat_id));
+    console.log(`Extracted ${payloads.length} messages across ${distinctChats.size} chats since ${SINCE.toLocaleDateString("en-GB")}\n`);
+
     let ingested = 0;
     let skipped = 0;
 
-    for (const chat of chats) {
+    for (const payload of payloads) {
       try {
-        const messages = await chat.fetchMessages({ limit: 100 });
-        const recent = messages.filter((m) => new Date(m.timestamp * 1000) >= SINCE);
-
-        if (recent.length === 0) continue;
-
-        const label = chat.isGroup ? `[${chat.name}]` : chat.name || chat.id._serialized;
-        console.log(`${label}: ${recent.length} messages`);
-
-        for (const msg of recent) {
-          if (msg.from === "status@broadcast") continue;
-          if (!msg.body && !msg.hasMedia) continue;
-
-          total++;
-          const contact = await msg.getContact();
-
-          const payload = {
-            message_id: msg.id._serialized,
-            chat_id: chat.id._serialized,
-            chat_name: chat.name || "",
-            sender_phone: msg.from,
-            sender_name: contact.pushname || contact.name || msg.from,
-            timestamp: new Date(msg.timestamp * 1000).toISOString(),
-            message_text: msg.body || "",
-            is_sent: msg.fromMe,
-            is_group: chat.isGroup,
-            has_media: msg.hasMedia,
-            media_type: msg.type !== "chat" ? msg.type : null,
-          };
-
-          try {
-            const res = await fetch(`${API_BASE}/api/ingest/whatsapp/live`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            const data = await res.json();
-            if (data.ok) ingested++;
-            else skipped++;
-          } catch {
-            skipped++;
-          }
-        }
+        const res = await fetch(`${API_BASE}/api/ingest/whatsapp/live`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && !data.skipped) ingested++;
+        else skipped++;
       } catch {
-        // Some chats may fail to fetch — skip
+        skipped++;
       }
     }
 
-    console.log(`\n✅ Done! ${total} messages scanned, ${ingested} ingested, ${skipped} skipped (personal/duplicate).`);
+    console.log(`\n✅ Done! ${payloads.length} messages found, ${ingested} ingested, ${skipped} skipped.`);
   } catch (err) {
     console.error("Backfill failed:", err.message);
   }
@@ -91,7 +131,7 @@ client.on("ready", async () => {
 console.log("🔄 Connecting to WhatsApp (using existing session)...");
 client.initialize().catch((e) => {
   console.error("❌ Failed:", e.message);
-  console.log("Make sure whatsapp-qr-server.js is NOT running (only one can use the session at a time).");
+  console.log("Make sure whatsapp-listener.js is NOT running (only one can use the session at a time).");
   console.log("Stop it first, then run this script.");
   process.exit(1);
 });
