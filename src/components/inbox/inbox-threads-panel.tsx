@@ -73,12 +73,17 @@ export function InboxThreadsPanel() {
   const [newSiteName, setNewSiteName] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingSite, setCreatingSite] = useState(false);
+  const [tickets, setTickets] = useState<Array<{ id: string; ticketNo: number; title: string }>>([]);
 
   // Load customers + sites + commercial links once
   function loadLookups() {
     fetch("/api/customers").then(r => r.ok ? r.json() : []).then(d => setCustomers(Array.isArray(d) ? d : d.customers ?? [])).catch(() => {});
     fetch("/api/sites").then(r => r.ok ? r.json() : []).then(d => setAllSites(Array.isArray(d) ? d : d.sites ?? [])).catch(() => {});
     fetch("/api/commercial-links").then(r => r.ok ? r.json() : []).then(d => setCommercialLinks(Array.isArray(d) ? d : d.links ?? [])).catch(() => {});
+    fetch("/api/tickets?active=1").then(r => r.ok ? r.json() : []).then(d => {
+      const list = Array.isArray(d) ? d : d.tickets ?? [];
+      setTickets(list.map((t: any) => ({ id: t.id, ticketNo: t.ticketNo, title: t.title })));
+    }).catch(() => {});
   }
   useEffect(() => { loadLookups(); }, []);
 
@@ -412,13 +417,17 @@ export function InboxThreadsPanel() {
               onClick={bulkDeleteAndBlock} disabled={working === "bulk"}>
               Delete & Block
             </Button>
-            <Button size="sm" variant="outline" className="h-6 text-[10px] px-3"
-              onClick={() => {
-                const ticketId = prompt("Enter ticket ID to link to:");
-                if (ticketId) bulkLink(ticketId.trim());
-              }} disabled={working === "bulk"}>
-              Link to ticket
-            </Button>
+            <select
+              className="h-6 text-[10px] bg-[#0A0A0A] border border-[#444] px-2 rounded"
+              defaultValue=""
+              onChange={(e) => { if (e.target.value) bulkLink(e.target.value); e.target.value = ""; }}
+              disabled={working === "bulk"}
+            >
+              <option value="">Link selected →</option>
+              {tickets.map((tk) => (
+                <option key={tk.id} value={tk.id}>T-{tk.ticketNo} {tk.title?.slice(0,30)}</option>
+              ))}
+            </select>
             <button className="text-[10px] text-[#888] ml-2" onClick={() => setSelected(new Set())}>
               Clear selection
             </button>
@@ -524,13 +533,17 @@ export function InboxThreadsPanel() {
                               onClick={() => openNewTicketForm(t)} disabled={working === t.id}>
                               New Ticket
                             </Button>
-                            <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
-                              onClick={() => {
-                                const ticketId = prompt("Ticket ID to link to:");
-                                if (ticketId) doAction(t.id, "LINK", { ticketId: ticketId.trim() });
-                              }} disabled={working === t.id}>
-                              Link
-                            </Button>
+                            <select
+                              className="h-5 text-[10px] bg-[#0A0A0A] border border-[#444] px-1 rounded"
+                              defaultValue=""
+                              onChange={(e) => { if (e.target.value) doAction(t.id, "LINK", { ticketId: e.target.value }); e.target.value = ""; }}
+                              disabled={working === t.id}
+                            >
+                              <option value="">Link →</option>
+                              {tickets.map((tk) => (
+                                <option key={tk.id} value={tk.id}>T-{tk.ticketNo} {tk.title?.slice(0,30)}</option>
+                              ))}
+                            </select>
                             <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
                               onClick={() => doDelete(t.id)} disabled={working === t.id}>
                               Delete
@@ -713,15 +726,16 @@ export function InboxThreadsPanel() {
               }}>
                 New Ticket from selected
               </Button>
-              <Button size="sm" variant="outline" className="h-5 text-[10px] px-2" onClick={() => {
-                const ticketId = prompt("Ticket ID to link selected messages to:");
-                if (ticketId) {
-                  // TODO: API to move specific messages to a ticket
-                  doAction(selectedThread.id, "LINK", { ticketId: ticketId.trim() });
-                }
-              }}>
-                Link selected
-              </Button>
+              <select
+                className="h-5 text-[10px] bg-[#0A0A0A] border border-[#444] px-1 rounded"
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) doAction(selectedThread.id, "LINK", { ticketId: e.target.value }); e.target.value = ""; }}
+              >
+                <option value="">Link selected →</option>
+                {tickets.map((tk) => (
+                  <option key={tk.id} value={tk.id}>T-{tk.ticketNo} {tk.title?.slice(0,30)}</option>
+                ))}
+              </select>
               <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white" onClick={async () => {
                 // Delete selected messages from thread
                 for (const msgId of selectedMsgIds) {
@@ -797,12 +811,17 @@ export function InboxThreadsPanel() {
               <Button size="sm" variant="default" onClick={() => openNewTicketForm(selectedThread)} disabled={working === selectedThread.id}>
                 New Ticket (all)
               </Button>
-              <Button size="sm" variant="outline" onClick={() => {
-                const ticketId = prompt("Ticket ID to link to:");
-                if (ticketId) doAction(selectedThread.id, "LINK", { ticketId: ticketId.trim() });
-              }} disabled={working === selectedThread.id}>
-                Link all
-              </Button>
+              <select
+                className="h-7 text-[10px] bg-[#0A0A0A] border border-[#444] px-1 rounded"
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) doAction(selectedThread.id, "LINK", { ticketId: e.target.value }); e.target.value = ""; }}
+                disabled={working === selectedThread.id}
+              >
+                <option value="">Link all →</option>
+                {tickets.map((tk) => (
+                  <option key={tk.id} value={tk.id}>T-{tk.ticketNo} {tk.title?.slice(0,30)}</option>
+                ))}
+              </select>
               <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={() => doDelete(selectedThread.id)} disabled={working === selectedThread.id}>
                 Delete
               </Button>
