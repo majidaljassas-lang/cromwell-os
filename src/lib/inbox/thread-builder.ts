@@ -228,12 +228,39 @@ export async function attachEventToThread(eventId: string): Promise<string | nul
   const meta = deriveMeta(event);
   const cls = classify(meta.subject, meta.snippet);
 
+  // For WhatsApp: split threads by time gap (3 hours).
+  // If the most recent message on this chat's thread is >3h old, start a new thread.
+  // This prevents day-long chats about different jobs being lumped together.
+  const TIME_GAP_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+  let effectiveKey = key.conversationKey;
+
+  if (key.channel === "WHATSAPP" || key.channel === "WHATSAPP_GROUP") {
+    // Find the most recent thread for this chat
+    const latestThread = await prisma.inboxThread.findFirst({
+      where: { channel: key.channel, conversationKey: { startsWith: key.conversationKey } },
+      orderBy: { latestAt: "desc" },
+      select: { id: true, conversationKey: true, latestAt: true },
+    });
+
+    if (latestThread) {
+      const gap = event.receivedAt.getTime() - latestThread.latestAt.getTime();
+      if (gap > TIME_GAP_MS) {
+        // Time gap exceeded — create a new thread with a timestamp suffix
+        effectiveKey = `${key.conversationKey}::${event.receivedAt.toISOString().slice(0, 13)}`;
+      } else {
+        // Within the window — join the existing thread
+        effectiveKey = latestThread.conversationKey;
+      }
+    }
+  }
+
   // Upsert thread
   const thread = await prisma.inboxThread.upsert({
-    where: { channel_conversationKey: { channel: key.channel, conversationKey: key.conversationKey } },
+    where: { channel_conversationKey: { channel: key.channel, conversationKey: effectiveKey } },
     create: {
       channel: key.channel,
-      conversationKey: key.conversationKey,
+      conversationKey: effectiveKey,
       subject: meta.subject,
       participants: meta.participants,
       classification: cls,
