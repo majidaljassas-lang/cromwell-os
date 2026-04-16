@@ -92,7 +92,7 @@ export async function POST(
     where: { id: stockItem.id },
     data: {
       qtyOnHand: available - allocateQty,
-      outcome: available - allocateQty <= 0 ? "DEPLETED" : "HOLDING",
+      outcome: available - allocateQty <= 0 ? "ALLOCATED" : "HOLDING",
       outcomeDate: available - allocateQty <= 0 ? new Date() : undefined,
     },
   });

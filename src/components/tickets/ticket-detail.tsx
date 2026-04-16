@@ -360,8 +360,9 @@ function InlineLineRow({
       setStockOpen(false);
       router.refresh();
     } else {
-      const d = await r.json();
-      alert(d.error ?? "Allocation failed");
+      const text = await r.text();
+      try { const d = JSON.parse(text); alert(d.error ?? "Allocation failed"); }
+      catch { alert("Allocation failed: " + (text || "server error")); }
     }
   }
 
