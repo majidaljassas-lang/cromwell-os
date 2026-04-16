@@ -66,12 +66,56 @@ export function InboxThreadsPanel() {
   const [ntSaving, setNtSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newSiteName, setNewSiteName] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [creatingSite, setCreatingSite] = useState(false);
 
   // Load customers + sites once
   useEffect(() => {
     fetch("/api/customers").then(r => r.ok ? r.json() : []).then(d => setCustomers(Array.isArray(d) ? d : d.customers ?? [])).catch(() => {});
     fetch("/api/sites").then(r => r.ok ? r.json() : []).then(d => setSites(Array.isArray(d) ? d : d.sites ?? [])).catch(() => {});
   }, []);
+
+  async function createNewCustomer() {
+    if (!newCustomerName.trim()) return;
+    setCreatingCustomer(true);
+    try {
+      const r = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCustomerName.trim(), isBillingEntity: true }),
+      });
+      if (r.ok) {
+        const c = await r.json();
+        const id = c.id ?? c.customer?.id;
+        const name = c.name ?? c.customer?.name ?? newCustomerName.trim();
+        setCustomers((prev) => [...prev, { id, name }].sort((a, b) => a.name.localeCompare(b.name)));
+        setNtCustomerId(id);
+        setNewCustomerName("");
+      }
+    } finally { setCreatingCustomer(false); }
+  }
+
+  async function createNewSite() {
+    if (!newSiteName.trim()) return;
+    setCreatingSite(true);
+    try {
+      const r = await fetch("/api/sites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteName: newSiteName.trim() }),
+      });
+      if (r.ok) {
+        const s = await r.json();
+        const id = s.id ?? s.site?.id;
+        const siteName = s.siteName ?? s.site?.siteName ?? newSiteName.trim();
+        setSites((prev) => [...prev, { id, siteName }].sort((a, b) => a.siteName.localeCompare(b.siteName)));
+        setNtSiteId(id);
+        setNewSiteName("");
+      }
+    } finally { setCreatingSite(false); }
+  }
 
   function openNewTicketForm(t: Thread) {
     setNewTicketThread(t);
@@ -520,7 +564,7 @@ export function InboxThreadsPanel() {
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Customer</label>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Customer *</label>
               <select
                 value={ntCustomerId} onChange={(e) => setNtCustomerId(e.target.value)}
                 className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
@@ -530,18 +574,46 @@ export function InboxThreadsPanel() {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
+              <div className="flex gap-1 mt-1">
+                <input
+                  value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") createNewCustomer(); }}
+                  className="flex-1 h-6 px-2 text-[10px] bg-[#0A0A0A] border border-[#444] placeholder-[#555]"
+                  placeholder="+ New customer name"
+                />
+                {newCustomerName && (
+                  <button onClick={createNewCustomer} disabled={creatingCustomer}
+                    className="text-[10px] text-[#00CC66] hover:text-[#33FF99] px-2 font-bold">
+                    {creatingCustomer ? "..." : "Add"}
+                  </button>
+                )}
+              </div>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Site</label>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Site <span className="text-[#555]">(optional)</span></label>
               <select
                 value={ntSiteId} onChange={(e) => setNtSiteId(e.target.value)}
                 className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
               >
-                <option value="">— select site —</option>
+                <option value="">— no site —</option>
                 {sites.map((s) => (
                   <option key={s.id} value={s.id}>{s.siteName}</option>
                 ))}
               </select>
+              <div className="flex gap-1 mt-1">
+                <input
+                  value={newSiteName} onChange={(e) => setNewSiteName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") createNewSite(); }}
+                  className="flex-1 h-6 px-2 text-[10px] bg-[#0A0A0A] border border-[#444] placeholder-[#555]"
+                  placeholder="+ New site name"
+                />
+                {newSiteName && (
+                  <button onClick={createNewSite} disabled={creatingSite}
+                    className="text-[10px] text-[#00CC66] hover:text-[#33FF99] px-2 font-bold">
+                    {creatingSite ? "..." : "Add"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
