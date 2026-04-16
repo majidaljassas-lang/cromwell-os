@@ -7,6 +7,8 @@
 
 // Message classification for WhatsApp/Outlook
 export type MessageClassification =
+  | "CUSTOMER_ORDER"
+  | "SUPPLIER_ORDER_ACK"
   | "ORDER"
   | "QUOTE_REQUEST"
   | "APPROVAL"
@@ -114,13 +116,13 @@ export function classifyMessage(
     confidence = 80;
     reasons.push("Contains delivery/dispatch keywords");
   } else if (matchesKeywords(lower, ORDER_ACK_KEYWORDS)) {
-    classification = "ORDER";
-    confidence = 70;
+    classification = "SUPPLIER_ORDER_ACK";
+    confidence = 80;
     reasons.push("Order acknowledgement from supplier");
   } else if (matchesKeywords(lower, ORDER_KEYWORDS)) {
-    classification = "ORDER";
+    classification = "CUSTOMER_ORDER";
     confidence = 65;
-    reasons.push("Contains order/supply language");
+    reasons.push("Customer order / request to supply");
   } else if (lower.length < 20) {
     classification = "GENERAL_CHATTER";
     confidence = 50;

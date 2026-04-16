@@ -428,7 +428,8 @@ export function InboxThreadsPanel() {
                         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{
                           color: ({
                             BILL: "#00CCFF", BILL_DOCUMENT: "#00CCFF",
-                            ORDER: "#00CC66", ORDER_ACK: "#00CC66",
+                            CUSTOMER_ORDER: "#00CC66", ORDER: "#00CC66",
+                            SUPPLIER_ORDER_ACK: "#3399FF",
                             QUOTE_REQUEST: "#FFCC00", QUOTE: "#FFCC00",
                             DELIVERY: "#00CC66", DELIVERY_UPDATE: "#00CC66",
                             DISPUTE: "#FF3333",
