@@ -287,6 +287,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         closeTaskType = "AWAIT_ORDER_ACK";
         msgTaskType = "CONFIRM_DELIVERY_RECEIPT";
         msgTaskReason = "Delivery scheduled — confirm goods arrive on site";
+      } else if (!isSent && /delivered|on site|arrived|signed|received.*goods|goods.*received/i.test(msgText)) {
+        // Delivery confirmed
+        msgEvidenceType = "DELIVERY";
+        msgEventType = "GOODS_DELIVERED";
+        closeTaskType = "CONFIRM_DELIVERY_RECEIPT";
+        msgTaskType = "MATCH_BILL_TO_TICKET";
+        msgTaskReason = "Goods delivered — await supplier bill, match costs";
       } else if (!isSent && /order.*ack|acknowledgement|confirm.*order|your order/i.test(msgText)) {
         // Supplier order ack
         msgEvidenceType = "SUPPLIER_CONFIRMATION";
@@ -298,9 +305,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         // Bill received
         msgEvidenceType = "INSTRUCTION";
         msgEventType = "BILL_RECEIVED";
-        msgTaskType = "MATCH_BILL_TO_TICKET";
+        closeTaskType = "MATCH_BILL_TO_TICKET";
+        msgTaskType = "MARKUP_AND_INVOICE";
         msgTaskPriority = "HIGH";
-        msgTaskReason = "Supplier bill received — match costs and allocate";
+        msgTaskReason = "Bill received and matched — review costs, apply markup, draft invoice to customer";
+      } else if (isSent && /invoice|inv.*attached|please find.*invoice|as per.*invoice/i.test(msgText)) {
+        // You sent the invoice to customer
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "INVOICE_RAISED";
+        closeTaskType = "MARKUP_AND_INVOICE";
+        msgTaskType = "CHASE_PAYMENT";
+        msgTaskReason = "Invoice sent to customer — chase payment if not received";
+      } else if (!isSent && /paid|payment.*received|bacs|bank transfer.*confirm|remittance/i.test(msgText)) {
+        // Payment received
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "PAYMENT_RECEIVED";
+        closeTaskType = "CHASE_PAYMENT";
+        // No next task — job complete. Close the ticket.
       } else if (!isSent && /approved|go ahead|proceed|yes.*please/i.test(msgText)) {
         // Customer approval
         msgEvidenceType = "APPROVAL";
@@ -372,10 +393,36 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
     }
 
-    // Update ticket lastActivityAt
+    // Update ticket lastActivityAt + auto-progress status based on events
+    const statusUpdate: Record<string, unknown> = { lastActivityAt: new Date() };
+
+    // Check what we just logged and progress the ticket
+    const latestEventTypes = allMessages.map(m => {
+      const t = (m.snippet ?? "").toLowerCase();
+      const sent = (m.sender ?? "").toLowerCase().includes("majid");
+      if (!sent && /paid|payment.*received|remittance/i.test(t)) return "PAYMENT";
+      if (sent && /invoice|inv.*attached/i.test(t)) return "INVOICED";
+      if (!sent && /delivered|on site|arrived/i.test(t)) return "DELIVERED";
+      if (!sent && /loaded|delivery.*monday|dispatch|can get it there/i.test(t)) return "DELIVERY_SCHEDULED";
+      if (sent && /can i order|order.*please/i.test(t)) return "ORDER_PLACED";
+      return null;
+    }).filter(Boolean);
+
+    // Progress to the furthest stage
+    if (latestEventTypes.includes("PAYMENT")) {
+      statusUpdate.status = "CLOSED";
+      statusUpdate.closedAt = new Date();
+    } else if (latestEventTypes.includes("INVOICED")) {
+      statusUpdate.status = "INVOICED";
+      statusUpdate.invoicedAt = new Date();
+    } else if (latestEventTypes.includes("DELIVERED")) {
+      statusUpdate.status = "DELIVERED";
+      statusUpdate.deliveredAt = new Date();
+    }
+
     await prisma.ticket.update({
       where: { id: body.ticketId },
-      data: { lastActivityAt: new Date() },
+      data: statusUpdate,
     });
 
     return Response.json({
