@@ -481,7 +481,7 @@ export function InboxThreadsPanel() {
                       <div>{dateStr}</div>
                       <div className="text-[10px]">{timeStr}</div>
                     </td>
-                    <td className="p-2 max-w-[150px] truncate" title={sender}>
+                    <td className="p-2 max-w-[150px] truncate" title={rawSender}>
                       {senderShort}
                     </td>
                     <td className="p-2 max-w-md">
