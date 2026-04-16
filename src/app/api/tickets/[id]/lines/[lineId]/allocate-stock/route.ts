@@ -97,11 +97,12 @@ export async function POST(
     },
   });
 
-  // Update ticket line — set fromStock, cost, supplier from stock item
+  // Update ticket line — set fromStock, cost, supplier, description from stock item
   const existingFromStock = Number((await prisma.ticketLine.findUnique({ where: { id: lineId }, select: { fromStock: true } }))?.fromStock ?? 0);
   await prisma.ticketLine.update({
     where: { id: lineId },
     data: {
+      description: stockItem.description,
       fromStock: existingFromStock + allocateQty,
       toOrder: Math.max(0, lineQty - existingFromStock - allocateQty),
       expectedCostUnit: costPerUnit,
