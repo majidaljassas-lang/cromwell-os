@@ -54,6 +54,7 @@ export function InboxThreadsPanel() {
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+  const [suggestions, setSuggestions] = useState<Array<{ ticketId: string; ticketNo: number; title: string; customer: string; site: string; score: number; reasons: string[] }>>([]);
   const [working, setWorking] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -205,13 +206,26 @@ export function InboxThreadsPanel() {
   async function openThread(t: Thread) {
     setSelectedThread(t);
     setSelectedMsgIds(new Set());
+    setSuggestions([]);
     setDrawerLoading(true);
     try {
       const r = await fetch(`/api/inbox/threads/${t.id}`);
       const j = await safeJson(r);
-      setThreadMessages((j.thread?.messages ?? []).map((m: any) => ({
+      const msgs = (j.thread?.messages ?? []).map((m: any) => ({
         id: m.id, occurredAt: m.occurredAt, sender: m.sender, snippet: m.snippet, hasAttachments: m.hasAttachments,
-      })));
+      }));
+      setThreadMessages(msgs);
+
+      // Auto-suggest tickets based on thread content
+      const fullText = [t.subject ?? "", ...msgs.map((m: any) => m.snippet ?? "")].join(" ");
+      const sender = t.participants[0] ?? "";
+      fetch("/api/inbox/suggest-ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: fullText, sender }),
+      }).then(r => r.ok ? r.json() : { suggestions: [] })
+        .then(d => setSuggestions(d.suggestions ?? []))
+        .catch(() => {});
     } finally { setDrawerLoading(false); }
   }
 
@@ -708,6 +722,33 @@ export function InboxThreadsPanel() {
             </div>
             <button className="text-xs text-[#888]" onClick={() => { setSelectedThread(null); setSelectedMsgIds(new Set()); }}>close ✕</button>
           </div>
+
+          {/* Ticket suggestions */}
+          {suggestions.length > 0 && (
+            <div className="bg-[#001A0A] border border-[#00CC66]/30 rounded p-2 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-[#00CC66] mb-1.5">Suggested tickets</div>
+              <div className="space-y-1">
+                {suggestions.map((s) => (
+                  <div key={s.ticketId} className="flex items-center justify-between gap-2 py-1 border-b border-[#222] last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-bold text-[#FF6600]">T-{s.ticketNo}</span>
+                      <span className="text-xs text-[#ccc] ml-2">{s.title?.slice(0, 40)}</span>
+                      {s.site && <span className="text-[10px] text-[#888] ml-2">{s.site}</span>}
+                      <div className="text-[9px] text-[#666]">{s.reasons.join(" · ")}</div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[9px] tabular-nums text-[#00CC66]">{s.score}%</span>
+                      <Button size="sm" className="h-5 text-[10px] px-2 bg-[#00CC66] hover:bg-[#00AA55] text-black"
+                        onClick={() => doAction(selectedThread!.id, "LINK", { ticketId: s.ticketId })}
+                        disabled={working === selectedThread?.id}>
+                        Link
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Message-level action bar */}
           {selectedMsgIds.size > 0 && (
