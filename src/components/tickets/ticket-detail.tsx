@@ -175,6 +175,9 @@ type TicketLine = {
   status: string;
   createdAt: Date;
   payingCustomer: { id: string; name: string };
+  fromStock?: number | null;
+  toOrder?: number | null;
+  prices?: Array<{ id: string; supplierName: string; costPerUnit: Decimal; costTotal: Decimal; isWinner: boolean; isManual: boolean; leadTimeDays: number | null }>;
   parentLineId?: string | null;
   isBomParent?: boolean;
   components?: BOMComponent[];
@@ -312,6 +315,8 @@ function InlineLineRow({
   const [qtyVal, setQtyVal] = useState("");
   const [costVal, setCostVal] = useState("");
   const [saleVal, setSaleVal] = useState("");
+  const [fromStockVal, setFromStockVal] = useState("");
+  const [notesVal, setNotesVal] = useState("");
   const [marginPctVal, setMarginPctVal] = useState("");
   const [mounted, setMounted] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -388,6 +393,8 @@ function InlineLineRow({
         ? String(Number(line.actualSaleUnit))
         : ""
     );
+    setFromStockVal(line.fromStock ? String(line.fromStock) : "");
+    setNotesVal(line.internalNotes || "");
     setMarginPctVal("");
     setMounted(true);
   }, [
@@ -397,11 +404,15 @@ function InlineLineRow({
     line.expectedCostUnit,
     line.actualSaleUnit,
     line.supplierName,
+    line.fromStock,
+    line.internalNotes,
     supplierLookup,
   ]);
   const [saving, setSaving] = useState(false);
 
   const qty = Number(qtyVal || 1);
+  const fromStock = Number(fromStockVal || 0);
+  const toOrder = Math.max(0, qty - fromStock);
   const costUnit = evalMathExpr(costVal || "0");
   const saleUnit = evalMathExpr(saleVal || "0");
   const costTotal = (isNaN(costUnit) ? 0 : costUnit) * qty;
@@ -487,6 +498,25 @@ function InlineLineRow({
       saveField("actualSaleUnit", rounded);
     } else {
       setMarginPctVal("");
+    }
+  }
+
+  function onBlurFromStock() {
+    const v = Number(fromStockVal || 0);
+    if (v !== (line.fromStock || 0)) {
+      const to = Math.max(0, qty - v);
+      saveMultipleFields({
+        fromStock: v || null,
+        toOrder: to || null,
+        ...(v >= qty ? { supplierName: "STOCK", status: "ORDERED" } : {}),
+        ...(v > 0 && v < qty ? { supplierName: supplierVal === "STOCK" ? null : supplierVal || null } : {}),
+      });
+    }
+  }
+
+  function onBlurNotes() {
+    if (notesVal !== (line.internalNotes || "")) {
+      saveField("internalNotes", notesVal || null);
     }
   }
 
@@ -638,6 +668,8 @@ function InlineLineRow({
           —
         </TableCell>
         <TableCell className="text-right text-[10px] p-1">—</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">{line.fromStock || "—"}</TableCell>
+        <TableCell className="text-right tabular-nums text-xs p-1">{Number(line.qty || 0) - (line.fromStock || 0) || "—"}</TableCell>
         <TableCell className="p-1">
           <Badge className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 text-[#888888] bg-[#333333]">
             {line.status.replace(/_/g, " ")}
@@ -652,7 +684,7 @@ function InlineLineRow({
     <>
     <TableRow
       key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
-      className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${selected ? "bg-[#FF6600]/5" : ""}`}
+      className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${selected ? "bg-[#FF6600]/5" : fromStock >= qty && fromStock > 0 ? "bg-[#00CC66]/8" : fromStock > 0 ? "bg-[#FF9900]/8" : ""}`}
     >
       <TableCell className="p-1 w-8">
         <input
@@ -745,6 +777,26 @@ function InlineLineRow({
           className={`${NUM_CLS} w-16`}
           placeholder={`${marginPct.toFixed(1)}%`}
         />
+      </TableCell>
+      <TableCell className="p-0">
+        <input
+          type="number"
+          value={fromStockVal}
+          onChange={(e) => setFromStockVal(e.target.value)}
+          onBlur={onBlurFromStock}
+          onKeyDown={kd}
+          className={`${NUM_CLS} w-14 ${fromStock >= qty && fromStock > 0 ? "text-[#00CC66]" : fromStock > 0 ? "text-[#FF9900]" : ""}`}
+          placeholder="0"
+        />
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-xs p-1">
+        {fromStock > 0 ? (
+          <span className={toOrder === 0 ? "text-[#00CC66] font-medium" : "text-[#FF9900]"}>
+            {toOrder}
+          </span>
+        ) : (
+          <span className="text-[#555]">{qty}</span>
+        )}
       </TableCell>
       <TableCell>
         <Badge
@@ -1398,6 +1450,95 @@ export function TicketDetail({
     }
   }
 
+  function handleGenerateOrderList() {
+    const orderLines = ticket.lines.filter((l) => {
+      if (l.status === "ORDERED" && l.supplierName === "STOCK") return false;
+      const fs = l.fromStock ?? 0;
+      const q = Number(l.qty || 0);
+      const toOrd = fs > 0 ? Math.max(0, q - fs) : q;
+      return toOrd > 0;
+    });
+
+    if (orderLines.length === 0) {
+      alert("All lines are covered from stock — nothing to order.");
+      return;
+    }
+
+    const customerName = ticket.payingCustomer?.name || "—";
+    const siteName = ticket.site?.siteName || "—";
+    const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+    function esc(s: string) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Order List — T-${ticket.ticketNo}</title><style>
+      *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,'Helvetica Neue',Arial,sans-serif}
+      body{padding:25px 30px;font-size:11px;color:#000}
+      h1{font-size:18px;font-weight:800}
+      .sub{font-size:12px;color:#555;margin-top:2px}
+      hr{border:none;border-top:2px solid #000;margin:10px 0}
+      .meta{display:flex;gap:25px;margin:8px 0;font-size:11px;flex-wrap:wrap}
+      .meta b{font-weight:700}
+      table{width:100%;border-collapse:collapse;margin-top:14px}
+      th{text-align:left;padding:6px 8px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #000;font-weight:700}
+      td{padding:6px 8px;border-bottom:1px solid #ccc;font-size:11px;vertical-align:top}
+      .r{text-align:right}
+      .stock{color:#888;font-size:9px;font-style:italic}
+      .total{font-weight:700;border-top:2px solid #000;font-size:12px}
+      @page{margin:14mm}
+    </style></head><body>
+      <h1>TO ORDER — T-${ticket.ticketNo}</h1>
+      <div class="sub">${esc(ticket.title)}</div>
+      <hr/>
+      <div class="meta">
+        <div><b>Customer:</b> ${esc(customerName)}</div>
+        <div><b>Site:</b> ${esc(siteName)}</div>
+        <div><b>Date:</b> ${today}</div>
+        <div><b>Lines:</b> ${orderLines.length}</div>
+      </div>
+      <table><thead><tr>
+        <th style="width:30px">#</th>
+        <th>Description</th>
+        <th class="r" style="width:60px">Qty</th>
+        <th style="width:45px">Unit</th>
+        <th style="width:120px">Supplier</th>
+        <th class="r" style="width:70px">Unit £</th>
+        <th class="r" style="width:80px">Total £</th>
+        <th>Notes</th>
+      </tr></thead><tbody>`;
+
+    let grandTotal = 0;
+    orderLines.forEach((l, i) => {
+      const fs = l.fromStock ?? 0;
+      const q = Number(l.qty || 0);
+      const toOrd = fs > 0 ? Math.max(0, q - fs) : q;
+      const cost = Number(l.expectedCostUnit || 0);
+      const lineTotal = toOrd * cost;
+      grandTotal += lineTotal;
+      const stockNote = fs > 0 ? `<div class="stock">${fs} from stock</div>` : "";
+      html += `<tr>
+        <td>${i + 1}</td>
+        <td><b>${esc(l.description)}</b>${stockNote}</td>
+        <td class="r"><b>${toOrd}</b></td>
+        <td>${l.unit}</td>
+        <td>${esc(l.supplierName && l.supplierName !== "MIXED" ? l.supplierName : "—")}</td>
+        <td class="r">${cost > 0 ? "£" + cost.toFixed(2) : "—"}</td>
+        <td class="r">${lineTotal > 0 ? "£" + lineTotal.toFixed(2) : "—"}</td>
+        <td style="font-size:9px;color:#666">${esc(l.internalNotes || "")}</td>
+      </tr>`;
+    });
+
+    html += `<tr class="total">
+      <td colspan="6" class="r">TOTAL</td>
+      <td class="r">£${grandTotal.toFixed(2)}</td>
+      <td></td>
+    </tr></tbody></table></body></html>`;
+
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500); }
+  }
+
   // ── Convert to Invoice ──
   const [creatingInvoice, setCreatingInvoice] = useState(false);
 
@@ -2025,6 +2166,17 @@ export function TicketDetail({
                     Print Procurement List
                   </Button>
                 )}
+              {ticket.lines.length > 0 && (
+                <Button
+                  onClick={handleGenerateOrderList}
+                  variant="outline"
+                  className="bg-[#FF9900]/10 text-[#FF9900] border-[#FF9900]/30 hover:bg-[#FF9900]/20"
+                  size="sm"
+                >
+                  <Package className="size-4 mr-1" />
+                  Generate Order List
+                </Button>
+              )}
 
               {/* Generate Quote button — always available when there are lines */}
               {ticket.lines.length > 0 &&
@@ -2320,6 +2472,8 @@ export function TicketDetail({
                   <TableHead className="text-right">Sale</TableHead>
                   <TableHead className="text-right">Margin</TableHead>
                   <TableHead className="text-right">Margin %</TableHead>
+                  <TableHead className="text-right">Stock</TableHead>
+                  <TableHead className="text-right">Order</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
