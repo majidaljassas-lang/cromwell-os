@@ -33,6 +33,11 @@ export async function GET(request: Request) {
       take: limit,
       include: {
         _count: { select: { messages: true } },
+        messages: {
+          orderBy: { occurredAt: "desc" as const },
+          take: 1,
+          select: { sender: true },
+        },
         linkedTicket: {
           select: {
             id: true,
@@ -69,6 +74,7 @@ export async function GET(request: Request) {
       firstAt: t.firstAt,
       messageCount: t._count.messages,
       lastSnippet: t.lastSnippet,
+      lastSender: t.messages[0]?.sender ?? t.participants[0] ?? null,
       status: t.status,
       linkConfidence: t.linkConfidence,
       linkSource: t.linkSource,

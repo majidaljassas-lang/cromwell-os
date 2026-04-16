@@ -461,8 +461,12 @@ export function InboxThreadsPanel() {
                 const date = new Date(t.latestAt);
                 const dateStr = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
                 const timeStr = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-                const sender = t.participants[0] ?? "—";
-                const senderShort = sender.includes("@") ? sender.split("@")[0] : sender;
+                const rawSender = (t as any).lastSender ?? t.participants[0] ?? "—";
+                // Clean up: remove @c.us/@lid suffixes, show name not phone
+                const senderShort = rawSender.includes("@c.us") ? rawSender.split("@")[0]
+                  : rawSender.includes("@lid") ? rawSender.split("@")[0]
+                  : rawSender.includes("@") ? rawSender.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
+                  : rawSender;
 
                 return (
                   <tr key={t.id}
