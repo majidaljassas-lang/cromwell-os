@@ -108,14 +108,16 @@ export function TicketsTable({
   customers,
   sites,
   commercialLinks = [],
+  initialStatusFilter,
 }: {
   tickets: TicketRow[];
   customers: SelectOption[];
   sites: SelectOption[];
   commercialLinks?: CommercialLink[];
+  initialStatusFilter?: string;
 }) {
   const router = useRouter();
-  const [statusFilter, setStatusFilter] = useState<string>("ACTIVE");
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter ?? "ACTIVE");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);

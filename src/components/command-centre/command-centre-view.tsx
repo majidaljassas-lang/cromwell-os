@@ -132,7 +132,7 @@ export function CommandCentreView() {
             const pct = pipelineTotal > 0 ? (count / pipelineTotal) * 100 : 0;
             const barHeight = count > 0 ? Math.max(24, Math.min(80, pct * 1.5)) : 8;
             return (
-              <div key={st.key} className="flex-1 flex flex-col items-center gap-1">
+              <Link key={st.key} href={`/tickets?status=${st.key}`} className="flex-1 flex flex-col items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer">
                 {/* Bar */}
                 <div className="w-full rounded-t relative" style={{
                   height: barHeight,
@@ -150,11 +150,7 @@ export function CommandCentreView() {
                   <div className="text-sm">{st.icon}</div>
                   <div className="text-[9px] uppercase tracking-wider text-[#888]">{st.label}</div>
                 </div>
-                {/* Arrow */}
-                {i < STATUS_FLOW.length - 1 && (
-                  <div className="absolute" style={{ display: "none" }}>→</div>
-                )}
-              </div>
+              </Link>
             );
           })}
         </div>

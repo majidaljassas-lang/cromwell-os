@@ -3,7 +3,8 @@ import { TicketsTable } from "@/components/tickets/tickets-table";
 
 export const dynamic = 'force-dynamic';
 
-export default async function TicketsPage() {
+export default async function TicketsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const { status: filterStatus } = await searchParams;
   // Clean cutover: Cromwell OS is the sole system from 2026-04-01.
   const CLEAN_CUTOVER = new Date("2026-04-01");
   const tickets = await prisma.ticket.findMany({
@@ -37,7 +38,7 @@ export default async function TicketsPage() {
 
   return (
     <div className="p-4 space-y-4">
-      <TicketsTable tickets={tickets} customers={customers} sites={sites} commercialLinks={s(commercialLinks)} />
+      <TicketsTable tickets={tickets} customers={customers} sites={sites} commercialLinks={s(commercialLinks)} initialStatusFilter={filterStatus} />
     </div>
   );
 }
