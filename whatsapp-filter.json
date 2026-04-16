@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "2 Aybrook Street Residents' Group",
+    "label": "2 Aybrook Street Residents' Group",
+    "blockedAt": "2026-04-16T15:42:46.682Z"
+  }
+]
