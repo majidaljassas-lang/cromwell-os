@@ -8,6 +8,24 @@ import { attachEventToThread } from "@/lib/inbox/thread-builder";
 import { resolveLink } from "@/lib/ingestion/link-resolver";
 import { CUTOVER_DATE } from "@/lib/sync-constants";
 import { checkSchedulerSecret } from "@/lib/scheduler/secret";
+import fs from "fs";
+import path from "path";
+
+type EmailFilterEntry = { type: string; matchType: string; value: string };
+function loadEmailBlacklist(): EmailFilterEntry[] {
+  try { return JSON.parse(fs.readFileSync(path.join(process.cwd(), "email-filter.json"), "utf-8")).filter((f: EmailFilterEntry) => f.type === "BLACKLIST"); }
+  catch { return []; }
+}
+function isEmailBlocked(senderEmail: string): boolean {
+  const blacklist = loadEmailBlacklist();
+  const email = senderEmail.toLowerCase();
+  const domain = email.split("@")[1] ?? "";
+  return blacklist.some((f) => {
+    if (f.matchType === "EMAIL") return email === f.value.toLowerCase();
+    if (f.matchType === "EMAIL_DOMAIN") return domain === f.value.toLowerCase();
+    return false;
+  });
+}
 
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
 
@@ -88,8 +106,8 @@ export async function POST(request: Request) {
             : CUTOVER_DATE;
         const since = sinceDate.toISOString();
 
-        // Page through inbox + sent items (follow @odata.nextLink — Graph caps each page at 1000)
-        async function pullAll(folder: "inbox") {
+        // Page through a mailbox folder (follow @odata.nextLink — Graph caps each page at 1000)
+        async function pullAll(folder: "inbox" | "sentitems") {
           const out: Array<Record<string, unknown>> = [];
           let page = await fetchEmails(tokens.access_token, { folder, since, top: 200 });
           out.push(...(page.value || []));
@@ -101,10 +119,14 @@ export async function POST(request: Request) {
           }
           return out;
         }
-        // INBOX only — the Outlook "Accounts Payable" rule routes incoming mail; sent items
-        // are out of scope for the bills intake engine.
+        // Pull INBOX + SENT — both directions needed to build complete threads.
+        // Sent emails are RFQs, POs, quotes, invoices — half the thread.
         const inboxList = await pullAll("inbox");
-        const emails = inboxList.map((e) => ({ ...e, _folder: "INBOX" as const }));
+        const sentList = await pullAll("sentitems");
+        const emails = [
+          ...inboxList.map((e) => ({ ...e, _folder: "INBOX" as const })),
+          ...sentList.map((e) => ({ ...e, _folder: "SENT" as const })),
+        ];
 
         // Deduplicate against existing ingestion events
         const existingIds = new Set(
@@ -129,6 +151,9 @@ export async function POST(request: Request) {
           const senderEmail = isSent
             ? (email.toRecipients?.[0]?.emailAddress?.address ?? "")
             : (email.from?.emailAddress?.address ?? "");
+
+          // Check email block list — skip silently if blocked
+          if (!isSent && isEmailBlocked(senderEmail)) continue;
 
           // Create ingestion event FIRST so we have an id for attachment filenames
           const event = await prisma.ingestionEvent.create({

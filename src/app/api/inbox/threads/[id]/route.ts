@@ -358,7 +358,10 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // 6. Delete the InboxThreadMessage rows (cascade will also run, but explicit is safer)
     const threadMsgs = await tx.inboxThreadMessage.deleteMany({ where: { threadId: id } });
 
-    // 7. Delete IngestionEvent rows (only the ones not protected)
+    // 7. Delete InboundEvent rows
+    const inbound = await tx.inboundEvent.deleteMany({ where: { ingestionEventId: { in: deletableEventIds } } });
+
+    // 8. Delete IngestionEvent rows (only the ones not protected)
     const events = await tx.ingestionEvent.deleteMany({ where: { id: { in: deletableEventIds } } });
 
     // 8. Finally drop the thread itself

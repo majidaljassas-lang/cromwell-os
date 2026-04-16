@@ -165,14 +165,47 @@ export function InboxThreadsPanel() {
     } finally { setWorking(null); }
   }
 
-  async function doDelete(id: string) {
+  async function doDelete(id: string, block?: boolean) {
     setWorking(id);
     setToast(null);
     try {
+      // If blocking, figure out what to block from the thread
+      if (block) {
+        const t = threads.find((t) => t.id === id);
+        if (t) {
+          const sender = t.participants[0] ?? "";
+          if (t.channel === "EMAIL" && sender.includes("@")) {
+            // Block by email address
+            await fetch("/api/inbox/block", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ matchType: "EMAIL", value: sender, label: t.subject }),
+            });
+          } else if (t.channel === "WHATSAPP" || t.channel === "WHATSAPP_GROUP") {
+            // Block by chat name or phone
+            const chatName = t.subject || "";
+            const chatId = sender;
+            if (chatName) {
+              await fetch("/api/inbox/block", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ matchType: "CHAT_NAME", value: chatName, label: chatName }),
+              });
+            } else if (chatId) {
+              await fetch("/api/inbox/block", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ matchType: "PHONE", value: chatId, label: chatId }),
+              });
+            }
+          }
+        }
+      }
+
       const r = await fetch(`/api/inbox/threads/${id}?force=1`, { method: "DELETE" });
       const j = await safeJson(r);
       if (r.ok) {
-        setToast("✓ Deleted");
+        setToast(block ? "✓ Deleted & blocked" : "✓ Deleted");
         await refresh();
         if (selectedThread?.id === id) setSelectedThread(null);
       } else setToast(`✗ ${j.error ?? "delete failed"}`);
@@ -193,6 +226,19 @@ export function InboxThreadsPanel() {
       } catch {}
     }
     setToast(`✓ Deleted ${deleted} thread${deleted !== 1 ? "s" : ""}`);
+    setWorking(null);
+    await refresh();
+  }
+
+  async function bulkDeleteAndBlock() {
+    if (selected.size === 0) return;
+    setWorking("bulk");
+    setToast(null);
+    let deleted = 0;
+    for (const id of selected) {
+      try { await doDelete(id, true); deleted++; } catch {}
+    }
+    setToast(`✓ Deleted & blocked ${deleted} thread${deleted !== 1 ? "s" : ""}`);
     setWorking(null);
     await refresh();
   }
@@ -293,6 +339,10 @@ export function InboxThreadsPanel() {
             <Button size="sm" className="h-6 text-[10px] bg-red-600 hover:bg-red-700 text-white px-3"
               onClick={bulkDelete} disabled={working === "bulk"}>
               {working === "bulk" ? "..." : "Delete selected"}
+            </Button>
+            <Button size="sm" className="h-6 text-[10px] bg-red-900 hover:bg-red-800 text-red-300 px-3"
+              onClick={bulkDeleteAndBlock} disabled={working === "bulk"}>
+              Delete & Block
             </Button>
             <Button size="sm" variant="outline" className="h-6 text-[10px] px-3"
               onClick={() => {
@@ -411,6 +461,11 @@ export function InboxThreadsPanel() {
                             <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
                               onClick={() => doDelete(t.id)} disabled={working === t.id}>
                               Delete
+                            </Button>
+                            <Button size="sm" className="h-5 text-[10px] px-1.5 bg-red-900 hover:bg-red-800 text-red-300"
+                              onClick={() => doDelete(t.id, true)} disabled={working === t.id}
+                              title="Delete and block future messages from this sender">
+                              🚫
                             </Button>
                           </>
                         )}
@@ -548,6 +603,9 @@ export function InboxThreadsPanel() {
               </Button>
               <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={() => doDelete(selectedThread.id)} disabled={working === selectedThread.id}>
                 Delete
+              </Button>
+              <Button size="sm" className="bg-red-900 hover:bg-red-800 text-red-300" onClick={() => doDelete(selectedThread.id, true)} disabled={working === selectedThread.id}>
+                Delete & Block
               </Button>
             </div>
           )}
