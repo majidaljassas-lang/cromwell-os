@@ -625,7 +625,18 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // 7. Delete InboundEvent rows
     const inbound = await tx.inboundEvent.deleteMany({ where: { ingestionEventId: { in: deletableEventIds } } });
 
-    // 8. Delete IngestionEvent rows (only the ones not protected)
+    // 8. Record external message IDs before deleting so sync won't re-ingest
+    const eventsToDelete = await tx.ingestionEvent.findMany({
+      where: { id: { in: deletableEventIds } },
+      select: { externalMessageId: true },
+    });
+    for (const e of eventsToDelete) {
+      if (e.externalMessageId) {
+        await tx.deletedMessageId.create({ data: { externalMessageId: e.externalMessageId } }).catch(() => {});
+      }
+    }
+
+    // 9. Delete IngestionEvent rows completely
     const events = await tx.ingestionEvent.deleteMany({ where: { id: { in: deletableEventIds } } });
 
     // 8. Finally drop the thread itself

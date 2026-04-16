@@ -174,15 +174,38 @@ export async function POST(
         ticketId: id,
         eventType: "INVOICE_RAISED",
         timestamp: new Date(),
-        notes: `Draft invoice ${invoice?.invoiceNo || invoiceNo} generated`,
+        notes: `Invoice ${invoice?.invoiceNo || invoiceNo} generated — £${totalSell.toFixed(2)} to ${ticket.payingCustomer?.name ?? "customer"}`,
       },
     });
 
-    // After invoice creation, if recovery pipeline, transition to REALISED
-    if (ticket.revenueState === "RECOVERY_PIPELINE") {
-      await prisma.ticket.update({
-        where: { id },
-        data: { revenueState: "REALISED" },
+    // Auto-progress ticket → INVOICED
+    await prisma.ticket.update({
+      where: { id },
+      data: {
+        status: "INVOICED",
+        invoicedAt: new Date(),
+        lastActivityAt: new Date(),
+        ...(ticket.revenueState === "RECOVERY_PIPELINE" ? { revenueState: "REALISED" } : {}),
+      },
+    });
+
+    // Close MARKUP_AND_INVOICE task, open CHASE_PAYMENT
+    await prisma.task.updateMany({
+      where: { ticketId: id, taskType: "MARKUP_AND_INVOICE", status: "OPEN" },
+      data: { status: "DONE" },
+    });
+    const existingChase = await prisma.task.findFirst({
+      where: { ticketId: id, taskType: "CHASE_PAYMENT", status: "OPEN" },
+    });
+    if (!existingChase) {
+      await prisma.task.create({
+        data: {
+          ticketId: id,
+          taskType: "CHASE_PAYMENT",
+          priority: "MEDIUM",
+          status: "OPEN",
+          generatedReason: `Invoice ${invoice?.invoiceNo || invoiceNo} sent — chase payment if not received`,
+        },
       });
     }
 

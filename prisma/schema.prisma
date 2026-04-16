@@ -602,6 +602,14 @@ model TicketLine {
   @@index([canonicalProductId])
 }
 
+model DeletedMessageId {
+  id                 String   @id @default(uuid())
+  externalMessageId  String   @unique
+  deletedAt          DateTime @default(now())
+
+  @@index([externalMessageId])
+}
+
 model TicketLinePrice {
   id           String     @id @default(uuid())
   ticketLineId String

@@ -136,7 +136,18 @@ export async function POST(request: Request) {
           })).map((e) => e.externalMessageId)
         );
 
-        const newEmails = emails.filter((e) => !existingIds.has(e.internetMessageId || e.id));
+        // Also check deleted message IDs — these were explicitly deleted by the user
+        const deletedIds = new Set(
+          (await prisma.deletedMessageId.findMany({
+            where: { externalMessageId: { in: emails.map((e) => e.internetMessageId || e.id) } },
+            select: { externalMessageId: true },
+          })).map((d) => d.externalMessageId)
+        );
+
+        const newEmails = emails.filter((e) => {
+          const msgId = e.internetMessageId || e.id;
+          return !existingIds.has(msgId) && !deletedIds.has(msgId);
+        });
 
         // Process each new email
         let processed = 0;

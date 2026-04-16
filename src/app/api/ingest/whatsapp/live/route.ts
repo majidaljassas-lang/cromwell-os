@@ -130,12 +130,18 @@ export async function POST(request: Request) {
     // Capture everything — classify as WORK/PERSONAL in the event for inbox filtering
     // (Previously filtered personal messages — now relaxed so user can triage from inbox)
 
-    // Deduplicate
+    // Deduplicate — check both existing events AND deleted message IDs
     const existing = await prisma.ingestionEvent.findFirst({
       where: { externalMessageId: msg.message_id },
     });
     if (existing) {
       return Response.json({ skipped: true, reason: "duplicate" });
+    }
+    const wasDeleted = await prisma.deletedMessageId.findFirst({
+      where: { externalMessageId: msg.message_id },
+    });
+    if (wasDeleted) {
+      return Response.json({ skipped: true, reason: "previously deleted" });
     }
 
     // Get or create WhatsApp source

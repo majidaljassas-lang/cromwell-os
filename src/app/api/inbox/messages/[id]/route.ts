@@ -41,6 +41,12 @@ export async function DELETE(
     // Delete the thread message
     await tx.inboxThreadMessage.delete({ where: { id } });
 
+    // Record external message ID before deleting so it doesn't come back
+    const evt = await tx.ingestionEvent.findUnique({ where: { id: msg.ingestionEventId }, select: { externalMessageId: true } });
+    if (evt?.externalMessageId) {
+      await tx.deletedMessageId.create({ data: { externalMessageId: evt.externalMessageId } }).catch(() => {});
+    }
+
     // Delete the ingestion event
     await tx.ingestionEvent.delete({ where: { id: msg.ingestionEventId } }).catch(() => {});
 

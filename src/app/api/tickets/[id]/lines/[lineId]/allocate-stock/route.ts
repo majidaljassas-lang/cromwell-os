@@ -122,11 +122,54 @@ export async function POST(
     },
   });
 
-  // Update ticket lastActivityAt
-  await prisma.ticket.update({
-    where: { id },
-    data: { lastActivityAt: new Date() },
+  // Check if ALL lines on this ticket are now fully covered from stock
+  const allLines = await prisma.ticketLine.findMany({
+    where: { ticketId: id },
+    select: { qty: true, fromStock: true },
   });
+  const allCovered = allLines.every((l) => (l.fromStock ?? 0) >= Number(l.qty));
+
+  if (allCovered) {
+    // All from stock → auto-progress to DELIVERED + create MARKUP_AND_INVOICE task
+    await prisma.ticket.update({
+      where: { id },
+      data: { status: "DELIVERED", deliveredAt: new Date(), lastActivityAt: new Date() },
+    });
+
+    await prisma.event.create({
+      data: {
+        ticketId: id,
+        eventType: "GOODS_DELIVERED",
+        timestamp: new Date(),
+        notes: "All items fully covered from stock — ready to invoice",
+      },
+    });
+
+    // Close procurement tasks
+    await prisma.task.updateMany({
+      where: { ticketId: id, status: "OPEN", taskType: { in: ["PLACE_ORDER_WITH_SUPPLIER", "AWAIT_ORDER_ACK", "CONFIRM_DELIVERY_RECEIPT"] } },
+      data: { status: "DONE" },
+    });
+
+    // Open invoice task
+    const existing = await prisma.task.findFirst({ where: { ticketId: id, taskType: "MARKUP_AND_INVOICE", status: "OPEN" } });
+    if (!existing) {
+      await prisma.task.create({
+        data: {
+          ticketId: id,
+          taskType: "MARKUP_AND_INVOICE",
+          priority: "HIGH",
+          status: "OPEN",
+          generatedReason: "All stock allocated and delivered — apply markup and invoice customer",
+        },
+      });
+    }
+  } else {
+    await prisma.ticket.update({
+      where: { id },
+      data: { lastActivityAt: new Date() },
+    });
+  }
 
   return Response.json({
     ok: true,
@@ -134,5 +177,6 @@ export async function POST(
     costPerUnit,
     totalCost,
     stockRemaining: available - allocateQty,
+    allCovered,
   });
 }
