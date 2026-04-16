@@ -21,6 +21,8 @@ export async function GET(request: Request) {
       { subject: { contains: q, mode: "insensitive" } },
       { lastSnippet: { contains: q, mode: "insensitive" } },
       { participants: { has: q.toLowerCase() } },
+      { messages: { some: { sender: { contains: q, mode: "insensitive" } } } },
+      { messages: { some: { snippet: { contains: q, mode: "insensitive" } } } },
     ];
   }
 
