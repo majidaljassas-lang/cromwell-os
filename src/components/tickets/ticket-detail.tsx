@@ -2184,6 +2184,28 @@ export function TicketDetail({
                 </Button>
               )}
 
+              {/* Upload materials file */}
+              <label className="cursor-pointer">
+                <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  const res = await fetch(`/api/tickets/${ticket.id}/upload-materials`, { method: "POST", body: fd });
+                  const data = await res.json();
+                  if (res.ok) {
+                    alert(`${data.linesCreated} lines imported from ${file.name}`);
+                    router.refresh();
+                  } else {
+                    alert(`Upload failed: ${data.error}`);
+                  }
+                  e.target.value = "";
+                }} />
+                <span className="inline-flex items-center gap-1 h-8 px-3 text-xs bg-[#222] border border-[#333] hover:bg-[#2A2A2A] text-[#E0E0E0] cursor-pointer rounded-md">
+                  📄 Upload Excel/CSV
+                </span>
+              </label>
+
               {/* Generate Quote button — always available when there are lines */}
               {ticket.lines.length > 0 &&
                 ticket.status !== "INVOICED" &&
