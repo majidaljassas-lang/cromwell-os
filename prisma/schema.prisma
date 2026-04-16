@@ -542,6 +542,8 @@ model TicketLine {
   salesStatus           String?
   mergedIntoLineId      String?
   sourceItemIds         String[]                 @default([])
+  fromStock             Int?
+  toOrder               Int?
   isLocked              Boolean                  @default(false)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
