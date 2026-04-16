@@ -53,6 +53,7 @@ export function InboxThreadsPanel() {
   const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -198,6 +199,7 @@ export function InboxThreadsPanel() {
 
   async function openThread(t: Thread) {
     setSelectedThread(t);
+    setSelectedMsgIds(new Set());
     setDrawerLoading(true);
     try {
       const r = await fetch(`/api/inbox/threads/${t.id}`);
@@ -676,7 +678,7 @@ export function InboxThreadsPanel() {
         </div>
       )}
 
-      {/* Thread detail drawer */}
+      {/* Thread detail drawer with message-level actions */}
       {selectedThread && (
         <div className="border border-[#FF6600] bg-[#0F0F0F] p-3">
           <div className="flex items-start justify-between mb-2">
@@ -687,34 +689,115 @@ export function InboxThreadsPanel() {
               <div className="text-sm font-medium">{selectedThread.subject ?? "(no subject)"}</div>
               <div className="text-[10px] text-[#888]">{selectedThread.participants.join(", ")}</div>
             </div>
-            <button className="text-xs text-[#888]" onClick={() => setSelectedThread(null)}>close ✕</button>
+            <button className="text-xs text-[#888]" onClick={() => { setSelectedThread(null); setSelectedMsgIds(new Set()); }}>close ✕</button>
           </div>
+
+          {/* Message-level action bar */}
+          {selectedMsgIds.size > 0 && (
+            <div className="flex items-center gap-2 bg-[#1A1A1A] border border-[#FF6600]/30 px-3 py-2 mb-2 rounded">
+              <span className="text-[10px] font-bold text-[#FF6600]">{selectedMsgIds.size} message{selectedMsgIds.size !== 1 ? "s" : ""} selected</span>
+              <Button size="sm" className="h-5 text-[10px] px-2" onClick={() => {
+                // Build description from selected messages
+                const selectedMsgs = threadMessages.filter(m => selectedMsgIds.has(m.id));
+                const desc = selectedMsgs.map(m => `${m.sender ?? "?"} (${new Date(m.occurredAt).toLocaleString("en-GB")}):\n${m.snippet ?? ""}`).join("\n\n---\n\n");
+                openNewTicketForm(selectedThread);
+                // Override the title with a hint
+                setTimeout(() => {
+                  const titleEl = document.querySelector<HTMLInputElement>('input[placeholder="Job title"]');
+                  if (titleEl && !titleEl.value) titleEl.focus();
+                }, 100);
+              }}>
+                New Ticket from selected
+              </Button>
+              <Button size="sm" variant="outline" className="h-5 text-[10px] px-2" onClick={() => {
+                const ticketId = prompt("Ticket ID to link selected messages to:");
+                if (ticketId) {
+                  // TODO: API to move specific messages to a ticket
+                  doAction(selectedThread.id, "LINK", { ticketId: ticketId.trim() });
+                }
+              }}>
+                Link selected
+              </Button>
+              <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white" onClick={async () => {
+                // Delete selected messages from thread
+                for (const msgId of selectedMsgIds) {
+                  await fetch(`/api/inbox/messages/${msgId}`, { method: "DELETE" }).catch(() => {});
+                }
+                // Refresh thread
+                setSelectedMsgIds(new Set());
+                const r = await fetch(`/api/inbox/threads/${selectedThread.id}`);
+                const j = await safeJson(r);
+                setThreadMessages((j.thread?.messages ?? []).map((m: any) => ({
+                  id: m.id, occurredAt: m.occurredAt, sender: m.sender, snippet: m.snippet, hasAttachments: m.hasAttachments,
+                })));
+                refresh();
+              }}>
+                Delete selected
+              </Button>
+              <button className="text-[10px] text-[#888] ml-2" onClick={() => setSelectedMsgIds(new Set())}>Clear</button>
+            </div>
+          )}
+
           {drawerLoading ? (
             <div className="text-xs text-[#888]">Loading...</div>
           ) : (
-            <div className="space-y-2 max-h-96 overflow-auto">
-              {threadMessages.map((m) => (
-                <div key={m.id} className="border border-[#222] bg-[#0A0A0A] p-2">
-                  <div className="flex items-center justify-between text-[10px] text-[#888]">
-                    <span>{m.sender ?? "(unknown)"}</span>
-                    <span>{new Date(m.occurredAt).toLocaleString("en-GB")}</span>
+            <div className="space-y-1 max-h-[500px] overflow-auto">
+              {/* Select all */}
+              <div className="flex items-center gap-2 px-1 py-1 border-b border-[#333]">
+                <input type="checkbox"
+                  checked={threadMessages.length > 0 && selectedMsgIds.size === threadMessages.length}
+                  onChange={() => {
+                    if (selectedMsgIds.size === threadMessages.length) setSelectedMsgIds(new Set());
+                    else setSelectedMsgIds(new Set(threadMessages.map(m => m.id)));
+                  }}
+                  className="accent-[#FF6600]" />
+                <span className="text-[10px] text-[#888]">Select all</span>
+              </div>
+              {threadMessages.map((m) => {
+                const isMsgSelected = selectedMsgIds.has(m.id);
+                const isSent = (m.sender ?? "").toLowerCase().includes("majid") || (m.snippet ?? "").startsWith("[SENT]");
+                return (
+                  <div key={m.id}
+                    className={`flex gap-2 border border-[#222] p-2 cursor-pointer hover:border-[#444] ${isMsgSelected ? "bg-[#FF6600]/10 border-[#FF6600]/30" : "bg-[#0A0A0A]"} ${isSent ? "ml-8" : "mr-8"}`}
+                    onClick={() => {
+                      setSelectedMsgIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                        return next;
+                      });
+                    }}>
+                    <input type="checkbox" checked={isMsgSelected} readOnly className="accent-[#FF6600] mt-1 shrink-0" onClick={e => e.stopPropagation()} onChange={() => {
+                      setSelectedMsgIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                        return next;
+                      });
+                    }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between text-[10px] text-[#888]">
+                        <span className={isSent ? "text-[#FF9900]" : "text-[#3399FF]"}>{isSent ? "You" : (m.sender ?? "(unknown)")}</span>
+                        <span>{new Date(m.occurredAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                      {m.hasAttachments && <Badge variant="outline" className="text-[9px] mt-0.5">📎</Badge>}
+                      {m.snippet && <div className="text-xs mt-1 whitespace-pre-wrap">{m.snippet}</div>}
+                    </div>
                   </div>
-                  {m.hasAttachments && <Badge variant="outline" className="text-[9px] mt-1">📎 attachment</Badge>}
-                  {m.snippet && <div className="text-xs mt-1 whitespace-pre-wrap">{m.snippet}</div>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-          {selectedThread.status === "NEW" && (
+
+          {/* Thread-level actions */}
+          {selectedThread.status === "NEW" && selectedMsgIds.size === 0 && (
             <div className="mt-3 flex gap-2">
               <Button size="sm" variant="default" onClick={() => openNewTicketForm(selectedThread)} disabled={working === selectedThread.id}>
-                New Ticket
+                New Ticket (all)
               </Button>
               <Button size="sm" variant="outline" onClick={() => {
                 const ticketId = prompt("Ticket ID to link to:");
                 if (ticketId) doAction(selectedThread.id, "LINK", { ticketId: ticketId.trim() });
               }} disabled={working === selectedThread.id}>
-                Link to Ticket
+                Link all
               </Button>
               <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={() => doDelete(selectedThread.id)} disabled={working === selectedThread.id}>
                 Delete
