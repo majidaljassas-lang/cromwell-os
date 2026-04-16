@@ -256,7 +256,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const isSent = (msg.sender ?? "").toLowerCase().includes("majid");
       const sourceType = thread.channel === "EMAIL" ? "OUTLOOK" : "WHATSAPP";
       const msgText = (msg.snippet ?? "").toLowerCase();
-      const displayText = `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`;
+      const rawSnippet = (msg.snippet ?? "").trim();
+      const displayText = `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${rawSnippet.slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`;
+
+      // Skip pure chatter — messages with no commercial content at all.
+      // BUT keep anything that mentions: products, quantities, prices, sites, orders, delivery.
+      const hasCommercialContent = /\d+\s*(x|no|nr|box|pack|roll|length|m\b|mm\b|£|\bqty)/i.test(rawSnippet)
+        || /order|deliver|invoice|bill|quote|price|site|collection|dispatch|po\b|ack/i.test(msgText)
+        || /\b\d{2,}mm\b/i.test(rawSnippet)  // product sizes like 15mm, 22mm
+        || msg.hasAttachments;  // attachments are always commercial
+
+      if (!hasCommercialContent && rawSnippet.length < 80) {
+        // Pure chatter — skip evidence + event creation but don't block
+        continue;
+      }
 
       // Classify THIS individual message
       let msgEvidenceType: string = "INSTRUCTION";
