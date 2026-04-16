@@ -195,27 +195,56 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   if (body.action === "ACCEPT") {
-    // Auto-derive payingCustomerId from the thread's sender via
-    // Contact → SiteContactLink → Customer. ACCEPT only succeeds when the
-    // sender resolves to exactly one customer; ambiguous / unknown senders
-    // get a clear error so the user can fall back to LINK.
-    const customerResolution = await deriveCustomerFromThread(thread);
-    if (!customerResolution.ok) {
-      return Response.json({ error: customerResolution.error }, { status: 400 });
+    const { customerId, siteId, ticketMode, title: userTitle, description: userDescription } = body as {
+      customerId?: string;
+      siteId?: string;
+      ticketMode?: string;
+      title?: string;
+      description?: string;
+    };
+
+    // Customer: use provided, or try auto-derive, or fail with helpful error
+    let resolvedCustomerId = customerId;
+    if (!resolvedCustomerId) {
+      const customerResolution = await deriveCustomerFromThread(thread);
+      if (customerResolution.ok) {
+        resolvedCustomerId = customerResolution.customerId;
+      }
+      // If no customer provided and can't derive, still create — user can set it later
     }
 
-    const ticketMode =
-      thread.classification === "ORDER" ? "DIRECT_ORDER" :
-      thread.classification === "QUOTE_REQUEST" ? "PRICING_FIRST" :
-      "DIRECT_ORDER";
+    const title = userTitle ?? thread.subject ?? `Thread ${thread.id.slice(0, 8)}`;
 
-    const title = body.title ?? thread.subject ?? `Thread ${thread.id.slice(0, 8)}`;
+    // Pull the full email/message body from parsed messages for the description
+    let description = userDescription ?? "";
+    if (!description) {
+      const threadMessages = await prisma.inboxThreadMessage.findMany({
+        where: { threadId: id },
+        orderBy: { occurredAt: "asc" },
+        select: { ingestionEventId: true, snippet: true },
+      });
+      const eventIds = threadMessages.map((m) => m.ingestionEventId);
+      if (eventIds.length > 0) {
+        const parsedMessages = await prisma.parsedMessage.findMany({
+          where: { ingestionEventId: { in: eventIds } },
+          select: { extractedText: true },
+          orderBy: { createdAt: "asc" },
+        });
+        description = parsedMessages.map((p) => p.extractedText ?? "").join("\n\n---\n\n").slice(0, 32000);
+      }
+      if (!description) {
+        description = threadMessages.map((m) => m.snippet ?? "").join("\n\n").slice(0, 16000);
+      }
+    }
+
     const ticket = await prisma.ticket.create({
       data: {
         title: title.slice(0, 200),
-        ticketMode,
+        description,
+        ticketMode: (ticketMode as any) ?? "DIRECT_ORDER",
         status: "CAPTURED",
-        payingCustomer: { connect: { id: customerResolution.customerId } },
+        ...(resolvedCustomerId ? { payingCustomer: { connect: { id: resolvedCustomerId } } } : {}),
+        ...(siteId ? { site: { connect: { id: siteId } } } : {}),
       },
     });
     await prisma.inboxThread.update({
@@ -226,7 +255,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         triagedAt: new Date(),
       },
     });
-    return Response.json({ ok: true, status: "LINKED", ticket: { id: ticket.id, ticketNo: ticket.ticketNo, title: ticket.title } });
+
+    // Create an event on the ticket for audit trail
+    await prisma.event.create({
+      data: {
+        ticketId: ticket.id,
+        eventType: "TICKET_CREATED",
+        timestamp: new Date(),
+        notes: `Created from inbox ${thread.channel.toLowerCase()} thread: "${thread.subject ?? "(no subject)"}"`,
+      },
+    });
+
+    return Response.json({
+      ok: true,
+      status: "LINKED",
+      ticket: { id: ticket.id, ticketNo: ticket.ticketNo, title: ticket.title },
+    });
   }
 
   return Response.json({ error: "unknown action" }, { status: 400 });

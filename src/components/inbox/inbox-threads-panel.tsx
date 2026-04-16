@@ -39,6 +39,9 @@ const CHANNEL_ICON: Record<string, string> = {
   EMAIL: "✉", WHATSAPP: "💬", WHATSAPP_GROUP: "👥", SMS: "📱", OTHER: "•",
 };
 
+type Customer = { id: string; name: string };
+type Site = { id: string; siteName: string };
+
 export function InboxThreadsPanel() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -52,6 +55,58 @@ export function InboxThreadsPanel() {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [working, setWorking] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+
+  // New Ticket form state
+  const [newTicketThread, setNewTicketThread] = useState<Thread | null>(null);
+  const [ntTitle, setNtTitle] = useState("");
+  const [ntCustomerId, setNtCustomerId] = useState("");
+  const [ntSiteId, setNtSiteId] = useState("");
+  const [ntMode, setNtMode] = useState("PRICING_FIRST");
+  const [ntSaving, setNtSaving] = useState(false);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+
+  // Load customers + sites once
+  useEffect(() => {
+    fetch("/api/customers").then(r => r.ok ? r.json() : []).then(d => setCustomers(Array.isArray(d) ? d : d.customers ?? [])).catch(() => {});
+    fetch("/api/sites").then(r => r.ok ? r.json() : []).then(d => setSites(Array.isArray(d) ? d : d.sites ?? [])).catch(() => {});
+  }, []);
+
+  function openNewTicketForm(t: Thread) {
+    setNewTicketThread(t);
+    setNtTitle(t.subject ?? "");
+    setNtCustomerId("");
+    setNtSiteId("");
+    setNtMode("PRICING_FIRST");
+  }
+
+  async function submitNewTicket() {
+    if (!newTicketThread) return;
+    setNtSaving(true);
+    try {
+      const r = await fetch(`/api/inbox/threads/${newTicketThread.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "ACCEPT",
+          title: ntTitle || undefined,
+          customerId: ntCustomerId || undefined,
+          siteId: ntSiteId || undefined,
+          ticketMode: ntMode,
+        }),
+      });
+      const j = await safeJson(r);
+      if (r.ok && j.ticket) {
+        setToast(`✓ Ticket T-${j.ticket.ticketNo} created`);
+        setNewTicketThread(null);
+        if (selectedThread?.id === newTicketThread.id) setSelectedThread(null);
+        await refresh();
+      } else {
+        setToast(`✗ ${j.error ?? "Failed"}`);
+      }
+    } finally { setNtSaving(false); }
+  }
 
   async function refresh() {
     setLoading(true);
@@ -173,14 +228,19 @@ export function InboxThreadsPanel() {
   }
 
   function toggleAll() {
-    if (selected.size === threads.length) {
+    if (selected.size === sortedThreads.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(threads.map((t) => t.id)));
+      setSelected(new Set(sortedThreads.map((t) => t.id)));
     }
   }
 
-  const allSelected = threads.length > 0 && selected.size === threads.length;
+  const sortedThreads = [...threads].sort((a, b) => {
+    const da = new Date(a.latestAt).getTime();
+    const db = new Date(b.latestAt).getTime();
+    return sortDir === "desc" ? db - da : da - db;
+  });
+  const allSelected = sortedThreads.length > 0 && selected.size === sortedThreads.length;
 
   return (
     <div className="space-y-2">
@@ -266,15 +326,19 @@ export function InboxThreadsPanel() {
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-[#FF6600]" />
                 </th>
                 <th className="p-2 w-6"></th>
-                <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">Date</th>
+                <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal cursor-pointer hover:text-[#ccc] select-none"
+                  onClick={() => setSortDir(sortDir === "desc" ? "asc" : "desc")}>
+                  Date {sortDir === "desc" ? "↓" : "↑"}
+                </th>
                 <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">From</th>
                 <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">Subject / Message</th>
+                <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">Type</th>
                 <th className="p-2 text-right text-[10px] uppercase tracking-wider text-[#888] font-normal w-8">#</th>
                 <th className="p-2 text-right text-[10px] uppercase tracking-wider text-[#888] font-normal">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {threads.map((t) => {
+              {sortedThreads.map((t) => {
                 const isSelected = selected.has(t.id);
                 const date = new Date(t.latestAt);
                 const dateStr = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
@@ -309,13 +373,32 @@ export function InboxThreadsPanel() {
                         </a>
                       )}
                     </td>
+                    <td className="p-2">
+                      {t.classification && t.classification !== "UNKNOWN" && (
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{
+                          color: ({
+                            BILL: "#00CCFF", BILL_DOCUMENT: "#00CCFF",
+                            ORDER: "#00CC66", ORDER_ACK: "#00CC66",
+                            QUOTE_REQUEST: "#FFCC00", QUOTE: "#FFCC00",
+                            DELIVERY: "#00CC66", DELIVERY_UPDATE: "#00CC66",
+                            DISPUTE: "#FF3333",
+                            APPROVAL: "#FF9900",
+                            PO_DOCUMENT: "#3399FF",
+                            NOISE: "#555",
+                          } as Record<string, string>)[t.classification] ?? "#888",
+                          background: "rgba(255,255,255,0.05)",
+                        }}>
+                          {(t.classification ?? "").replace(/_/g, " ").toLowerCase()}
+                        </span>
+                      )}
+                    </td>
                     <td className="p-2 text-right tabular-nums text-[#888]">{t.messageCount}</td>
                     <td className="p-2 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1 justify-end">
                         {t.status === "NEW" && (
                           <>
                             <Button size="sm" variant="default" className="h-5 text-[10px] px-2"
-                              onClick={() => doAction(t.id, "ACCEPT")} disabled={working === t.id}>
+                              onClick={() => openNewTicketForm(t)} disabled={working === t.id}>
                               New Ticket
                             </Button>
                             <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
@@ -346,6 +429,82 @@ export function InboxThreadsPanel() {
           </table>
         )}
       </div>
+
+      {/* New Ticket form */}
+      {newTicketThread && (
+        <div className="border-2 border-[#FF6600] bg-[#0F0F0F] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-bold text-[#FF6600]">New Ticket</div>
+            <button className="text-xs text-[#888]" onClick={() => setNewTicketThread(null)}>cancel ✕</button>
+          </div>
+          <div className="text-[10px] text-[#888] mb-3">
+            From: {newTicketThread.channel.toLowerCase()} · {newTicketThread.participants.join(", ")}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Title</label>
+              <input
+                value={ntTitle} onChange={(e) => setNtTitle(e.target.value)}
+                className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
+                placeholder="Job title"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Mode</label>
+              <select
+                value={ntMode} onChange={(e) => setNtMode(e.target.value)}
+                className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
+              >
+                <option value="PRICING_FIRST">Pricing First (quote then order)</option>
+                <option value="COMPETITIVE_BID">Competitive Bid (beat a price)</option>
+                <option value="DIRECT_ORDER">Direct Order (just order it)</option>
+                <option value="SPEC_DRIVEN">Spec Driven (work out what's needed)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Customer</label>
+              <select
+                value={ntCustomerId} onChange={(e) => setNtCustomerId(e.target.value)}
+                className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
+              >
+                <option value="">— select customer —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Site</label>
+              <select
+                value={ntSiteId} onChange={(e) => setNtSiteId(e.target.value)}
+                className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
+              >
+                <option value="">— select site —</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Preview of thread content */}
+          <div className="bg-[#0A0A0A] border border-[#333] p-2 mb-3 max-h-48 overflow-auto">
+            <div className="text-[10px] uppercase tracking-wider text-[#888] mb-1">Thread preview</div>
+            <div className="text-xs whitespace-pre-wrap text-[#ccc]">
+              {newTicketThread.lastSnippet || newTicketThread.subject || "(no content)"}
+            </div>
+          </div>
+
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="outline" onClick={() => setNewTicketThread(null)}>Cancel</Button>
+            <Button size="sm" className="bg-[#FF6600] hover:bg-[#FF9900] text-black font-bold"
+              onClick={submitNewTicket} disabled={ntSaving}>
+              {ntSaving ? "Creating..." : "Create Ticket"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Thread detail drawer */}
       {selectedThread && (
@@ -378,7 +537,7 @@ export function InboxThreadsPanel() {
           )}
           {selectedThread.status === "NEW" && (
             <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="default" onClick={() => doAction(selectedThread.id, "ACCEPT")} disabled={working === selectedThread.id}>
+              <Button size="sm" variant="default" onClick={() => openNewTicketForm(selectedThread)} disabled={working === selectedThread.id}>
                 New Ticket
               </Button>
               <Button size="sm" variant="outline" onClick={() => {
