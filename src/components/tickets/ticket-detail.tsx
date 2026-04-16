@@ -508,8 +508,7 @@ function InlineLineRow({
       saveMultipleFields({
         fromStock: v || null,
         toOrder: to || null,
-        ...(v >= qty ? { supplierName: "STOCK", status: "ORDERED" } : {}),
-        ...(v > 0 && v < qty ? { supplierName: supplierVal === "STOCK" ? null : supplierVal || null } : {}),
+        ...(v >= qty ? { status: "ORDERED" } : {}),
       });
     }
   }
@@ -711,14 +710,21 @@ function InlineLineRow({
         </div>
       </TableCell>
       <TableCell className="p-0 max-w-[100px]">
-        <input
-          value={supplierVal}
-          onChange={(e) => setSupplierVal(e.target.value)}
-          onBlur={onBlurSupplier}
-          onKeyDown={kd}
-          className={`${INPUT_CLS} w-full text-[10px] text-[#888888]`}
-          placeholder="—"
-        />
+        <div className="flex items-center gap-1">
+          <input
+            value={supplierVal}
+            onChange={(e) => setSupplierVal(e.target.value)}
+            onBlur={onBlurSupplier}
+            onKeyDown={kd}
+            className={`${INPUT_CLS} w-full text-[10px] text-[#888888]`}
+            placeholder="—"
+          />
+          {fromStock > 0 && (
+            <span className="text-[8px] font-bold text-[#00CC66] bg-[#00CC66]/10 px-1 py-0.5 tracking-wider shrink-0" title={`${fromStock} from stock`}>
+              STK
+            </span>
+          )}
+        </div>
       </TableCell>
       <TableCell className="p-0">
         <input
