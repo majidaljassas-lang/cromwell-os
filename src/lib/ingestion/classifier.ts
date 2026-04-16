@@ -31,9 +31,16 @@ export type CostLineClassification =
   | "CREDIT"
   | "WRITE_OFF";
 
+const ORDER_ACK_KEYWORDS = [
+  "order acknowledgement", "order confirmation", "order confirmed",
+  "thank you for your order", "we have received your order",
+  "your order has been received", "order accepted",
+  "acknowledgement", "order ref",
+];
+
 const ORDER_KEYWORDS = [
-  "order", "need", "send", "supply", "deliver", "want", "require",
-  "can you get", "how much for", "price for", "quote for",
+  "please order", "need to order", "send us", "supply us", "want to order",
+  "require", "can you get", "how much for", "price for", "quote for",
 ];
 
 const APPROVAL_KEYWORDS = [
@@ -44,6 +51,10 @@ const APPROVAL_KEYWORDS = [
 const DELIVERY_KEYWORDS = [
   "delivered", "on site", "arrived", "dropped off", "driver",
   "collection", "picked up", "in transit", "eta", "pod",
+  "dispatch", "dispatched", "dispatching", "shipped", "shipping",
+  "consignment", "tracking", "out for delivery", "despatch",
+  "dispatch confirmation", "your order has been dispatched",
+  "your order has shipped", "order dispatched",
 ];
 
 const DISPUTE_KEYWORDS = [
@@ -100,8 +111,12 @@ export function classifyMessage(
     reasons.push("Contains dispute/problem language");
   } else if (matchesKeywords(lower, DELIVERY_KEYWORDS)) {
     classification = "DELIVERY_UPDATE";
+    confidence = 80;
+    reasons.push("Contains delivery/dispatch keywords");
+  } else if (matchesKeywords(lower, ORDER_ACK_KEYWORDS)) {
+    classification = "ORDER";
     confidence = 70;
-    reasons.push("Contains delivery/logistics language");
+    reasons.push("Order acknowledgement from supplier");
   } else if (matchesKeywords(lower, ORDER_KEYWORDS)) {
     classification = "ORDER";
     confidence = 65;

@@ -485,9 +485,10 @@ export function InboxThreadsPanel() {
         )}
       </div>
 
-      {/* New Ticket form */}
+      {/* New Ticket form — fixed overlay */}
       {newTicketThread && (
-        <div className="border-2 border-[#FF6600] bg-[#0F0F0F] p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setNewTicketThread(null)}>
+        <div className="border-2 border-[#FF6600] bg-[#0F0F0F] p-4 w-[600px] max-h-[80vh] overflow-auto rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-bold text-[#FF6600]">New Ticket</div>
             <button className="text-xs text-[#888]" onClick={() => setNewTicketThread(null)}>cancel ✕</button>
@@ -558,6 +559,7 @@ export function InboxThreadsPanel() {
               {ntSaving ? "Creating..." : "Create Ticket"}
             </Button>
           </div>
+        </div>
         </div>
       )}
 
