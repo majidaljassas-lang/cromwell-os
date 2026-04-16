@@ -195,12 +195,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   if (body.action === "ACCEPT") {
-    const { customerId, siteId, ticketMode, title: userTitle, description: userDescription } = body as {
+    const { customerId, siteId, ticketMode, title: userTitle, description: userDescription, source: userSource } = body as {
       customerId?: string;
       siteId?: string;
       ticketMode?: string;
       title?: string;
       description?: string;
+      source?: string;
     };
 
     // Customer: use provided, or try auto-derive, or fail with helpful error
@@ -237,12 +238,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
     }
 
+    // Source: user override > thread channel > unknown
+    const sourceMap: Record<string, string> = { EMAIL: "EMAIL", WHATSAPP: "WHATSAPP", WHATSAPP_GROUP: "WHATSAPP", SMS: "SMS" };
+    const source = userSource ?? sourceMap[thread.channel] ?? "OTHER";
+    const sourceRef = thread.participants[0] ?? null;
+
     const ticket = await prisma.ticket.create({
       data: {
         title: title.slice(0, 200),
         description,
         ticketMode: (ticketMode as any) ?? "DIRECT_ORDER",
         status: "CAPTURED",
+        source,
+        sourceRef,
+        lastActivityAt: new Date(),
         ...(resolvedCustomerId ? { payingCustomer: { connect: { id: resolvedCustomerId } } } : {}),
         ...(siteId ? { site: { connect: { id: siteId } } } : {}),
       },

@@ -63,6 +63,7 @@ export function InboxThreadsPanel() {
   const [ntCustomerId, setNtCustomerId] = useState("");
   const [ntSiteId, setNtSiteId] = useState("");
   const [ntMode, setNtMode] = useState("PRICING_FIRST");
+  const [ntSource, setNtSource] = useState("");
   const [ntSaving, setNtSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allSites, setAllSites] = useState<Site[]>([]);
@@ -141,6 +142,8 @@ export function InboxThreadsPanel() {
     setNtCustomerId("");
     setNtSiteId("");
     setNtMode("PRICING_FIRST");
+    const srcMap: Record<string, string> = { EMAIL: "EMAIL", WHATSAPP: "WHATSAPP", WHATSAPP_GROUP: "WHATSAPP", SMS: "SMS" };
+    setNtSource(srcMap[t.channel] ?? "OTHER");
   }
 
   async function submitNewTicket() {
@@ -156,6 +159,7 @@ export function InboxThreadsPanel() {
           customerId: ntCustomerId || undefined,
           siteId: ntSiteId || undefined,
           ticketMode: ntMode,
+          source: ntSource || undefined,
         }),
       });
       const j = await safeJson(r);
@@ -560,8 +564,8 @@ export function InboxThreadsPanel() {
             From: {newTicketThread.channel.toLowerCase()} · {newTicketThread.participants.join(", ")}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div className="col-span-2">
               <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Title</label>
               <input
                 value={ntTitle} onChange={(e) => setNtTitle(e.target.value)}
@@ -570,15 +574,30 @@ export function InboxThreadsPanel() {
               />
             </div>
             <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Source</label>
+              <select
+                value={ntSource} onChange={(e) => setNtSource(e.target.value)}
+                className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
+              >
+                <option value="EMAIL">Email</option>
+                <option value="WHATSAPP">WhatsApp</option>
+                <option value="PHONE_CALL">Phone Call</option>
+                <option value="WALK_IN">Walk-in</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
               <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Mode</label>
               <select
                 value={ntMode} onChange={(e) => setNtMode(e.target.value)}
                 className="w-full h-8 px-2 text-xs bg-[#0A0A0A] border border-[#333]"
               >
-                <option value="PRICING_FIRST">Pricing First (quote then order)</option>
-                <option value="COMPETITIVE_BID">Competitive Bid (beat a price)</option>
-                <option value="DIRECT_ORDER">Direct Order (just order it)</option>
-                <option value="SPEC_DRIVEN">Spec Driven (work out what's needed)</option>
+                <option value="PRICING_FIRST">Pricing First</option>
+                <option value="COMPETITIVE_BID">Competitive Bid</option>
+                <option value="DIRECT_ORDER">Direct Order</option>
+                <option value="SPEC_DRIVEN">Spec Driven</option>
               </select>
             </div>
             <div>

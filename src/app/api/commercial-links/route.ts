@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   if (existing) return Response.json(existing);
 
   const link = await prisma.siteCommercialLink.create({
-    data: { customerId, siteId, isActive: true },
+    data: { customerId, siteId, role: body.role ?? "MAIN_CONTRACTOR", billingAllowed: true, isActive: true },
   });
 
   return Response.json(link);

@@ -437,6 +437,13 @@ model Ticket {
   poStatus                  String?
   recoveryRequired          Boolean                  @default(false)
   isLocked                  Boolean                  @default(false)
+  source                    String?                  // EMAIL, WHATSAPP, PHONE_CALL, WALK_IN, OTHER
+  sourceRef                 String?                  // original sender/contact info
+  quotedAt                  DateTime?
+  orderedAt                 DateTime?
+  deliveredAt               DateTime?
+  invoicedAt                DateTime?
+  lastActivityAt            DateTime?
   createdAt                 DateTime                 @default(now())
   closedAt                  DateTime?
   updatedAt                 DateTime                 @updatedAt
