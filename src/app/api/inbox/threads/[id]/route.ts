@@ -247,22 +247,84 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       taskReason = "Dispute or issue flagged — review and resolve";
     }
 
-    // Create Evidence + Event + Task for each message
+    // Process EACH message individually — classify, create evidence + event + task
     let evidenceCount = 0;
     let eventCount = 0;
+    const tasksCreated: string[] = [];
 
     for (const msg of allMessages) {
       const isSent = (msg.sender ?? "").toLowerCase().includes("majid");
       const sourceType = thread.channel === "EMAIL" ? "OUTLOOK" : "WHATSAPP";
-      const msgText = `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`;
+      const msgText = (msg.snippet ?? "").toLowerCase();
+      const displayText = `${isSent ? "[SENT] " : ""}${msg.sender ?? "Unknown"}: ${(msg.snippet ?? "").slice(0, 500)}${msg.hasAttachments ? " [📎]" : ""}`;
 
-      // 1. Evidence — the actual message as proof
+      // Classify THIS individual message
+      let msgEvidenceType: string = "INSTRUCTION";
+      let msgEventType = "COMMS_RECEIVED";
+      let msgTaskType: string | null = null;
+      let msgTaskReason = "";
+      let msgTaskPriority = "MEDIUM";
+      let closeTaskType: string | null = null; // auto-close a previous task
+
+      if (isSent && /order|can i order|please.*supply|following.*to.*orme|following.*to.*site/i.test(msgText)) {
+        // You sent an order to a supplier
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "ORDER_PLACED";
+        closeTaskType = "PLACE_ORDER_WITH_SUPPLIER";
+        msgTaskType = "AWAIT_ORDER_ACK";
+        msgTaskReason = "Order placed with supplier — awaiting acknowledgement";
+      } else if (isSent && /confirm|go ahead|approved|proceed/i.test(msgText)) {
+        // You confirmed/sent a sale
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "SALE_CONFIRMED";
+        msgTaskType = "PLACE_ORDER_WITH_SUPPLIER";
+        msgTaskPriority = "HIGH";
+        msgTaskReason = "Sale confirmed to customer — place order with supplier";
+      } else if (!isSent && /loaded|delivery.*monday|delivery.*tomorrow|dispatch|can get it there|deliver.*to|collection.*ready|shipped/i.test(msgText)) {
+        // Supplier confirmed delivery
+        msgEvidenceType = "DELIVERY";
+        msgEventType = "DELIVERY_SCHEDULED";
+        closeTaskType = "AWAIT_ORDER_ACK";
+        msgTaskType = "CONFIRM_DELIVERY_RECEIPT";
+        msgTaskReason = "Delivery scheduled — confirm goods arrive on site";
+      } else if (!isSent && /order.*ack|acknowledgement|confirm.*order|your order/i.test(msgText)) {
+        // Supplier order ack
+        msgEvidenceType = "SUPPLIER_CONFIRMATION";
+        msgEventType = "ORDER_ACK_RECEIVED";
+        closeTaskType = "AWAIT_ORDER_ACK";
+        msgTaskType = "CHECK_DELIVERY_DATE";
+        msgTaskReason = "Order acknowledged by supplier — check delivery date";
+      } else if (!isSent && /invoice|bill|amount due|payment|inv[\s-]*no/i.test(msgText)) {
+        // Bill received
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "BILL_RECEIVED";
+        msgTaskType = "MATCH_BILL_TO_TICKET";
+        msgTaskPriority = "HIGH";
+        msgTaskReason = "Supplier bill received — match costs and allocate";
+      } else if (!isSent && /approved|go ahead|proceed|yes.*please/i.test(msgText)) {
+        // Customer approval
+        msgEvidenceType = "APPROVAL";
+        msgEventType = "APPROVAL_RECEIVED";
+        msgTaskType = "PLACE_ORDER_WITH_SUPPLIER";
+        msgTaskPriority = "HIGH";
+        msgTaskReason = "Customer approval received — place order";
+      } else if (!isSent && /quote|pricing|price|we can offer/i.test(msgText)) {
+        // Supplier quote
+        msgEvidenceType = "PRICING";
+        msgEventType = "SUPPLIER_QUOTE_RECEIVED";
+        msgTaskType = "REVIEW_SUPPLIER_PRICING";
+        msgTaskReason = "Supplier pricing received — review and update costs";
+      } else if (isSent) {
+        msgEventType = "COMMS_SENT";
+      }
+
+      // 1. Evidence
       await prisma.evidenceFragment.create({
         data: {
           ticketId: body.ticketId,
           sourceType,
-          fragmentType: evidenceType as any,
-          fragmentText: msgText,
+          fragmentType: msgEvidenceType as any,
+          fragmentText: displayText,
           sourceRef: `msg:${msg.id}`,
           timestamp: msg.occurredAt,
           isPrimaryEvidence: !isSent,
@@ -270,36 +332,43 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       });
       evidenceCount++;
 
-      // 2. Event — what happened on the timeline
+      // 2. Event
       await prisma.event.create({
         data: {
           ticketId: body.ticketId,
-          eventType: "COMMS_RECEIVED",
+          eventType: msgEventType as any,
           timestamp: msg.occurredAt,
-          notes: msgText,
+          notes: displayText,
           sourceRef: `thread:${id}:msg:${msg.id}`,
         },
       });
       eventCount++;
-    }
 
-    // 3. Task — what needs doing next (one per thread, not per message)
-    let taskId: string | null = null;
-    if (taskType) {
-      const existingTask = await prisma.task.findFirst({
-        where: { ticketId: body.ticketId, taskType, status: "OPEN" },
-      });
-      if (!existingTask) {
-        const task = await prisma.task.create({
-          data: {
-            ticketId: body.ticketId,
-            taskType,
-            priority: taskPriority,
-            status: "OPEN",
-            generatedReason: taskReason,
-          },
+      // 3. Auto-close previous task if this message completes it
+      if (closeTaskType) {
+        await prisma.task.updateMany({
+          where: { ticketId: body.ticketId, taskType: closeTaskType, status: "OPEN" },
+          data: { status: "DONE" },
         });
-        taskId = task.id;
+      }
+
+      // 4. Create next task
+      if (msgTaskType) {
+        const existing = await prisma.task.findFirst({
+          where: { ticketId: body.ticketId, taskType: msgTaskType, status: "OPEN" },
+        });
+        if (!existing) {
+          await prisma.task.create({
+            data: {
+              ticketId: body.ticketId,
+              taskType: msgTaskType,
+              priority: msgTaskPriority,
+              status: "OPEN",
+              generatedReason: msgTaskReason,
+            },
+          });
+          tasksCreated.push(msgTaskType);
+        }
       }
     }
 
