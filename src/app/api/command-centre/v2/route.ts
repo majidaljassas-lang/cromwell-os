@@ -35,7 +35,7 @@ export async function GET() {
       take: 20,
     }),
     prisma.task.groupBy({ by: ["taskType"], _count: true, where: { status: "OPEN" } }),
-    prisma.salesInvoice.aggregate({ _sum: { totalIncVat: true }, _count: true, where: { status: { in: ["SENT", "UNPAID"] } } }),
+    prisma.salesInvoice.aggregate({ _sum: { totalSell: true }, _count: true, where: { status: { in: ["SENT", "UNPAID"] } } }),
     prisma.supplierBill.aggregate({ _sum: { totalCost: true }, _count: true, where: { paymentStatus: "UNPAID" } }),
     prisma.supplierBill.aggregate({ _sum: { totalCost: true }, _count: true, where: { matchStatus: "DISPUTE" } }),
     prisma.stockItem.aggregate({ _count: true, _sum: { qtyOnHand: true }, where: { isActive: true, outcome: "HOLDING" } }),
@@ -76,7 +76,7 @@ export async function GET() {
       })),
     },
     financial: {
-      receivables: Number(receivables._sum.totalIncVat ?? 0),
+      receivables: Number(receivables._sum.totalSell ?? 0),
       receivablesCount: receivables._count,
       payables: Number(payables._sum.totalCost ?? 0),
       payablesCount: payables._count,
