@@ -316,7 +316,14 @@ export function InboxThreadsPanel() {
                           <>
                             <Button size="sm" variant="default" className="h-5 text-[10px] px-2"
                               onClick={() => doAction(t.id, "ACCEPT")} disabled={working === t.id}>
-                              Accept
+                              New Ticket
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
+                              onClick={() => {
+                                const ticketId = prompt("Ticket ID to link to:");
+                                if (ticketId) doAction(t.id, "LINK", { ticketId: ticketId.trim() });
+                              }} disabled={working === t.id}>
+                              Link
                             </Button>
                             <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
                               onClick={() => doDelete(t.id)} disabled={working === t.id}>
@@ -372,7 +379,13 @@ export function InboxThreadsPanel() {
           {selectedThread.status === "NEW" && (
             <div className="mt-3 flex gap-2">
               <Button size="sm" variant="default" onClick={() => doAction(selectedThread.id, "ACCEPT")} disabled={working === selectedThread.id}>
-                Accept → new Ticket
+                New Ticket
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => {
+                const ticketId = prompt("Ticket ID to link to:");
+                if (ticketId) doAction(selectedThread.id, "LINK", { ticketId: ticketId.trim() });
+              }} disabled={working === selectedThread.id}>
+                Link to Ticket
               </Button>
               <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={() => doDelete(selectedThread.id)} disabled={working === selectedThread.id}>
                 Delete
