@@ -141,3 +141,32 @@ Each category runs in its own try/catch; one failure does not abort the others. 
 - **Sidebar nav link** — root redirect goes to command-centre but the sidebar still shows "Dashboard" as the primary label. Cosmetic update.
 - **Final migration consolidation** — each phase applied its own migration via `prisma db execute` (because `prisma dev` shadow DB returns P1017). Running `prisma migrate dev --name consolidate` would collapse them but is unnecessary and risks DB divergence.
 - **AI badge in inbox UI** — `autoCreatedByAi` and `aiSummary` fields are persisted but the InboxThreadsPanel does not yet render the AI badge or summary. Cosmetic wiring.
+
+## Phase 13 — Supplier quote auto-linking (NOT YET BUILT)
+
+When a WhatsApp or email message arrives from a known supplier contact and contains prices/numbers, auto-link it to an open ticket in PRICING status and populate `TicketLinePrice` rows.
+
+### Flow
+
+1. **Detect**: WhatsApp/email lands in inbox. Sender matches a `Contact` linked to a `Supplier` via `SiteContactLink` or `SupplierAlias`.
+2. **Extract**: AI or regex extracts line items with unit prices from the message body (same pattern as `auto-ticket-creator.ts` line extraction but for costs not orders).
+3. **Match**: Find open tickets in `PRICING` or `CAPTURED` status where the ticket's lines overlap with the extracted items (description fuzzy match or `canonicalProductId`).
+4. **Link**: For each matched ticket line, create a `TicketLinePrice` row with the supplier's name, cost per unit, and cost total. Run `recalcWinner()` to auto-select the best price.
+5. **Surface**: Create a `Task` of type `SUPPLIER_QUOTE_RECEIVED` on the ticket so the user sees it in their task queue. Thread gets `linkConfidence: HIGH` and `linkedTicketId` set.
+
+### Schema changes needed
+
+- None — `TicketLinePrice` already supports this. `supplierId` FK links to the supplier.
+
+### Lib module
+
+- `src/lib/inbox/supplier-quote-linker.ts` — main engine
+- Wired into `run-all` as step after `threadLinker`, before `autoCreateTickets`
+
+### Constraints
+
+- Only fires for messages from supplier-linked contacts (never customer contacts)
+- Only targets tickets in PRICING / CAPTURED status (not ORDERED / INVOICED / CLOSED)
+- Creates `TicketLinePrice` rows — never overwrites existing prices from other suppliers
+- If match confidence is LOW, creates a `REVIEW_SUPPLIER_QUOTE` task instead of auto-linking
+- Message text is preserved in `TicketLinePrice.notes` for audit trail
