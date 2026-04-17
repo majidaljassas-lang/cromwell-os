@@ -6,94 +6,363 @@
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.174:3000
 - Environments: .env.local, .env
-✓ Ready in 206ms
+✓ Ready in 223ms
 
- GET /api/system/health 200 in 164ms (next.js: 144ms, application-code: 21ms)
- GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 4.0s (next.js: 2.2s, application-code: 1718ms)
- GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 495ms (next.js: 486ms, application-code: 10ms)
- GET /tickets 200 in 88ms (next.js: 30ms, application-code: 59ms)
- GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 159ms (next.js: 6ms, application-code: 153ms)
- GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 8ms (next.js: 3ms, application-code: 5ms)
- GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 9ms (next.js: 1394µs, application-code: 8ms)
- GET /tickets 200 in 63ms (next.js: 5ms, application-code: 58ms)
- GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 151ms (next.js: 8ms, application-code: 143ms)
- GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 7ms (next.js: 3ms, application-code: 5ms)
- GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 9ms (next.js: 1075µs, application-code: 8ms)
-✓ Compiled in 801ms
- POST /api/automation/sync/outlook 200 in 2.9s (next.js: 208ms, application-code: 2.7s)
- POST /api/automation/process 200 in 61ms (next.js: 30ms, application-code: 31ms)
-✓ Compiled in 387ms
-[browser] ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1
-Export TicketDetail doesn't exist in target module
-  1 | import { notFound } from "next/navigation";
-  2 | import { prisma } from "@/lib/prisma";
-> 3 | import { TicketDetail } from "@/components/tickets/ticket-detail";
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  4 |
-  5 | export default async function TicketDetailPage({
-  6 |   params,
-
-The export TicketDetail was not found in module [project]/src/components/tickets/ticket-detail.tsx [app-rsc] (ecmascript).
-The module has no exports at all.
-All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist. 
- GET /tickets 500 in 173ms (next.js: 111ms, application-code: 62ms)
- GET /tickets 500 in 6ms (next.js: 1829µs, application-code: 4ms)
-[browser] ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1
-Export TicketDetail doesn't exist in target module
-  1 | import { notFound } from "next/navigation";
-  2 | import { prisma } from "@/lib/prisma";
-> 3 | import { TicketDetail } from "@/components/tickets/ticket-detail";
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  4 |
-  5 | export default async function TicketDetailPage({
-  6 |   params,
-
-The export TicketDetail was not found in module [project]/src/components/tickets/ticket-detail.tsx [app-rsc] (ecmascript).
-The module has no exports at all.
-All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist. 
- GET /tickets 500 in 9ms (next.js: 1992µs, application-code: 7ms)
- GET /tickets 500 in 10ms (next.js: 4ms, application-code: 6ms)
- GET /tickets 500 in 12ms (next.js: 8ms, application-code: 4ms)
-[browser] Uncaught Error: ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1
-Export TicketDetail doesn't exist in target module
-  1 | import { notFound } from "next/navigation";
-  2 | import { prisma } from "@/lib/prisma";
-> 3 | import { TicketDetail } from "@/components/tickets/ticket-detail";
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  4 |
-  5 | export default async function TicketDetailPage({
-  6 |   params,
-
-The export TicketDetail was not found in module [project]/src/components/tickets/ticket-detail.tsx [app-rsc] (ecmascript).
-The module has no exports at all.
-All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+ GET /api/system/health 200 in 282ms (next.js: 177ms, application-code: 105ms)
+ GET /tickets 200 in 740ms (next.js: 155ms, application-code: 585ms)
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
 
 
-    at <unknown> (Error: ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1)
-    at <unknown> (Error: (./src/app/(dashboard)/tickets/[id]/page.tsx:3:1)
-[browser] ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1
-Export TicketDetail doesn't exist in target module
-  1 | import { notFound } from "next/navigation";
-  2 | import { prisma } from "@/lib/prisma";
-> 3 | import { TicketDetail } from "@/components/tickets/ticket-detail";
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  4 |
-  5 | export default async function TicketDetailPage({
-  6 |   params,
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 195ms (next.js: 33ms, application-code: 162ms)
+[autoLinkThread] thread=6c9025a7-2427-490c-81d1-205e90e7c7ff score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 237ms (next.js: 28ms, application-code: 209ms)
+✓ Compiled in 1284ms
+✓ Compiled in 733ms
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
 
-The export TicketDetail was not found in module [project]/src/components/tickets/ticket-detail.tsx [app-rsc] (ecmascript).
-The module has no exports at all.
-All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist. 
-[browser] ./src/app/(dashboard)/tickets/[id]/page.tsx:3:1
-Export TicketDetail doesn't exist in target module
-  1 | import { notFound } from "next/navigation";
-  2 | import { prisma } from "@/lib/prisma";
-> 3 | import { TicketDetail } from "@/components/tickets/ticket-detail";
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  4 |
-  5 | export default async function TicketDetailPage({
-  6 |   params,
 
-The export TicketDetail was not found in module [project]/src/components/tickets/ticket-detail.tsx [app-rsc] (ecmascript).
-The module has no exports at all.
-All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist. 
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 129ms (next.js: 12ms, application-code: 117ms)
+[autoLinkThread] thread=6c9025a7-2427-490c-81d1-205e90e7c7ff score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 170ms (next.js: 6ms, application-code: 164ms)
+ GET /tickets 200 in 107ms (next.js: 7ms, application-code: 100ms)
+ POST /api/ingest/whatsapp/live 200 in 22ms (next.js: 4ms, application-code: 18ms)
+ POST /api/ingest/whatsapp/live 200 in 22ms (next.js: 10ms, application-code: 12ms)
+ POST /api/ingest/whatsapp/live 200 in 17ms (next.js: 4ms, application-code: 13ms)
+ POST /api/ingest/whatsapp/live 200 in 17ms (next.js: 10ms, application-code: 7ms)
+ POST /api/ingest/whatsapp/live 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ POST /api/ingest/whatsapp/live 200 in 10ms (next.js: 1311µs, application-code: 9ms)
+ GET /tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 489ms (next.js: 353ms, application-code: 135ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 501ms (next.js: 492ms, application-code: 9ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 4ms (next.js: 1656µs, application-code: 3ms)
+ PATCH /api/ticket-lines/99a098ae-4afc-4520-8e84-ae10e242bd9f 200 in 531ms (next.js: 518ms, application-code: 12ms)
+ POST /api/ingest/whatsapp/live 200 in 5ms (next.js: 751µs, application-code: 4ms)
+ POST /api/ingest/whatsapp/live 200 in 5ms (next.js: 1913µs, application-code: 3ms)
+[autoLinkThread] thread=6c9025a7-2427-490c-81d1-205e90e7c7ff score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 43ms (next.js: 1346µs, application-code: 42ms)
+ POST /api/ingest/whatsapp/live 200 in 8ms (next.js: 1734µs, application-code: 7ms)
+ POST /api/ingest/whatsapp/live 200 in 8ms (next.js: 4ms, application-code: 5ms)
+ PATCH /api/ticket-lines/67d1833f-de11-47bd-828e-c75ababb4e0a 200 in 28ms (next.js: 9ms, application-code: 20ms)
+ POST /api/ingest/whatsapp/live 200 in 5ms (next.js: 839µs, application-code: 4ms)
+ POST /api/ingest/whatsapp/live 200 in 5ms (next.js: 2ms, application-code: 3ms)
+ POST /api/ingest/whatsapp/live 200 in 8ms (next.js: 1577µs, application-code: 7ms)
+ POST /api/ingest/whatsapp/live 200 in 8ms (next.js: 3ms, application-code: 5ms)
+[autoLinkThread] thread=45c13770-469c-4fca-a078-e164a0d34ada score=10 LOW — reasons: Within 72h of ticket activity
+[autoLinkThread] thread=15ebeda6-1edc-4a15-8c74-811b703e5ae4 score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/automation/sync/outlook 200 in 2.3s (next.js: 199ms, application-code: 2.1s)
+ POST /api/automation/process 200 in 38ms (next.js: 20ms, application-code: 17ms)
+ POST /api/ingest/whatsapp/live 200 in 33ms (next.js: 5ms, application-code: 28ms)
+ POST /api/ingest/whatsapp/live 200 in 33ms (next.js: 13ms, application-code: 20ms)
+ PATCH /api/ticket-lines/99a098ae-4afc-4520-8e84-ae10e242bd9f 200 in 30ms (next.js: 8ms, application-code: 22ms)
+ PATCH /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 607ms (next.js: 593ms, application-code: 15ms)
+ GET /tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 123ms (next.js: 2ms, application-code: 120ms)
+ PATCH /api/ticket-lines/99a098ae-4afc-4520-8e84-ae10e242bd9f 200 in 28ms (next.js: 7ms, application-code: 20ms)
+ PATCH /api/ticket-lines/99a098ae-4afc-4520-8e84-ae10e242bd9f 200 in 25ms (next.js: 6ms, application-code: 20ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 27ms (next.js: 10ms, application-code: 17ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 20ms (next.js: 6ms, application-code: 14ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 21ms (next.js: 6ms, application-code: 15ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 22ms (next.js: 8ms, application-code: 14ms)
+ PATCH /api/ticket-lines/f19488a2-4a01-49ba-b326-faf7aaeeb668 200 in 18ms (next.js: 7ms, application-code: 11ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 20ms (next.js: 5ms, application-code: 15ms)
+ PATCH /api/ticket-lines/f19488a2-4a01-49ba-b326-faf7aaeeb668 200 in 19ms (next.js: 6ms, application-code: 13ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 21ms (next.js: 6ms, application-code: 15ms)
+ PATCH /api/ticket-lines/f19488a2-4a01-49ba-b326-faf7aaeeb668 200 in 17ms (next.js: 5ms, application-code: 12ms)
+ PATCH /api/ticket-lines/795ae39c-0330-45db-8e77-6b91fdb44f72 200 in 25ms (next.js: 7ms, application-code: 18ms)
+ PATCH /api/ticket-lines/ce2b7f9b-c2bd-46de-9577-1db1a1e0eac7 200 in 22ms (next.js: 6ms, application-code: 16ms)
+ PATCH /api/ticket-lines/ce2b7f9b-c2bd-46de-9577-1db1a1e0eac7 200 in 20ms (next.js: 7ms, application-code: 13ms)
+ PATCH /api/ticket-lines/ce2b7f9b-c2bd-46de-9577-1db1a1e0eac7 200 in 20ms (next.js: 5ms, application-code: 15ms)
+ PATCH /api/ticket-lines/8e7c66e4-9b6d-4318-ae9b-a0fe6ddbcd3d 200 in 26ms (next.js: 7ms, application-code: 19ms)
+ PATCH /api/ticket-lines/8e7c66e4-9b6d-4318-ae9b-a0fe6ddbcd3d 200 in 19ms (next.js: 5ms, application-code: 15ms)
+ PATCH /api/ticket-lines/8e7c66e4-9b6d-4318-ae9b-a0fe6ddbcd3d 200 in 21ms (next.js: 6ms, application-code: 16ms)
+[autoLinkThread] thread=15ebeda6-1edc-4a15-8c74-811b703e5ae4 score=25 LOW — reasons: Text references customer "Criterion Capital"; Within 72h of ticket activity
+[autoLinkThread] thread=a95da0fd-0fff-414e-9dc8-0e3ff097c075 score=10 LOW — reasons: Within 72h of ticket activity
+(node:75823) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ POST /api/automation/sync/outlook 200 in 3.1s (next.js: 5ms, application-code: 3.1s)
+ POST /api/automation/process 200 in 8ms (next.js: 965µs, application-code: 7ms)
+ PATCH /api/ticket-lines/4962fa2b-7767-4287-b2c7-2dec99a4d3ac 200 in 26ms (next.js: 8ms, application-code: 18ms)
+ PATCH /api/ticket-lines/4962fa2b-7767-4287-b2c7-2dec99a4d3ac 200 in 27ms (next.js: 5ms, application-code: 22ms)
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
+
+
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 145ms (next.js: 6ms, application-code: 139ms)
+[autoLinkThread] thread=6c9025a7-2427-490c-81d1-205e90e7c7ff score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 197ms (next.js: 2ms, application-code: 195ms)
+ GET /tickets 200 in 69ms (next.js: 6ms, application-code: 64ms)
+ GET /inbox 200 in 58ms (next.js: 46ms, application-code: 12ms)
+ GET /api/commercial-links 200 in 102ms (next.js: 23ms, application-code: 79ms)
+ GET /api/customers 200 in 103ms (next.js: 71ms, application-code: 32ms)
+ GET /api/sites 200 in 103ms (next.js: 87ms, application-code: 16ms)
+ GET /api/tickets?active=1 200 in 104ms (next.js: 56ms, application-code: 48ms)
+ GET /api/commercial-links 200 in 16ms (next.js: 1040µs, application-code: 15ms)
+ GET /api/customers 200 in 20ms (next.js: 2ms, application-code: 17ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 131ms (next.js: 40ms, application-code: 91ms)
+ GET /api/sites 200 in 24ms (next.js: 17ms, application-code: 7ms)
+ GET /api/tickets?active=1 200 in 28ms (next.js: 6ms, application-code: 22ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 18ms (next.js: 1991µs, application-code: 16ms)
+ DELETE /api/inbox/threads/6c9025a7-2427-490c-81d1-205e90e7c7ff?force=1 200 in 657ms (next.js: 629ms, application-code: 27ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 21ms (next.js: 829µs, application-code: 20ms)
+ GET /tickets 200 in 59ms (next.js: 5ms, application-code: 55ms)
+ GET /tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 138ms (next.js: 8ms, application-code: 130ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 4ms (next.js: 647µs, application-code: 3ms)
+ GET /tickets 200 in 63ms (next.js: 3ms, application-code: 59ms)
+ GET /tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 146ms (next.js: 7ms, application-code: 139ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 6ms (next.js: 1711µs, application-code: 5ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 4ms (next.js: 702µs, application-code: 4ms)
+ GET /tickets 200 in 65ms (next.js: 3ms, application-code: 62ms)
+ GET /tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5 200 in 153ms (next.js: 6ms, application-code: 148ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 6ms (next.js: 1938µs, application-code: 4ms)
+ GET /api/tickets/aa5eca10-7200-4efe-bad0-5c0943a775f5/commercial-summary 200 in 5ms (next.js: 617µs, application-code: 5ms)
+ GET /tickets 200 in 55ms (next.js: 4ms, application-code: 51ms)
+ GET /inbox 200 in 28ms (next.js: 4ms, application-code: 24ms)
+ GET /api/customers 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/sites 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ GET /api/commercial-links 200 in 7ms (next.js: 5ms, application-code: 2ms)
+ GET /api/customers 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/tickets?active=1 200 in 14ms (next.js: 1839µs, application-code: 12ms)
+ GET /api/commercial-links 200 in 15ms (next.js: 5ms, application-code: 10ms)
+ GET /api/sites 200 in 16ms (next.js: 5ms, application-code: 12ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 33ms (next.js: 5ms, application-code: 28ms)
+ GET /api/tickets?active=1 200 in 6ms (next.js: 1165µs, application-code: 5ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 18ms (next.js: 556µs, application-code: 18ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 25ms (next.js: 3ms, application-code: 23ms)
+ DELETE /api/inbox/threads/45c13770-469c-4fca-a078-e164a0d34ada?force=1 200 in 29ms (next.js: 7ms, application-code: 22ms)
+ DELETE /api/inbox/threads/a95da0fd-0fff-414e-9dc8-0e3ff097c075?force=1 200 in 28ms (next.js: 764µs, application-code: 27ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 19ms (next.js: 811µs, application-code: 18ms)
+ GET /tickets 200 in 64ms (next.js: 5ms, application-code: 58ms)
+ POST /api/ingest/whatsapp/live 200 in 11ms (next.js: 1918µs, application-code: 9ms)
+ POST /api/ingest/whatsapp/live 200 in 11ms (next.js: 6ms, application-code: 5ms)
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
+
+
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 148ms (next.js: 3ms, application-code: 145ms)
+[autoLinkThread] thread=256b5593-127c-4bc1-8fc2-6253353c80ae score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 186ms (next.js: 7ms, application-code: 179ms)
+ GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 143ms (next.js: 8ms, application-code: 135ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 15ms (next.js: 922µs, application-code: 15ms)
+ POST /api/ingest/whatsapp/live 200 in 10ms (next.js: 869µs, application-code: 9ms)
+ POST /api/ingest/whatsapp/live 200 in 10ms (next.js: 2ms, application-code: 8ms)
+[autoLinkThread] thread=256b5593-127c-4bc1-8fc2-6253353c80ae score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 43ms (next.js: 1528µs, application-code: 41ms)
+[autoLinkThread] thread=1c04937d-f2af-4d3e-8646-7c8dc115b0ec score=10 LOW — reasons: Within 72h of ticket activity
+[autoLinkThread] thread=edceb888-effc-4ac0-95f2-52b39b01a86c score=20 LOW — reasons: Product overlap with ticket lines; Within 72h of ticket activity
+ POST /api/automation/sync/outlook 200 in 3.7s (next.js: 9ms, application-code: 3.7s)
+ POST /api/automation/process 200 in 14ms (next.js: 1536µs, application-code: 13ms)
+ GET /tickets 200 in 77ms (next.js: 5ms, application-code: 72ms)
+ GET /tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1 200 in 147ms (next.js: 9ms, application-code: 139ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 6ms (next.js: 1999µs, application-code: 4ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 5ms (next.js: 753µs, application-code: 4ms)
+ GET /tickets 200 in 60ms (next.js: 5ms, application-code: 55ms)
+ GET /tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1 200 in 131ms (next.js: 5ms, application-code: 126ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 8ms (next.js: 1078µs, application-code: 6ms)
+ GET /tickets 200 in 59ms (next.js: 4ms, application-code: 55ms)
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
+
+
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 200ms (next.js: 9ms, application-code: 191ms)
+[autoLinkThread] thread=acab46b2-6bc0-4d52-9031-7a9d2029fc1a score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/ingest/whatsapp/live 200 in 234ms (next.js: 3ms, application-code: 231ms)
+ POST /api/ingest/whatsapp/live 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ POST /api/ingest/whatsapp/live 200 in 9ms (next.js: 4ms, application-code: 6ms)

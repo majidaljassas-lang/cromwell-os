@@ -136,7 +136,10 @@ export async function POST(request: Request) {
   // auto-ticket-creator runs, so we don't accidentally create a new
   // ticket from a supplier reply when an existing ticket fits.
   const supplierRfqLinker        = await runStep("supplierRfqLinker",        "/api/automation/supplier-rfq-linker");
-  const autoCreateTickets        = await runStep("autoCreateTickets",        "/api/automation/auto-create-tickets");
+  // DISABLED: auto-ticket creator was creating junk tickets from noise.
+  // Tickets are created manually from inbox triage only.
+  // const autoCreateTickets        = await runStep("autoCreateTickets",        "/api/automation/auto-create-tickets");
+  const autoCreateTickets = { step: "autoCreateTickets" as const, endpoint: "", ok: true, status: 200, durationMs: 0, result: { skipped: true, reason: "DISABLED — manual triage only" } };
   // Phase 1 of the chain plan: backfill customer/site on tickets that
   // were created manually from inbox threads (or by older codepaths)
   // and never had aiEntities resolved into them.
