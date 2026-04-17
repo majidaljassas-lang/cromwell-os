@@ -192,18 +192,12 @@ async function resolveAutoLink(
   const customerIds = Array.from(new Set(links.map((l) => l.customerId!).filter(Boolean)));
 
   if (customerIds.length === 0) return { confidence: "LOW", ticketId: null };
-  if (customerIds.length > 1) return { confidence: "MEDIUM", ticketId: null };
 
-  const openTickets = await prisma.ticket.findMany({
-    where: {
-      payingCustomerId: customerIds[0],
-      status: { notIn: CLOSED_TICKET_STATUSES },
-    },
-    select: { id: true },
-    take: 2,
-  });
-
-  if (openTickets.length === 1) return { confidence: "HIGH", ticketId: openTickets[0].id };
+  // NEVER auto-link based on contact alone. A contact (e.g. Rob Gilbey) can
+  // have multiple active projects at different sites. Contact match only gives
+  // MEDIUM confidence — the user decides which ticket it belongs to.
+  // AUTO-LINK requires content matching (site name, PO ref) which happens
+  // in the suggest-ticket API, not here.
   return { confidence: "MEDIUM", ticketId: null };
 }
 
