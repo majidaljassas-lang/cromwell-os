@@ -120,6 +120,7 @@ model Customer {
   id                     String               @id @default(uuid())
   name                   String
   legalName              String?
+  companyNumber          String?
   billingAddress         String?
   vatNumber              String?
   paymentTerms           String?
@@ -749,6 +750,10 @@ model Quote {
   pdfFileName          String?
   pdfPath              String?
   pdfGeneratedAt       DateTime?
+  proformaNumber       String?
+  proformaIssuedAt     DateTime?
+  proformaPdfFileName  String?
+  proformaPdfPath      String?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   CustomerPO           CustomerPO[]
@@ -2435,10 +2440,14 @@ enum TicketLineType {
 enum UnitOfMeasure {
   EA
   M
+  LM
   LENGTH
   PACK
   LOT
   SET
+  PAIR
+  BOX
+  ROLL
 }
 
 enum StockSourceType {
@@ -2624,6 +2633,10 @@ enum EventType {
   ORDER_ACK_RECEIVED
   SUPPLIER_QUOTE_RECEIVED
   APPROVAL_RECEIVED
+  // Direct-order autonomous chain (2026-04-17)
+  TICKET_BACKFILL_RESOLVED
+  SUPPLIER_RFQ_LINKED
+  SUPPLIER_PRICES_EXTRACTED
 }
 
 enum OrderEventType {

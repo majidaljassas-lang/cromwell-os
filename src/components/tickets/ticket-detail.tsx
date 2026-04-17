@@ -774,11 +774,10 @@ function InlineLineRow({
       <TableCell className="text-[#888888] text-[10px] p-1">
         <select
           value={line.unit}
-          onChange={(e) => saveField("unit", e.target.value)}
-          className="bg-transparent text-[10px] text-[#888888] border-none outline-none cursor-pointer hover:text-[#E0E0E0] appearance-none w-full"
-          style={{ WebkitAppearance: "none" }}
+          onChange={(e) => { saveField("unit", e.target.value); router.refresh(); }}
+          className="bg-[#0A0A0A] text-[10px] text-[#888888] border border-[#333] outline-none cursor-pointer hover:text-[#E0E0E0] rounded px-1 py-0.5"
         >
-          {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL"].map(u => (
+          {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL", "LM"].map(u => (
             <option key={u} value={u} className="bg-[#1A1A1A] text-[#E0E0E0]">{u}</option>
           ))}
         </select>

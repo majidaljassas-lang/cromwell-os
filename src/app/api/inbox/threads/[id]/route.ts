@@ -8,6 +8,8 @@
  * UNDO    → status=NEW, clear linkedTicketId
  */
 import { prisma } from "@/lib/prisma";
+import { extractDocument } from "@/lib/ingestion/document-extractor";
+import { processExtractedDocument } from "@/lib/ingestion/document-processor";
 
 type CustomerResolution =
   | { ok: true; customerId: string }
@@ -472,6 +474,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       data: statusUpdate,
     });
 
+    // Auto-extract documents (quotes, bills, credit notes) from thread content
+    let docResult = null;
+    try {
+      const fullText = allMessages.map((m) => m.snippet ?? "").join("\n\n");
+      if (fullText.length > 50) {
+        const extracted = await extractDocument(fullText);
+        if (extracted.lines.length > 0) {
+          docResult = await processExtractedDocument(body.ticketId, extracted);
+        }
+      }
+    } catch (err) {
+      console.warn("[LINK] Document extraction failed:", err instanceof Error ? err.message : err);
+    }
+
     return Response.json({
       ok: true,
       status: "LINKED",
@@ -479,6 +495,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       evidenceCreated: evidenceCount,
       eventsCreated: eventCount,
       tasksCreated,
+      documentExtracted: docResult,
     });
   }
 
