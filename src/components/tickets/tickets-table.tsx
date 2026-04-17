@@ -118,6 +118,13 @@ export function TicketsTable({
 }) {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter ?? "ACTIVE");
+  const [sortCol, setSortCol] = useState<string>("ticketNo");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(col: string) {
+    if (sortCol === col) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("desc"); }
+  }
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -434,8 +441,37 @@ export function TicketsTable({
                   <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
                     T-{ticket.ticketNo}
                   </TableCell>
-                  <TableCell className="font-medium max-w-[250px] truncate">
-                    {ticket.title}
+                  <TableCell className="max-w-[300px]">
+                    <div className="font-medium truncate">{ticket.title}</div>
+                    {ticket.tasks && ticket.tasks.length > 0 && (
+                      <div className="flex gap-1 mt-0.5">
+                        {ticket.tasks.map((task: { taskType: string; priority: string }, i: number) => {
+                          const labels: Record<string, string> = {
+                            PLACE_ORDER_WITH_SUPPLIER: "Order from supplier",
+                            AWAIT_ORDER_ACK: "Awaiting order ack",
+                            CHECK_DELIVERY_DATE: "Check delivery",
+                            CONFIRM_DELIVERY_RECEIPT: "Confirm delivery",
+                            MATCH_BILL_TO_TICKET: "Awaiting bill",
+                            MARKUP_AND_INVOICE: "Invoice to send",
+                            CHASE_PAYMENT: "Chase payment",
+                            REVIEW_SUPPLIER_PRICING: "Review pricing",
+                            CHASE_FOLLOW_UP: "Follow up needed",
+                            REVIEW_DISPUTE: "Dispute",
+                          };
+                          const colors: Record<string, string> = {
+                            HIGH: "#FF3333",
+                            MEDIUM: "#FF9900",
+                            LOW: "#888",
+                          };
+                          return (
+                            <span key={i} className="text-[8px] uppercase tracking-wider px-1 py-0.5 rounded"
+                              style={{ color: colors[task.priority] ?? "#888", background: (colors[task.priority] ?? "#888") + "15", border: `1px solid ${colors[task.priority] ?? "#888"}30` }}>
+                              {labels[task.taskType] ?? task.taskType.replace(/_/g, " ").toLowerCase()}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">

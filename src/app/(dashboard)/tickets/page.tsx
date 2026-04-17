@@ -15,6 +15,12 @@ export default async function TicketsPage({ searchParams }: { searchParams: Prom
       _count: {
         select: { lines: true },
       },
+      tasks: {
+        where: { status: "OPEN" },
+        select: { taskType: true, priority: true },
+        orderBy: { priority: "asc" },
+        take: 3,
+      },
     },
     orderBy: { createdAt: "desc" },
   });
