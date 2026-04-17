@@ -68,5 +68,12 @@
     "value": "Football",
     "label": "Football",
     "blockedAt": "2026-04-17T12:04:17.859Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Pensioners Footy Club",
+    "label": "Pensioners Footy Club",
+    "blockedAt": "2026-04-17T13:04:42.218Z"
   }
 ]
