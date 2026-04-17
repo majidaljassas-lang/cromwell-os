@@ -229,23 +229,21 @@ export async function attachEventToThread(eventId: string): Promise<string | nul
 
   let effectiveKey = key.conversationKey;
 
-  if (key.channel === "WHATSAPP" || key.channel === "WHATSAPP_GROUP") {
-    // Find the most recent thread for this chat
-    const latestThread = await prisma.inboxThread.findFirst({
-      where: { channel: key.channel, conversationKey: { startsWith: key.conversationKey } },
-      orderBy: { latestAt: "desc" },
-      select: { id: true, conversationKey: true, latestAt: true },
-    });
+  // ALL channels: split by time gap. An email reply 7 days later is NOT
+  // the same conversation just because Outlook groups it. Each message
+  // within 3 hours joins the existing thread; beyond that, new thread.
+  const latestThread = await prisma.inboxThread.findFirst({
+    where: { channel: key.channel, conversationKey: { startsWith: key.conversationKey.split("::")[0] } },
+    orderBy: { latestAt: "desc" },
+    select: { id: true, conversationKey: true, latestAt: true },
+  });
 
-    if (latestThread) {
-      const gap = event.receivedAt.getTime() - latestThread.latestAt.getTime();
-      if (gap > TIME_GAP_MS) {
-        // Time gap exceeded — create a new thread with a timestamp suffix
-        effectiveKey = `${key.conversationKey}::${event.receivedAt.toISOString().slice(0, 13)}`;
-      } else {
-        // Within the window — join the existing thread
-        effectiveKey = latestThread.conversationKey;
-      }
+  if (latestThread) {
+    const gap = event.receivedAt.getTime() - latestThread.latestAt.getTime();
+    if (gap > TIME_GAP_MS) {
+      effectiveKey = `${key.conversationKey.split("::")[0]}::${event.receivedAt.toISOString().slice(0, 13)}`;
+    } else {
+      effectiveKey = latestThread.conversationKey;
     }
   }
 
