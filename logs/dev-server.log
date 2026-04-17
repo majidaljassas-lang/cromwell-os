@@ -366,3 +366,35 @@ Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
  POST /api/ingest/whatsapp/live 200 in 234ms (next.js: 3ms, application-code: 231ms)
  POST /api/ingest/whatsapp/live 200 in 11ms (next.js: 3ms, application-code: 8ms)
  POST /api/ingest/whatsapp/live 200 in 9ms (next.js: 4ms, application-code: 6ms)
+ GET /tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1 200 in 145ms (next.js: 8ms, application-code: 137ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 6ms (next.js: 1913µs, application-code: 4ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 4ms (next.js: 815µs, application-code: 4ms)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'name')
+    at <unknown> (src/components/quotes/quote-panel.tsx:422:41)
+    at Array.map (<anonymous>)
+    at QuotePanel (src/components/quotes/quote-panel.tsx:393:19)
+    at QuotePanelWithPO (src/components/tickets/ticket-detail.tsx:2956:7)
+    at TicketDetail (src/components/tickets/ticket-detail.tsx:2838:11)
+    at TicketDetailPage (src/app/(dashboard)/tickets/[id]/page.tsx:157:7)
+  420 |                     <div className="flex items-center gap-3">
+  421 |                       <span className="text-sm text-[#888888]">
+> 422 |                         {quote.customer.name}
+      |                                         ^
+  423 |                       </span>
+  424 |                       <span className="text-sm font-medium tabular-nums">
+  425 |                         {dec(quote.totalSell)}
+ GET /tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1 200 in 358ms (next.js: 7ms, application-code: 350ms)
+ GET /api/tickets/c9b5045d-1962-43d4-b8b0-1ebfe3ebf3a1/commercial-summary 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /tickets 200 in 60ms (next.js: 6ms, application-code: 54ms)
+ GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 143ms (next.js: 7ms, application-code: 135ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 6ms (next.js: 885µs, application-code: 5ms)
+ GET /tickets 200 in 56ms (next.js: 6ms, application-code: 51ms)
+ GET /tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30 200 in 139ms (next.js: 6ms, application-code: 132ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 8ms (next.js: 2ms, application-code: 6ms)
+ GET /api/tickets/a62dc23d-668d-46d0-b338-024ab3a0dc30/commercial-summary 200 in 4ms (next.js: 853µs, application-code: 3ms)
+ GET /tickets 200 in 59ms (next.js: 5ms, application-code: 53ms)
+ GET /tickets/1a39299c-3605-4850-a2d3-78f81af957e8 200 in 140ms (next.js: 7ms, application-code: 133ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/commercial-summary 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/commercial-summary 200 in 5ms (next.js: 659µs, application-code: 4ms)
+ GET /tickets 200 in 64ms (next.js: 3ms, application-code: 61ms)
