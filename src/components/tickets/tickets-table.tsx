@@ -130,7 +130,7 @@ export function TicketsTable({
   const [submitting, setSubmitting] = useState(false);
 
   // Status groups for quick filters
-  const activeStatuses = ["CAPTURED", "PRICING", "QUOTED", "APPROVED", "ORDERED", "DELIVERED", "COSTED", "PENDING_PO"];
+  const activeStatuses = ["CAPTURED", "PRICING", "APPROVED", "ORDERED", "DELIVERED", "COSTED", "PENDING_PO"];
   const closedStatuses = ["INVOICED", "CLOSED", "VERIFIED", "LOCKED"];
 
   const filtered = tickets.filter((t) => {
