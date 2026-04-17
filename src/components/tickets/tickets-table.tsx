@@ -151,17 +151,21 @@ export function TicketsTable({
     return true;
   });
 
-  // Sort: active tickets by status priority, then by most recent
-  const statusOrder: Record<string, number> = {
-    ORDERED: 0, APPROVED: 1, DELIVERED: 2, PRICING: 3, QUOTED: 4,
-    CAPTURED: 5, COSTED: 6, PENDING_PO: 7, INVOICED: 8, CLOSED: 9,
-    RECOVERY: 10, VERIFIED: 11, LOCKED: 12,
-  };
+  // Sort by selected column
   const sorted = [...filtered].sort((a, b) => {
-    const sa = statusOrder[a.status] ?? 99;
-    const sb = statusOrder[b.status] ?? 99;
-    if (sa !== sb) return sa - sb;
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    let cmp = 0;
+    switch (sortCol) {
+      case "ticketNo": cmp = a.ticketNo - b.ticketNo; break;
+      case "title": cmp = (a.title ?? "").localeCompare(b.title ?? ""); break;
+      case "status": cmp = a.status.localeCompare(b.status); break;
+      case "mode": cmp = a.ticketMode.localeCompare(b.ticketMode); break;
+      case "customer": cmp = (a.payingCustomer?.name ?? "").localeCompare(b.payingCustomer?.name ?? ""); break;
+      case "site": cmp = (a.site?.siteName ?? "").localeCompare(b.site?.siteName ?? ""); break;
+      case "lines": cmp = (a._count?.lines ?? 0) - (b._count?.lines ?? 0); break;
+      case "createdAt": cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(); break;
+      default: cmp = a.ticketNo - b.ticketNo;
+    }
+    return sortDir === "asc" ? cmp : -cmp;
   });
 
   const [ticketMode, setTicketMode] = useState<string>("DIRECT_ORDER");
@@ -391,14 +395,14 @@ export function TicketsTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>No</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead className="text-right">Lines</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("ticketNo")}>No {sortCol === "ticketNo" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("title")}>Title {sortCol === "title" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("mode")}>Mode {sortCol === "mode" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("status")}>Status {sortCol === "status" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("customer")}>Customer {sortCol === "customer" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("site")}>Site {sortCol === "site" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="text-right cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("lines")}>Lines {sortCol === "lines" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
+              <TableHead className="cursor-pointer select-none hover:text-[#FF6600]" onClick={() => toggleSort("createdAt")}>Created {sortCol === "createdAt" ? (sortDir === "asc" ? "↑" : "↓") : ""}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
