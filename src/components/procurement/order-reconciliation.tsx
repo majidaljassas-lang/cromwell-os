@@ -144,18 +144,23 @@ export function OrderReconciliation({ ticketId }: { ticketId: string }) {
               const hasReturn = matchedPoLines.some(pl => pl.matchStatus === "RETURN");
               const totalOrderedQty = matchedPoLines.reduce((s, pl) => s + Number(pl.qty), 0);
               const requiredQty = Number(tl.qty);
+              const fromStockQty = Number((tl as any).fromStock ?? 0);
               // Handle pack UOM
               let effectiveRequired = requiredQty;
               if (tl.unit === "PACK") {
                 const packMatch = tl.description.match(/\((\d+)\)/);
                 if (packMatch) effectiveRequired = requiredQty * parseInt(packMatch[1]);
               }
+              // Stock allocation counts as "covered" — reduces what needs ordering
+              const coveredByStock = Math.min(fromStockQty, effectiveRequired);
+              const needsOrdering = effectiveRequired - coveredByStock;
               // If stock/return allocated, show as resolved (effective ordered = required)
-              const orderedQty = (hasStockAllocated || hasReturn) ? effectiveRequired : totalOrderedQty;
+              const orderedQty = (hasStockAllocated || hasReturn) ? effectiveRequired : totalOrderedQty + coveredByStock;
               const diff = orderedQty - effectiveRequired;
-              const resolved = hasStockAllocated || hasReturn;
-              const statusColor = orderedQty === 0 ? "text-[#FF3333]" : resolved ? "text-[#00CC66]" : diff === 0 ? "text-[#00CC66]" : diff > 0 ? "text-[#FF9900]" : "text-[#FF3333]";
-              const statusText = orderedQty === 0 ? "NOT ORDERED" : resolved ? (hasStockAllocated ? "RESOLVED → STOCK" : "RESOLVED → RETURN") : diff === 0 ? "EXACT" : diff > 0 ? `+${diff} EXCESS` : `${diff} SHORT`;
+              const resolved = hasStockAllocated || hasReturn || (coveredByStock >= effectiveRequired);
+              const isFromStock = coveredByStock >= effectiveRequired && totalOrderedQty === 0;
+              const statusColor = isFromStock ? "text-[#00CC66]" : orderedQty === 0 ? "text-[#FF3333]" : resolved ? "text-[#00CC66]" : diff === 0 ? "text-[#00CC66]" : diff > 0 ? "text-[#FF9900]" : "text-[#FF3333]";
+              const statusText = isFromStock ? "FROM STOCK" : orderedQty === 0 ? "NOT ORDERED" : resolved ? (hasStockAllocated ? "RESOLVED → STOCK" : "RESOLVED → RETURN") : diff === 0 ? "EXACT" : diff > 0 ? `+${diff} EXCESS` : `${diff} SHORT`;
               const isSplitSupply = matchedPoLines.length > 1;
               const suppliers = [...new Set(matchedPoLines.map(pl => pl.procurementOrder.supplier.name))];
               return (
