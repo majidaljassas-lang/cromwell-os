@@ -21,7 +21,7 @@ export async function GET(
 
     const ticketLines = await prisma.ticketLine.findMany({
       where: { ticketId },
-      select: { id: true, description: true, qty: true, unit: true, status: true },
+      select: { id: true, description: true, qty: true, unit: true, status: true, fromStock: true, toOrder: true },
       orderBy: { createdAt: "asc" },
     });
 

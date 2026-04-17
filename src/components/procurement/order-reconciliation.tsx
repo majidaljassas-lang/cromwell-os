@@ -31,6 +31,8 @@ type TicketLine = {
   qty: number;
   unit: string;
   status: string;
+  fromStock?: number | null;
+  toOrder?: number | null;
 };
 
 type ReconData = {
@@ -144,7 +146,7 @@ export function OrderReconciliation({ ticketId }: { ticketId: string }) {
               const hasReturn = matchedPoLines.some(pl => pl.matchStatus === "RETURN");
               const totalOrderedQty = matchedPoLines.reduce((s, pl) => s + Number(pl.qty), 0);
               const requiredQty = Number(tl.qty);
-              const fromStockQty = Number((tl as any).fromStock ?? 0);
+              const fromStockQty = Number(tl.fromStock ?? 0);
               // Handle pack UOM
               let effectiveRequired = requiredQty;
               if (tl.unit === "PACK") {
