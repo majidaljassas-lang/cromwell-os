@@ -439,7 +439,7 @@ export function TicketsTable({
                     </Button>
                   </TableCell>
                   <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
-                    T-{ticket.ticketNo}
+                    CP-{String(ticket.ticketNo).padStart(4, "0")}
                   </TableCell>
                   <TableCell className="max-w-[300px]">
                     <div className="font-medium truncate">{ticket.title}</div>
