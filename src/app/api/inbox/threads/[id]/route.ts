@@ -180,9 +180,36 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (body.action === "UNDO") {
     await prisma.inboxThread.update({
       where: { id },
-      data: { status: "NEW", noisedAt: null, triagedAt: null, linkedTicketId: null },
+      data: { status: "NEW", noisedAt: null, triagedAt: null, linkedTicketId: null, triageAction: null, triageDueAt: null, triageNote: null },
     });
     return Response.json({ ok: true, status: "NEW" });
+  }
+
+  if (body.action === "TRIAGE") {
+    const { triageAction, triageDueAt, triageNote } = body as {
+      triageAction?: string;
+      triageDueAt?: string;
+      triageNote?: string;
+    };
+    await prisma.inboxThread.update({
+      where: { id },
+      data: {
+        status: "TRIAGED",
+        triageAction: triageAction ?? "REVIEW",
+        triageDueAt: triageDueAt ? new Date(triageDueAt) : new Date(Date.now() + 24 * 60 * 60 * 1000), // default tomorrow
+        triageNote: triageNote ?? null,
+        triagedAt: new Date(),
+      },
+    });
+    return Response.json({ ok: true, status: "TRIAGED", triageAction });
+  }
+
+  if (body.action === "DONE") {
+    await prisma.inboxThread.update({
+      where: { id },
+      data: { status: "ARCHIVED", triagedAt: new Date() },
+    });
+    return Response.json({ ok: true, status: "ARCHIVED" });
   }
 
   if (body.action === "LINK") {
@@ -348,6 +375,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         msgEventType = "SUPPLIER_QUOTE_RECEIVED";
         msgTaskType = "REVIEW_SUPPLIER_PRICING";
         msgTaskReason = "Supplier pricing received — review and update costs";
+      } else if (!isSent && /where.*my|chasing|following up|any update|still waiting|when.*ready|chase|outstanding|overdue/i.test(msgText)) {
+        // Follow-up / chase message
+        msgEvidenceType = "INSTRUCTION";
+        msgEventType = "COMMS_RECEIVED";
+        msgTaskType = "CHASE_FOLLOW_UP";
+        msgTaskPriority = "HIGH";
+        msgTaskReason = "Follow-up received — customer/supplier chasing for response";
       } else if (isSent) {
         msgEventType = "COMMS_SENT";
       }

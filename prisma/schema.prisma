@@ -3323,6 +3323,9 @@ model InboxThread {
   aiAnalysedAt      DateTime?            // When AI last analysed this thread
   autoCreatedTicket Boolean              @default(false) // Thread was auto-promoted to a ticket by Phase 12
   manualMode        Boolean              @default(false) // When true, AI never re-analyses or re-classifies
+  triageAction    String?
+  triageDueAt     DateTime?
+  triageNote      String?
   noisedAt        DateTime?
   triagedAt       DateTime?
   triagedBy       String?

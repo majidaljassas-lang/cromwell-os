@@ -7,6 +7,8 @@ export async function GET() {
     inboxNew,
     inboxEmail,
     inboxWa,
+    inboxTriaged,
+    inboxOverdue,
     ticketsByStatus,
     ticketsByMode,
     recentTickets,
@@ -21,6 +23,8 @@ export async function GET() {
     prisma.inboxThread.count({ where: { status: "NEW" } }),
     prisma.inboxThread.count({ where: { status: "NEW", channel: "EMAIL" } }),
     prisma.inboxThread.count({ where: { status: "NEW", channel: { in: ["WHATSAPP", "WHATSAPP_GROUP"] } } }),
+    prisma.inboxThread.count({ where: { status: "TRIAGED" } }),
+    prisma.inboxThread.count({ where: { status: "TRIAGED", triageDueAt: { lt: new Date() } } }),
     prisma.ticket.groupBy({ by: ["status"], _count: true, where: { status: { notIn: ["CLOSED"] } } }),
     prisma.ticket.groupBy({ by: ["ticketMode"], _count: true, where: { status: { notIn: ["CLOSED"] } } }),
     prisma.ticket.findMany({
@@ -58,6 +62,8 @@ export async function GET() {
       newCount: inboxNew,
       emailCount: inboxEmail,
       whatsappCount: inboxWa,
+      triagedCount: inboxTriaged,
+      overdueCount: inboxOverdue,
     },
     tickets: {
       total: Object.values(statusMap).reduce((a, b) => a + b, 0),

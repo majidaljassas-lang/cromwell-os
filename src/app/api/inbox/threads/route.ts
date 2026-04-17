@@ -31,7 +31,9 @@ export async function GET(request: Request) {
       where,
       // Content-based triage: HIGH deal-relevance threads at the top, LOW
       // threads at the bottom (still visible). Within each tier, newest first.
-      orderBy: [{ dealScore: "desc" }, { latestAt: "desc" }],
+      orderBy: status === "TRIAGED"
+        ? [{ triageDueAt: "asc" }, { latestAt: "desc" }]
+        : [{ dealScore: "desc" }, { latestAt: "desc" }],
       take: limit,
       include: {
         _count: { select: { messages: true } },
@@ -80,6 +82,12 @@ export async function GET(request: Request) {
       status: t.status,
       linkConfidence: t.linkConfidence,
       linkSource: t.linkSource,
+      triageAction: t.triageAction,
+      triageDueAt: t.triageDueAt,
+      triageNote: t.triageNote,
+      aiSummary: t.aiSummary,
+      aiClassification: t.aiClassification,
+      aiConfidence: t.aiConfidence,
       dealScore: t.dealScore,
       dealTier: t.dealScore >= 70 ? "HIGH" : t.dealScore >= 40 ? "MEDIUM" : "LOW",
       dealReasons: t.dealReasons,

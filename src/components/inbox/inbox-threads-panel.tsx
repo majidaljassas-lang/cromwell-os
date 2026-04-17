@@ -42,10 +42,10 @@ const CHANNEL_ICON: Record<string, string> = {
 type Customer = { id: string; name: string };
 type Site = { id: string; siteName: string };
 
-export function InboxThreadsPanel() {
+export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } = {}) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [statusFilter, setStatusFilter] = useState<string>("NEW");
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatus ?? "NEW");
   const [channelFilter, setChannelFilter] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,6 +74,40 @@ export function InboxThreadsPanel() {
   const [newSiteName, setNewSiteName] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingSite, setCreatingSite] = useState(false);
+  const [triageThreadId, setTriageThreadId] = useState<string | null>(null);
+  const [triageAction, setTriageAction] = useState("RESPOND");
+  const [triageDueAt, setTriageDueAt] = useState("");
+  const [triageNote, setTriageNote] = useState("");
+
+  async function submitTriage() {
+    if (!triageThreadId) return;
+    setWorking(triageThreadId);
+    try {
+      const r = await fetch(`/api/inbox/threads/${triageThreadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "TRIAGE", triageAction, triageDueAt: triageDueAt || undefined, triageNote: triageNote || undefined }),
+      });
+      if (r.ok) {
+        setToast(`✓ Triaged as ${triageAction}`);
+        setTriageThreadId(null);
+        await refresh();
+      }
+    } finally { setWorking(null); }
+  }
+
+  async function markDone(id: string) {
+    setWorking(id);
+    try {
+      await fetch(`/api/inbox/threads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "DONE" }),
+      });
+      setToast("✓ Done");
+      await refresh();
+    } finally { setWorking(null); }
+  }
   const [tickets, setTickets] = useState<Array<{ id: string; ticketNo: number; title: string }>>([]);
 
   // Load customers + sites + commercial links once
@@ -404,15 +438,22 @@ export function InboxThreadsPanel() {
               <option value="EMAIL">Email</option>
               <option value="WHATSAPP">WhatsApp</option>
             </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-7 text-xs bg-[#0A0A0A] border border-[#333] px-2"
-            >
-              <option value="NEW">New ({counts.NEW ?? 0})</option>
-              <option value="LINKED">Linked ({counts.LINKED ?? 0})</option>
-              <option value="ALL">All</option>
-            </select>
+            <div className="flex gap-0.5">
+              {[
+                { key: "NEW", label: "New", color: "#FF6600" },
+                { key: "TRIAGED", label: "To Do", color: "#FFCC00" },
+                { key: "LINKED", label: "Linked", color: "#00CC66" },
+                { key: "ALL", label: "All", color: "#888" },
+              ].map((tab) => (
+                <button key={tab.key}
+                  onClick={() => setStatusFilter(tab.key)}
+                  className={`h-7 px-3 text-[10px] uppercase tracking-wider font-bold border transition-colors ${statusFilter === tab.key ? "text-black" : "text-[#888] border-[#333] hover:border-[#555]"}`}
+                  style={statusFilter === tab.key ? { backgroundColor: tab.color, borderColor: tab.color } : {}}
+                >
+                  {tab.label} {tab.key !== "ALL" ? `(${counts[tab.key] ?? 0})` : ""}
+                </button>
+              ))}
+            </div>
             <Button size="sm" variant="outline" onClick={refresh} disabled={loading} className="h-7 text-xs">
               {loading ? "..." : "↻"}
             </Button>
@@ -519,7 +560,16 @@ export function InboxThreadsPanel() {
                       )}
                     </td>
                     <td className="p-2">
-                      {t.classification && t.classification !== "UNKNOWN" && (
+                      {/* Triage action badge for TO DO items */}
+                      {(t as any).triageAction && (
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded mr-1" style={{
+                          color: ({ RESPOND: "#3399FF", PAY: "#FF3333", CHASE: "#FF9900", ADMIN: "#B366FF", REVIEW: "#888" } as Record<string, string>)[(t as any).triageAction] ?? "#888",
+                          background: "rgba(255,255,255,0.05)",
+                        }}>
+                          {(t as any).triageAction}
+                        </span>
+                      )}
+                      {t.classification && t.classification !== "UNKNOWN" && !(t as any).triageAction && (
                         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded" style={{
                           color: ({
                             BILL: "#00CCFF", BILL_DOCUMENT: "#00CCFF",
@@ -562,12 +612,57 @@ export function InboxThreadsPanel() {
                               onClick={() => doDelete(t.id)} disabled={working === t.id}>
                               Delete
                             </Button>
+                            <select
+                              className="h-5 text-[10px] bg-[#FFCC00]/10 border border-[#FFCC00]/30 text-[#FFCC00] px-1 rounded"
+                              defaultValue=""
+                              onChange={async (e) => {
+                                if (!e.target.value) return;
+                                setWorking(t.id);
+                                try {
+                                  const r = await fetch(`/api/inbox/threads/${t.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ action: "TRIAGE", triageAction: e.target.value }),
+                                  });
+                                  if (r.ok) { setToast(`✓ → To Do (${e.target.value})`); await refresh(); }
+                                } finally { setWorking(null); }
+                                e.target.value = "";
+                              }}
+                              disabled={working === t.id}
+                            >
+                              <option value="">To Do →</option>
+                              <option value="RESPOND">Respond</option>
+                              <option value="PAY">Pay / Finance</option>
+                              <option value="CHASE">Chase</option>
+                              <option value="ADMIN">Admin</option>
+                              <option value="REVIEW">Review</option>
+                            </select>
+                            <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
+                              onClick={() => doDelete(t.id)} disabled={working === t.id}>
+                              Del
+                            </Button>
                             <Button size="sm" className="h-5 text-[10px] px-1.5 bg-red-900 hover:bg-red-800 text-red-300"
                               onClick={() => doDelete(t.id, true)} disabled={working === t.id}
                               title="Delete and block future messages from this sender">
                               🚫
                             </Button>
                           </>
+                        )}
+                        {t.status === "TRIAGED" && (
+                          <div className="flex gap-1">
+                            <Button size="sm" className="h-5 text-[10px] px-2 bg-[#00CC66] hover:bg-[#00AA55] text-black"
+                              onClick={() => markDone(t.id)} disabled={working === t.id}>
+                              Done
+                            </Button>
+                            <Button size="sm" variant="default" className="h-5 text-[10px] px-2"
+                              onClick={() => openNewTicketForm(t)} disabled={working === t.id}>
+                              → Ticket
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
+                              onClick={() => doAction(t.id, "UNDO")} disabled={working === t.id}>
+                              Undo
+                            </Button>
+                          </div>
                         )}
                         {t.status === "LINKED" && (
                           <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"

@@ -58,7 +58,7 @@ export function CommandCentreView() {
     <div className="space-y-5">
 
       {/* Hero cards row */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         {/* Inbox */}
         <Link href="/inbox" className="group relative overflow-hidden rounded-lg border border-[#FF6600]/30 bg-gradient-to-br from-[#1A0A00] to-[#0D0D0D] p-4 hover:border-[#FF6600] transition-all">
           <div className="flex items-center justify-between">
@@ -73,6 +73,21 @@ export function CommandCentreView() {
             <div className="mt-3 text-[10px] font-bold text-[#FF6600] uppercase tracking-wider group-hover:underline">
               Triage now →
             </div>
+          )}
+        </Link>
+
+        {/* To Do */}
+        <Link href="/inbox?status=TRIAGED" className="group relative overflow-hidden rounded-lg border border-[#FFCC00]/30 bg-gradient-to-br from-[#1A1500] to-[#0D0D0D] p-4 hover:border-[#FFCC00] transition-all">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-[#FFCC00]/70">To Do</div>
+              <div className="text-4xl font-black text-[#FFCC00] mt-1">{d.inbox.triagedCount ?? 0}</div>
+              <div className="text-[11px] text-[#888] mt-1">{d.inbox.overdueCount ?? 0} overdue</div>
+            </div>
+            <div className="text-5xl opacity-20 group-hover:opacity-40 transition-opacity">📋</div>
+          </div>
+          {(d.inbox.overdueCount ?? 0) > 0 && (
+            <div className="mt-2 text-[10px] text-[#FF3333] font-bold">⚠ {d.inbox.overdueCount} overdue</div>
           )}
         </Link>
 
