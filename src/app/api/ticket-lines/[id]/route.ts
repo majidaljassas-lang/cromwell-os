@@ -129,6 +129,15 @@ export async function PATCH(
     });
 
     // Auto-progress ticket status when lines change
+    // If any pricing field changed, check if ticket should move to PRICING
+    const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
+    if (pricingChanged) {
+      const ticket = await prisma.ticket.findUnique({ where: { id: line.ticketId }, select: { status: true } });
+      if (ticket?.status === "CAPTURED") {
+        await prisma.ticket.update({ where: { id: line.ticketId }, data: { status: "PRICING", lastActivityAt: new Date() } });
+      }
+    }
+
     if (allowed.status === "ORDERED" || allowed.status === "FROM_STOCK" || allowed.status === "FULLY_COSTED" || allowed.status === "INVOICED") {
       await autoProgressTicket(line.ticketId);
     }
