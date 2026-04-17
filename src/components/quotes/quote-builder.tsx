@@ -3,9 +3,11 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Send, FileText, Eye, Download, CheckCircle, XCircle } from "lucide-react";
+import { ArrowLeft, Send, FileText, Eye, Download, CheckCircle, XCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -15,6 +17,15 @@ import {
   TableRow,
   TableFooter,
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
 
 type BomComponent = {
   id: string;
@@ -52,7 +63,11 @@ type Quote = {
   totalSell: number;
   notes: string | null;
   issuedAt: string | null;
+  expiresAt: string | null;
   createdAt: string;
+  proformaNumber: string | null;
+  proformaIssuedAt: string | null;
+  proformaPdfPath: string | null;
   customer: { id: string; name: string };
   ticket: {
     id: string;
@@ -79,6 +94,39 @@ export function QuoteBuilder({ quote }: { quote: Quote & { pdfFileName?: string;
   const router = useRouter();
   const [sending, setSending] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+
+  // Pro-forma state
+  const [proformaOpen, setProformaOpen] = useState(false);
+  const [generatingProforma, setGeneratingProforma] = useState(false);
+  const [proformaError, setProformaError] = useState<string | null>(null);
+  const defaultValidUntil = quote.expiresAt
+    ? quote.expiresAt.slice(0, 10)
+    : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [validUntil, setValidUntil] = useState(defaultValidUntil);
+
+  async function handleGenerateProforma() {
+    setProformaError(null);
+    setGeneratingProforma(true);
+    try {
+      const res = await fetch(`/api/quotes/${quote.id}/generate-proforma`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expiresAt: validUntil || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setProformaError(data.error || "Pro-forma generation failed");
+        return;
+      }
+      window.open(`/api/quotes/${quote.id}/generate-proforma`, "_blank");
+      setProformaOpen(false);
+      router.refresh();
+    } catch (err) {
+      setProformaError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setGeneratingProforma(false);
+    }
+  }
 
   // Compute totals
   const totalSale = quote.lines.reduce((s, l) => s + Number(l.lineTotal), 0);
@@ -204,6 +252,73 @@ export function QuoteBuilder({ quote }: { quote: Quote & { pdfFileName?: string;
               <FileText className="size-4 mr-1" />
               {generatingPdf ? "Generating..." : "Generate PDF"}
             </Button>
+          )}
+          <Sheet open={proformaOpen} onOpenChange={setProformaOpen}>
+            <SheetTrigger
+              render={
+                <Button variant="outline" size="sm" className="bg-[#222222] text-[#3399FF] border-[#3399FF]/40 hover:bg-[#3399FF]/10">
+                  <Receipt className="size-4 mr-1" />
+                  Pro-Forma
+                </Button>
+              }
+            />
+            <SheetContent side="right">
+              <SheetHeader>
+                <SheetTitle>Generate Pro-Forma</SheetTitle>
+                <SheetDescription>
+                  Renders this quote as a pro-forma invoice PDF. Does NOT post to AR — the
+                  customer pays against this document and a real VAT invoice is issued on receipt.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-4 px-4">
+                {quote.proformaNumber && (
+                  <div className="text-xs bg-[#3399FF]/10 border border-[#3399FF]/30 px-3 py-2">
+                    Existing pro-forma: <strong className="bb-mono text-[#3399FF]">{quote.proformaNumber}</strong>
+                    {quote.proformaIssuedAt && (
+                      <span className="text-[#888888] ml-2">
+                        issued {new Date(quote.proformaIssuedAt).toLocaleDateString("en-GB")}
+                      </span>
+                    )}
+                    <div className="text-[10px] text-[#888888] mt-1">
+                      Re-generating will keep the same number and overwrite the PDF.
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="pf-valid-until">Valid Until</Label>
+                  <Input
+                    id="pf-valid-until"
+                    type="date"
+                    value={validUntil}
+                    onChange={(e) => setValidUntil(e.target.value)}
+                  />
+                  <p className="text-[10px] text-[#888888]">
+                    Updates the quote&apos;s expiry date. Default is 30 days from today.
+                  </p>
+                </div>
+                {proformaError && (
+                  <p className="text-[11px] text-[#FF3333]">{proformaError}</p>
+                )}
+                <SheetFooter>
+                  <Button
+                    onClick={handleGenerateProforma}
+                    disabled={generatingProforma}
+                    className="bg-[#3399FF] text-black hover:bg-[#66AAFF]"
+                  >
+                    <Receipt className="size-4 mr-1" />
+                    {generatingProforma ? "Generating..." : "Generate & Download"}
+                  </Button>
+                </SheetFooter>
+              </div>
+            </SheetContent>
+          </Sheet>
+          {quote.proformaPdfPath && (
+            <a href={`/api/quotes/${quote.id}/generate-proforma`} target="_blank" rel="noreferrer">
+              <Button variant="outline" size="sm" className="bg-[#222222] text-[#3399FF] border-[#333333] hover:bg-[#2A2A2A]">
+                <Download className="size-4 mr-1" />
+                PF
+              </Button>
+            </a>
           )}
           {quote.status === "DRAFT" && quote.pdfPath && (
             <Button onClick={handleSend} disabled={sending} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">

@@ -131,6 +131,39 @@ export function SitesTable({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const addressReqRef = useRef(0);
 
+  // Postcode lookup (postcodes.io)
+  const [lookingUpPc, setLookingUpPc] = useState(false);
+  const [pcLookupError, setPcLookupError] = useState<string | null>(null);
+  const [pcLookupOk, setPcLookupOk] = useState<string | null>(null);
+
+  async function handlePostcodeLookup() {
+    const cleaned = postcode.replace(/\s+/g, "");
+    if (!cleaned) {
+      setPcLookupError("Enter a postcode first");
+      return;
+    }
+    setPcLookupError(null);
+    setPcLookupOk(null);
+    setLookingUpPc(true);
+    try {
+      const res = await fetch(`/api/sites/lookup-postcode/${encodeURIComponent(cleaned)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setPcLookupError(data.error || "Lookup failed");
+        return;
+      }
+      if (data.postcode) setPostcode(data.postcode);
+      if (data.city) setCity(data.city);
+      if (data.country) setCountry(data.country);
+      setAddressDirty(true);
+      setPcLookupOk(`${data.city}${data.region ? ", " + data.region : ""} (${data.country})`);
+    } catch (err) {
+      setPcLookupError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setLookingUpPc(false);
+    }
+  }
+
   // Debounced smart address lookup. The endpoint searches the internal DB
   // first (Site / Customer / PO / IngestionEvent) and falls through to
   // Nominatim if nothing matches internally.
@@ -490,12 +523,28 @@ export function SitesTable({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="postcode">Postcode</Label>
-                  <Input
-                    id="postcode"
-                    name="postcode"
-                    value={postcode}
-                    onChange={handleAddressEdit(setPostcode)}
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      id="postcode"
+                      name="postcode"
+                      value={postcode}
+                      onChange={handleAddressEdit(setPostcode)}
+                      placeholder="e.g. W10 4RE"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handlePostcodeLookup}
+                      disabled={lookingUpPc || !postcode.trim()}
+                      className="bg-[#222222] border-[#333333] text-[#E0E0E0]"
+                    >
+                      <Search className="size-3.5 mr-1" />
+                      {lookingUpPc ? "..." : "Lookup"}
+                    </Button>
+                  </div>
+                  {pcLookupError && <p className="text-[10px] text-[#FF3333]">{pcLookupError}</p>}
+                  {pcLookupOk && <p className="text-[10px] text-[#00CC66]">Found: {pcLookupOk}</p>}
                 </div>
               </div>
               <div className="space-y-1.5">

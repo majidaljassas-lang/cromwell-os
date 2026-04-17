@@ -9,49 +9,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-
-// ── Recalculate winner after any price mutation ─────────────────────
-
-async function recalcWinner(ticketLineId: string) {
-  const prices = await prisma.ticketLinePrice.findMany({
-    where: { ticketLineId },
-    orderBy: { costTotal: "asc" },
-  });
-
-  if (prices.length === 0) {
-    // No prices left — clear line cost fields
-    await prisma.ticketLine.update({
-      where: { id: ticketLineId },
-      data: { expectedCostUnit: null, expectedCostTotal: null, supplierName: null, supplierId: null },
-    });
-    return;
-  }
-
-  // Manual override takes priority
-  const manual = prices.find((p) => p.isManual);
-  const winner = manual ?? prices[0]; // prices[0] is lowest costTotal
-
-  // Reset all to non-winner, then set the winner
-  await prisma.ticketLinePrice.updateMany({
-    where: { ticketLineId, isWinner: true },
-    data: { isWinner: false },
-  });
-  await prisma.ticketLinePrice.update({
-    where: { id: winner.id },
-    data: { isWinner: true },
-  });
-
-  // Flow winner cost to TicketLine
-  await prisma.ticketLine.update({
-    where: { id: ticketLineId },
-    data: {
-      expectedCostUnit: winner.costPerUnit,
-      expectedCostTotal: winner.costTotal,
-      supplierName: winner.supplierName,
-      supplierId: winner.supplierId,
-    },
-  });
-}
+import { recalcWinner } from "@/lib/finance/recalc-winner";
 
 // ── POST — add a new supplier price ─────────────────────────────────
 

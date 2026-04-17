@@ -1,1 +1,37 @@
-[]
+[
+  {
+    "type": "BLACKLIST",
+    "matchType": "EMAIL",
+    "value": "community@miro.com",
+    "label": "Spring cleaning your Miro boards? Us too. Join the April Challenge for a chance to win $400",
+    "blockedAt": "2026-04-16T17:16:29.534Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "EMAIL",
+    "value": "mark@ukbusinessmentoring.co.uk",
+    "label": "Why are you in Business",
+    "blockedAt": "2026-04-17T09:13:00.511Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "EMAIL",
+    "value": "feedback@experience.sixt.com",
+    "label": "We value your opinion: your recent SIXT rental",
+    "blockedAt": "2026-04-17T09:14:39.280Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "EMAIL",
+    "value": "Microsoftstore@microsoftstore.microsoft.com",
+    "label": "Travel light. Work anywhere",
+    "blockedAt": "2026-04-17T11:05:11.128Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "EMAIL",
+    "value": "andrea@gbbventure.com",
+    "label": "Majid, is Accor's Morocco portfolio on your supply radar for 2026?",
+    "blockedAt": "2026-04-17T11:17:45.948Z"
+  }
+]

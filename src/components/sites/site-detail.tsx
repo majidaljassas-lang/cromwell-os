@@ -11,6 +11,7 @@ import {
   Pencil,
   Check,
   X,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +149,41 @@ export function SiteDetail({
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [aliases, setAliases] = useState<string[]>(site.aliases || []);
 
+  // Address fields are controlled so the postcode lookup can update them.
+  const [postcode, setPostcode] = useState(site.postcode || "");
+  const [city, setCity] = useState(site.city || "");
+  const [country, setCountry] = useState(site.country || "");
+  const [lookingUpPc, setLookingUpPc] = useState(false);
+  const [pcLookupError, setPcLookupError] = useState<string | null>(null);
+  const [pcLookupOk, setPcLookupOk] = useState<string | null>(null);
+
+  async function handlePostcodeLookup() {
+    const cleaned = postcode.replace(/\s+/g, "");
+    if (!cleaned) {
+      setPcLookupError("Enter a postcode first");
+      return;
+    }
+    setPcLookupError(null);
+    setPcLookupOk(null);
+    setLookingUpPc(true);
+    try {
+      const res = await fetch(`/api/sites/lookup-postcode/${encodeURIComponent(cleaned)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setPcLookupError(data.error || "Lookup failed");
+        return;
+      }
+      if (data.postcode) setPostcode(data.postcode);
+      if (data.city) setCity(data.city);
+      if (data.country) setCountry(data.country);
+      setPcLookupOk(`${data.city}${data.region ? ", " + data.region : ""} (${data.country})`);
+    } catch (err) {
+      setPcLookupError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setLookingUpPc(false);
+    }
+  }
+
   async function handleSiteUpdate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
@@ -159,9 +195,9 @@ export function SiteDetail({
       siteCode: formData.get("siteCode") as string || null,
       addressLine1: formData.get("addressLine1") as string || null,
       addressLine2: formData.get("addressLine2") as string || null,
-      city: formData.get("city") as string || null,
-      postcode: formData.get("postcode") as string || null,
-      country: formData.get("country") as string || null,
+      city: city || null,
+      postcode: postcode || null,
+      country: country || null,
       notes: formData.get("notes") as string || null,
       aliases: aliases.filter((a) => a.trim()),
     };
@@ -309,31 +345,47 @@ export function SiteDetail({
                     defaultValue={site.addressLine2 || ""}
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-postcode">Postcode</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="edit-postcode"
+                      value={postcode}
+                      onChange={(e) => setPostcode(e.target.value)}
+                      placeholder="e.g. W10 4RE"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handlePostcodeLookup}
+                      disabled={lookingUpPc || !postcode.trim()}
+                      className="bg-[#222222] border-[#333333] text-[#E0E0E0]"
+                    >
+                      <Search className="size-3.5 mr-1" />
+                      {lookingUpPc ? "Looking up..." : "Lookup"}
+                    </Button>
+                  </div>
+                  {pcLookupError && <p className="text-[10px] text-[#FF3333]">{pcLookupError}</p>}
+                  {pcLookupOk && <p className="text-[10px] text-[#00CC66]">Found: {pcLookupOk} — city &amp; country auto-filled.</p>}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="edit-city">City</Label>
                     <Input
                       id="edit-city"
-                      name="city"
-                      defaultValue={site.city || ""}
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="edit-postcode">Postcode</Label>
+                    <Label htmlFor="edit-country">Country</Label>
                     <Input
-                      id="edit-postcode"
-                      name="postcode"
-                      defaultValue={site.postcode || ""}
+                      id="edit-country"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
                     />
                   </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="edit-country">Country</Label>
-                  <Input
-                    id="edit-country"
-                    name="country"
-                    defaultValue={site.country || ""}
-                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-notes">Notes</Label>

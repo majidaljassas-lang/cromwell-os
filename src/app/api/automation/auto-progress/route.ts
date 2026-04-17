@@ -4,11 +4,18 @@ import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 /**
  * Auto-progress ticket status based on data conditions.
  *
- * Progression rules:
+ * Progression rules (default — PRICING_FIRST / quote-led tickets):
  *   CAPTURED  -> PRICING    : when lines.length > 0
  *   PRICING   -> QUOTED     : when an APPROVED quote exists
  *   QUOTED    -> APPROVED   : when CustomerPO exists
  *   APPROVED  -> ORDERED    : when ProcurementOrder exists
+ *
+ * DIRECT_ORDER tickets (customer already confirmed verbally / by message —
+ * no quote, no customer PO):
+ *   CAPTURED  -> PRICING    : when lines.length > 0
+ *   PRICING   -> ORDERED    : when ProcurementOrder exists
+ *
+ * Both branches share:
  *   ORDERED   -> DELIVERED  : when ProcurementOrder.status = DELIVERED
  *                             OR LogisticsEvent type = GOODS_DELIVERED
  *   DELIVERED -> COSTED     : when all lines have expectedCostUnit > 0
@@ -56,6 +63,8 @@ export async function POST(request: Request) {
         ticketNo: true,
         title: true,
         status: true,
+        ticketMode: true,
+        manualMode: true,
         lines: {
           select: {
             id: true,
@@ -83,7 +92,11 @@ export async function POST(request: Request) {
     const transitions: Transition[] = [];
 
     for (const ticket of tickets) {
+      // Manual-mode tickets are never auto-progressed — Majid is driving.
+      if (ticket.manualMode) continue;
+
       const status = ticket.status as ProgressableStatus;
+      const isDirectOrder = ticket.ticketMode === "DIRECT_ORDER";
       let newStatus: ProgressableStatus | "INVOICED" | null = null;
       let reason = "";
 
@@ -97,12 +110,22 @@ export async function POST(request: Request) {
         }
 
         case "PRICING": {
-          const approvedQuote = ticket.quotes.find(
-            (q) => q.status === "APPROVED"
-          );
-          if (approvedQuote) {
-            newStatus = "QUOTED";
-            reason = `Quote ${approvedQuote.quoteNo} approved`;
+          // DIRECT_ORDER: customer already committed verbally / by message,
+          // there is no quote step. Jump straight to ORDERED as soon as
+          // we have a supplier PO to fulfil it.
+          if (isDirectOrder) {
+            if (ticket.procurementOrders.length > 0) {
+              newStatus = "ORDERED";
+              reason = `DIRECT_ORDER: procurement order ${ticket.procurementOrders[0].poNo} placed`;
+            }
+          } else {
+            const approvedQuote = ticket.quotes.find(
+              (q) => q.status === "APPROVED"
+            );
+            if (approvedQuote) {
+              newStatus = "QUOTED";
+              reason = `Quote ${approvedQuote.quoteNo} approved`;
+            }
           }
           break;
         }

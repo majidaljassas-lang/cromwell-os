@@ -27,7 +27,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         orderBy: { createdAt: "desc" },
         take: 10,
       },
-      parentEntity: { select: { id: true, name: true } },
+      parentEntity: { select: { id: true, name: true, isBillingEntity: true } },
       subsidiaries: { select: { id: true, name: true, legalName: true, isBillingEntity: true } },
       customerAliases: {
         where: { isActive: true },

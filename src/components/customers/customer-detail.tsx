@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Building2, Plus, Check, X, Pencil, Users, Tag, Trash2, Network } from "lucide-react";
+import { ArrowLeft, Building2, Plus, Check, X, Pencil, Users, Tag, Trash2, Network, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PaymentTermsSelect } from "@/components/shared/payment-terms-select";
 
 type CustomerAlias = {
   id: string;
@@ -32,6 +33,7 @@ type Customer = {
   id: string;
   name: string;
   legalName: string | null;
+  companyNumber: string | null;
   billingAddress: string | null;
   vatNumber: string | null;
   paymentTerms: string | null;
@@ -40,8 +42,10 @@ type Customer = {
   isBillingEntity: boolean;
   parentCustomerEntityId: string | null;
   entityType: string | null;
+  defaultCustomerMode: string | null;
+  defaultMarginPct: number | string | null;
   notes: string | null;
-  parentEntity: { id: string; name: string } | null;
+  parentEntity: { id: string; name: string; isBillingEntity: boolean } | null;
   subsidiaries: Array<{ id: string; name: string; legalName: string | null; isBillingEntity: boolean }>;
   customerAliases: CustomerAlias[];
   siteCommercialLinks: Array<{
@@ -108,6 +112,156 @@ export function CustomerDetail({
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
 
+  // Create new subsidiary (inherits commercial defaults from this parent)
+  const [createSubOpen, setCreateSubOpen] = useState(false);
+  const [creatingSub, setCreatingSub] = useState(false);
+  const [subName, setSubName] = useState("");
+  const [subLegalName, setSubLegalName] = useState("");
+  const [subCompanyNumber, setSubCompanyNumber] = useState("");
+  const [subVatNumber, setSubVatNumber] = useState("");
+  const [subBillingAddress, setSubBillingAddress] = useState("");
+  // Inheritable commercial defaults — pre-filled from parent, user can override.
+  const [subPaymentTerms, setSubPaymentTerms] = useState(customer.paymentTerms || "Net 30");
+  const [subPoRequired, setSubPoRequired] = useState(customer.poRequiredDefault);
+  const [subIsBillingEntity, setSubIsBillingEntity] = useState(true);
+  const [subLookingUp, setSubLookingUp] = useState(false);
+  const [subLookupError, setSubLookupError] = useState<string | null>(null);
+  const [subError, setSubError] = useState<string | null>(null);
+
+  async function handleSubCompaniesHouseLookup() {
+    const cleaned = subCompanyNumber.replace(/\s+/g, "");
+    if (!cleaned) {
+      setSubLookupError("Enter a company number first");
+      return;
+    }
+    setSubLookupError(null);
+    setSubLookingUp(true);
+    try {
+      const res = await fetch(`/api/companies-house/${encodeURIComponent(cleaned)}`);
+      const data = await res.json();
+      if (res.status === 503) {
+        window.open(
+          `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(cleaned)}`,
+          "_blank",
+          "noopener,noreferrer"
+        );
+        setSubLookupError("No API key set — opened Companies House in a new tab.");
+        return;
+      }
+      if (!res.ok) {
+        setSubLookupError(data.error || "Lookup failed");
+        return;
+      }
+      if (data.legalName) {
+        setSubLegalName(data.legalName);
+        if (!subName) setSubName(data.legalName);
+      }
+      if (data.billingAddress) setSubBillingAddress(data.billingAddress);
+      if (data.companyNumber) setSubCompanyNumber(data.companyNumber);
+    } catch (err) {
+      setSubLookupError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setSubLookingUp(false);
+    }
+  }
+
+  async function handleCreateSubsidiary() {
+    if (!subName.trim()) {
+      setSubError("Name is required");
+      return;
+    }
+    setSubError(null);
+    setCreatingSub(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: subName.trim(),
+          legalName: subLegalName.trim() || null,
+          companyNumber: subCompanyNumber.replace(/\s+/g, "") || null,
+          vatNumber: subVatNumber.trim() || null,
+          billingAddress: subBillingAddress.trim() || null,
+          paymentTerms: subPaymentTerms || null,
+          poRequiredDefault: subPoRequired,
+          isBillingEntity: subIsBillingEntity,
+          entityType: "SUBSIDIARY",
+          parentCustomerEntityId: customer.id,
+          // Inherit pricing/mode defaults so quoting behaves consistently across the group.
+          defaultMarginPct: customer.defaultMarginPct ?? null,
+          defaultCustomerMode: customer.defaultCustomerMode ?? null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSubError(data.error || "Failed to create subsidiary");
+        return;
+      }
+      // Reset and close
+      setSubName("");
+      setSubLegalName("");
+      setSubCompanyNumber("");
+      setSubVatNumber("");
+      setSubBillingAddress("");
+      setSubPaymentTerms(customer.paymentTerms || "Net 30");
+      setSubPoRequired(customer.poRequiredDefault);
+      setSubIsBillingEntity(true);
+      setCreateSubOpen(false);
+      router.refresh();
+    } catch (err) {
+      setSubError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setCreatingSub(false);
+    }
+  }
+
+  // Companies House lookup
+  const [companyNumber, setCompanyNumber] = useState(customer.companyNumber || "");
+  const [legalName, setLegalName] = useState(customer.legalName || "");
+  const [billingAddress, setBillingAddress] = useState(customer.billingAddress || "");
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupOk, setLookupOk] = useState<string | null>(null);
+
+  async function handleCompaniesHouseLookup() {
+    const cleaned = companyNumber.replace(/\s+/g, "");
+    if (!cleaned) {
+      setLookupError("Enter a company number first");
+      return;
+    }
+    setLookupError(null);
+    setLookupOk(null);
+    setLookingUp(true);
+    try {
+      const res = await fetch(`/api/companies-house/${encodeURIComponent(cleaned)}`);
+      const data = await res.json();
+      // 503 = no API key configured. Fall back to opening the Companies
+      // House public website so the user can still see the registered
+      // details rather than hitting a dead end.
+      if (res.status === 503) {
+        window.open(
+          `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(cleaned)}`,
+          "_blank",
+          "noopener,noreferrer"
+        );
+        setLookupError("No API key set — opened Companies House in a new tab. Add COMPANIES_HOUSE_API_KEY to .env for inline auto-fill.");
+        return;
+      }
+      if (!res.ok) {
+        setLookupError(data.error || "Lookup failed");
+        return;
+      }
+      if (data.legalName) setLegalName(data.legalName);
+      if (data.billingAddress) setBillingAddress(data.billingAddress);
+      if (data.companyNumber) setCompanyNumber(data.companyNumber);
+      setLookupOk(`Found: ${data.companyName}`);
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirm(`Delete customer "${customer.name}"? This will remove all aliases and site links.`)) return;
     await fetch(`/api/customers/${customer.id}`, { method: "DELETE" });
@@ -120,8 +274,9 @@ export function CustomerDetail({
     const fd = new FormData(e.currentTarget);
     const body = {
       name: fd.get("name") as string,
-      legalName: (fd.get("legalName") as string) || null,
-      billingAddress: (fd.get("billingAddress") as string) || null,
+      legalName: legalName || null,
+      companyNumber: companyNumber.replace(/\s+/g, "") || null,
+      billingAddress: billingAddress || null,
       vatNumber: (fd.get("vatNumber") as string) || null,
       paymentTerms: (fd.get("paymentTerms") as string) || null,
       notes: (fd.get("notes") as string) || null,
@@ -265,7 +420,11 @@ export function CustomerDetail({
             {customer.legalName && <span>{customer.legalName}</span>}
             {customer.poRequiredDefault && <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">PO REQUIRED</Badge>}
             {customer.isCashCustomer && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">CASH</Badge>}
-            {customer.isBillingEntity && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">BILLING ENTITY</Badge>}
+            {customer.isBillingEntity ? (
+              <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">BILLING ENTITY</Badge>
+            ) : (
+              <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10" title="Not a real legal entity — used to group subsidiaries.">GROUPING ONLY</Badge>
+            )}
             {customer.parentEntity && (
               <Link href={`/customers/${customer.parentEntity.id}`}>
                 <Badge className="text-[8px] px-1 py-0 text-[#FF6600] bg-[#FF6600]/10 cursor-pointer hover:bg-[#FF6600]/20">
@@ -303,10 +462,45 @@ export function CustomerDetail({
             {editing ? (
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="space-y-1.5"><Label>Customer Name *</Label><Input name="name" defaultValue={customer.name} required /></div>
-                <div className="space-y-1.5"><Label>Legal Name</Label><Input name="legalName" defaultValue={customer.legalName || ""} /></div>
-                <div className="space-y-1.5"><Label>Billing Address</Label><Input name="billingAddress" defaultValue={customer.billingAddress || ""} /></div>
+                <div className="space-y-1.5">
+                  <Label>Company Number (UK)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={companyNumber}
+                      onChange={(e) => setCompanyNumber(e.target.value)}
+                      placeholder="e.g. 10611686"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleCompaniesHouseLookup}
+                      disabled={lookingUp || !companyNumber.trim()}
+                      className="bg-[#222222] border-[#333333] text-[#E0E0E0]"
+                    >
+                      <Search className="size-3.5 mr-1" />
+                      {lookingUp ? "Looking up..." : "Lookup"}
+                    </Button>
+                  </div>
+                  {lookupError && <p className="text-[10px] text-[#FF3333]">{lookupError}</p>}
+                  {lookupOk && <p className="text-[10px] text-[#00CC66]">{lookupOk} — name &amp; address auto-filled.</p>}
+                </div>
+                <div className="space-y-1.5"><Label>Legal Name</Label><Input value={legalName} onChange={(e) => setLegalName(e.target.value)} /></div>
+                <div className="space-y-1.5">
+                  <Label>Billing Address</Label>
+                  <textarea
+                    value={billingAddress}
+                    onChange={(e) => setBillingAddress(e.target.value)}
+                    rows={4}
+                    className="w-full bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3 py-2 font-mono"
+                    placeholder="One line per address line"
+                  />
+                </div>
                 <div className="space-y-1.5"><Label>VAT Number</Label><Input name="vatNumber" defaultValue={customer.vatNumber || ""} /></div>
-                <div className="space-y-1.5"><Label>Payment Terms</Label><Input name="paymentTerms" defaultValue={customer.paymentTerms || ""} /></div>
+                <div className="space-y-1.5">
+                  <Label>Payment Terms</Label>
+                  <PaymentTermsSelect name="paymentTerms" defaultValue={customer.paymentTerms} />
+                </div>
                 <div className="space-y-1.5"><Label>Entity Type</Label><Input name="entityType" defaultValue={customer.entityType || ""} placeholder="e.g. HEAD_OFFICE, DIVISION, SUBSIDIARY" /></div>
                 <div className="space-y-1.5"><Label>Notes</Label><Input name="notes" defaultValue={customer.notes || ""} /></div>
                 <div className="flex items-center gap-4">
@@ -316,7 +510,7 @@ export function CustomerDetail({
                   </div>
                   <div className="flex items-center gap-2">
                     <input type="checkbox" name="isBillingEntity" id="isBillingEntity" defaultChecked={customer.isBillingEntity} />
-                    <Label htmlFor="isBillingEntity">Billing Entity</Label>
+                    <Label htmlFor="isBillingEntity" title="Untick if this is just a name/grouping, not a real legal entity that gets invoiced.">Billing Entity</Label>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -328,8 +522,26 @@ export function CustomerDetail({
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 <div><dt className="text-[#888888]">Name</dt><dd className="font-medium">{customer.name}</dd></div>
                 <div><dt className="text-[#888888]">Legal Name</dt><dd>{customer.legalName || "—"}</dd></div>
-                <div><dt className="text-[#888888]">Billing Address</dt><dd>{customer.billingAddress || "—"}</dd></div>
+                <div>
+                  <dt className="text-[#888888]">Company Number</dt>
+                  <dd>
+                    {customer.companyNumber ? (
+                      <a
+                        href={`https://find-and-update.company-information.service.gov.uk/company/${customer.companyNumber}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#FF6600] hover:underline bb-mono"
+                      >
+                        {customer.companyNumber}
+                      </a>
+                    ) : "—"}
+                  </dd>
+                </div>
                 <div><dt className="text-[#888888]">VAT Number</dt><dd>{customer.vatNumber || "—"}</dd></div>
+                <div className="col-span-2">
+                  <dt className="text-[#888888]">Billing Address</dt>
+                  <dd className="whitespace-pre-line">{customer.billingAddress || "—"}</dd>
+                </div>
                 <div><dt className="text-[#888888]">Payment Terms</dt><dd>{customer.paymentTerms || "—"}</dd></div>
                 <div><dt className="text-[#888888]">Entity Type</dt><dd>{customer.entityType || "—"}</dd></div>
                 <div><dt className="text-[#888888]">PO Required</dt><dd>{customer.poRequiredDefault ? "Yes" : "No"}</dd></div>
@@ -392,28 +604,125 @@ export function CustomerDetail({
               <div className="text-[10px] uppercase tracking-widest text-[#888888] flex items-center gap-2">
                 <Building2 className="size-3.5" /> SUBSIDIARIES ({customer.subsidiaries.length})
               </div>
-              <Sheet open={addSubOpen} onOpenChange={setAddSubOpen}>
-                <SheetTrigger render={<Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900] text-xs h-7"><Plus className="size-3.5 mr-1" />Add Subsidiary</Button>} />
-                <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
-                  <SheetHeader><SheetTitle className="text-[#E0E0E0]">Add Subsidiary</SheetTitle></SheetHeader>
-                  <div className="flex flex-col gap-4 px-4">
-                    <div className="space-y-1.5">
-                      <Label>Customer</Label>
-                      <select value={selectedSubId} onChange={(e) => setSelectedSubId(e.target.value)} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
-                        <option value="">Select customer...</option>
-                        {allCustomers.filter((c) => c.id !== customer.id && !customer.subsidiaries.some((s) => s.id === c.id)).map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
+              <div className="flex gap-2">
+                <Sheet open={addSubOpen} onOpenChange={setAddSubOpen}>
+                  <SheetTrigger render={<Button size="sm" variant="outline" className="bg-[#222222] border-[#333333] text-[#E0E0E0] text-xs h-7"><Plus className="size-3.5 mr-1" />Link Existing</Button>} />
+                  <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+                    <SheetHeader><SheetTitle className="text-[#E0E0E0]">Link Existing as Subsidiary</SheetTitle></SheetHeader>
+                    <div className="flex flex-col gap-4 px-4">
+                      <div className="space-y-1.5">
+                        <Label>Customer</Label>
+                        <select value={selectedSubId} onChange={(e) => setSelectedSubId(e.target.value)} className="w-full h-9 bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3">
+                          <option value="">Select customer...</option>
+                          {allCustomers.filter((c) => c.id !== customer.id && !customer.subsidiaries.some((s) => s.id === c.id)).map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <SheetFooter>
+                        <Button onClick={handleAddSubsidiary} disabled={savingSub || !selectedSubId} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
+                          {savingSub ? "Linking..." : "Link as Subsidiary"}
+                        </Button>
+                      </SheetFooter>
                     </div>
-                    <SheetFooter>
-                      <Button onClick={handleAddSubsidiary} disabled={savingSub || !selectedSubId} className="bg-[#FF6600] text-black hover:bg-[#FF9900]">
-                        {savingSub ? "Adding..." : "Add as Subsidiary"}
-                      </Button>
-                    </SheetFooter>
-                  </div>
-                </SheetContent>
-              </Sheet>
+                  </SheetContent>
+                </Sheet>
+                <Sheet open={createSubOpen} onOpenChange={setCreateSubOpen}>
+                  <SheetTrigger render={<Button size="sm" className="bg-[#FF6600] text-black hover:bg-[#FF9900] text-xs h-7"><Plus className="size-3.5 mr-1" />Create New</Button>} />
+                  <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333] w-[480px] sm:max-w-[480px]">
+                    <SheetHeader>
+                      <SheetTitle className="text-[#E0E0E0]">Create Subsidiary of {customer.name}</SheetTitle>
+                    </SheetHeader>
+                    <div className="flex flex-col gap-3 px-4 overflow-y-auto">
+                      <div className="text-[10px] text-[#888888] bg-[#222222] border border-[#333333] px-3 py-2">
+                        Commercial defaults (payment terms, PO requirements, margin, mode) are
+                        pre-filled from <strong className="text-[#FF6600]">{customer.name}</strong>.
+                        Override anything that differs for this entity.
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label>Name *</Label>
+                        <Input value={subName} onChange={(e) => setSubName(e.target.value)} required placeholder="Trading name" />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label>Company Number (UK)</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={subCompanyNumber}
+                            onChange={(e) => setSubCompanyNumber(e.target.value)}
+                            placeholder="e.g. 10611686"
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleSubCompaniesHouseLookup}
+                            disabled={subLookingUp || !subCompanyNumber.trim()}
+                            className="bg-[#222222] border-[#333333] text-[#E0E0E0]"
+                          >
+                            <Search className="size-3.5 mr-1" />
+                            {subLookingUp ? "..." : "Lookup"}
+                          </Button>
+                        </div>
+                        {subLookupError && <p className="text-[10px] text-[#FF3333]">{subLookupError}</p>}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label>Legal Name</Label>
+                        <Input value={subLegalName} onChange={(e) => setSubLegalName(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>VAT Number</Label>
+                        <Input value={subVatNumber} onChange={(e) => setSubVatNumber(e.target.value)} placeholder="GB123456789" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Billing Address</Label>
+                        <textarea
+                          value={subBillingAddress}
+                          onChange={(e) => setSubBillingAddress(e.target.value)}
+                          rows={3}
+                          className="w-full bg-[#222222] border border-[#333333] text-[#E0E0E0] text-sm px-3 py-2 font-mono"
+                          placeholder="One line per address line"
+                        />
+                      </div>
+
+                      <div className="border-t border-[#333333] pt-3 mt-1">
+                        <div className="text-[10px] uppercase tracking-widest text-[#FF6600] font-bold mb-2">Inherited from parent</div>
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label>Payment Terms</Label>
+                            <PaymentTermsSelect defaultValue={subPaymentTerms} onChange={setSubPaymentTerms} />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="checkbox" id="subPoRequired" checked={subPoRequired} onChange={(e) => setSubPoRequired(e.target.checked)} />
+                            <Label htmlFor="subPoRequired">PO Required by default</Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="checkbox" id="subIsBillingEntity" checked={subIsBillingEntity} onChange={(e) => setSubIsBillingEntity(e.target.checked)} />
+                            <Label htmlFor="subIsBillingEntity" title="Untick only if this subsidiary is itself a label/grouping rather than a real billable entity.">Billing Entity</Label>
+                          </div>
+                          <div className="text-[9px] text-[#666666]">
+                            Margin default and customer mode also inherit silently.
+                          </div>
+                        </div>
+                      </div>
+
+                      {subError && <p className="text-[11px] text-[#FF3333]">{subError}</p>}
+
+                      <SheetFooter>
+                        <Button
+                          onClick={handleCreateSubsidiary}
+                          disabled={creatingSub || !subName.trim()}
+                          className="bg-[#FF6600] text-black hover:bg-[#FF9900]"
+                        >
+                          {creatingSub ? "Creating..." : "Create Subsidiary"}
+                        </Button>
+                      </SheetFooter>
+                    </div>
+                  </SheetContent>
+                </Sheet>
+              </div>
             </div>
             {customer.subsidiaries.length === 0 ? (
               <div className="text-xs text-[#666666] italic">No subsidiaries.</div>

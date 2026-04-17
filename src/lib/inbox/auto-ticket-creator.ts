@@ -114,7 +114,7 @@ function phoneDigits(raw: string | null | undefined): string | null {
   return digits.length >= 7 ? digits : null;
 }
 
-async function resolveCustomer(
+export async function resolveCustomer(
   thread: {
     channel: string;
     conversationKey: string;
@@ -208,7 +208,7 @@ async function resolveCustomer(
 
 // ── Site resolution ─────────────────────────────────────────────────────────
 
-async function resolveSite(
+export async function resolveSite(
   aiEntities: Record<string, unknown> | null,
 ): Promise<string | null> {
   const siteName = (aiEntities as Record<string, unknown> | null)?.siteName;

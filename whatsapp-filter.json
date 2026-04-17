@@ -5,5 +5,68 @@
     "value": "2 Aybrook Street Residents' Group",
     "label": "2 Aybrook Street Residents' Group",
     "blockedAt": "2026-04-16T15:42:46.682Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "PHONE",
+    "value": "120363181805285218@newsletter",
+    "label": "120363181805285218@newsletter",
+    "blockedAt": "2026-04-16T17:45:33.627Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Mimi UK New",
+    "label": "Mimi UK New",
+    "blockedAt": "2026-04-17T09:14:29.094Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Skinny Mo",
+    "label": "Skinny Mo",
+    "blockedAt": "2026-04-17T11:05:11.558Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Khan JGM Transport ADR Arctic",
+    "label": "Khan JGM Transport ADR Arctic",
+    "blockedAt": "2026-04-17T11:05:11.863Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "25th April. Saturday",
+    "label": "25th April. Saturday",
+    "blockedAt": "2026-04-17T11:05:12.303Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Mum",
+    "label": "Mum",
+    "blockedAt": "2026-04-17T11:40:51.168Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "PHONE",
+    "value": "447903978473@c.us",
+    "label": "447903978473@c.us",
+    "blockedAt": "2026-04-17T11:43:25.504Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Fuckers",
+    "label": "Fuckers",
+    "blockedAt": "2026-04-17T11:43:35.643Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Football",
+    "label": "Football",
+    "blockedAt": "2026-04-17T12:04:17.859Z"
   }
 ]
