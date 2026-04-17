@@ -19,6 +19,7 @@ export async function GET() {
     stockItems,
     lastSync,
     eventsToday,
+    urgentAlerts,
   ] = await Promise.all([
     prisma.inboxThread.count({ where: { status: "NEW" } }),
     prisma.inboxThread.count({ where: { status: "NEW", channel: "EMAIL" } }),
@@ -45,6 +46,13 @@ export async function GET() {
     prisma.stockItem.aggregate({ _count: true, _sum: { qtyOnHand: true }, where: { isActive: true, outcome: "HOLDING" } }),
     prisma.ingestionSource.findFirst({ where: { sourceType: "OUTLOOK", isActive: true }, select: { lastSyncAt: true } }),
     prisma.ingestionEvent.count({ where: { receivedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } }),
+    // Urgent alerts: tickets ready to invoice, overdue items
+    prisma.task.findMany({
+      where: { status: "OPEN", priority: "HIGH" },
+      select: { taskType: true, generatedReason: true, ticketId: true, ticket: { select: { ticketNo: true, title: true } } },
+      orderBy: { createdAt: "asc" },
+      take: 10,
+    }),
   ]);
 
   const statusMap: Record<string, number> = {};
@@ -94,6 +102,13 @@ export async function GET() {
       itemCount: stockItems._count,
       totalValue: Number(stockItems._sum.qtyOnHand ?? 0),
     },
+    urgentAlerts: urgentAlerts.map((a: any) => ({
+      taskType: a.taskType,
+      reason: a.generatedReason,
+      ticketNo: a.ticket?.ticketNo,
+      ticketTitle: a.ticket?.title,
+      ticketId: a.ticketId,
+    })),
     system: {
       lastSync: lastSync?.lastSyncAt?.toISOString() ?? null,
       eventsToday,

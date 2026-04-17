@@ -57,6 +57,38 @@ export function CommandCentreView() {
   return (
     <div className="space-y-5">
 
+      {/* RED ALERTS — urgent actions */}
+      {(d as any).urgentAlerts?.length > 0 && (
+        <div className="rounded-lg border-2 border-[#FF3333] bg-[#1A0000] p-4 animate-pulse-slow">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🚨</span>
+            <span className="text-[10px] uppercase tracking-widest font-black text-[#FF3333]">Action Required — {(d as any).urgentAlerts.length} urgent</span>
+          </div>
+          <div className="space-y-2">
+            {(d as any).urgentAlerts.map((alert: any, i: number) => {
+              const labels: Record<string, string> = {
+                MATCH_BILL_TO_TICKET: "Match supplier bill",
+                MARKUP_AND_INVOICE: "Invoice customer",
+                CHASE_PAYMENT: "Chase payment",
+                CONFIRM_DELIVERY_RECEIPT: "Confirm delivery",
+                PLACE_ORDER_WITH_SUPPLIER: "Place order",
+                PRICE_ITEMS: "Price items",
+                CHASE_FOLLOW_UP: "Follow up",
+              };
+              return (
+                <Link key={i} href={`/tickets/${alert.ticketId}`} className="flex items-center justify-between py-1.5 border-b border-[#FF3333]/20 last:border-0 hover:bg-[#FF3333]/5 px-2 rounded">
+                  <div>
+                    <span className="text-xs font-bold text-[#FF3333]">{labels[alert.taskType] ?? alert.taskType.replace(/_/g, " ")}</span>
+                    <span className="text-xs text-[#888] ml-2">CP-{String(alert.ticketNo).padStart(4, "0")} {alert.ticketTitle}</span>
+                  </div>
+                  <span className="text-[10px] text-[#FF3333]">→</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Hero cards row */}
       <div className="grid grid-cols-5 gap-3">
         {/* Inbox */}
