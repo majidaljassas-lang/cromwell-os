@@ -109,3 +109,142 @@
  PATCH /api/ticket-lines/85e20a2f-33e5-4e76-9e7b-8967705d1983 200 in 19ms (next.js: 6ms, application-code: 14ms)
  PATCH /api/ticket-lines/85e20a2f-33e5-4e76-9e7b-8967705d1983 200 in 29ms (next.js: 6ms, application-code: 23ms)
  PATCH /api/ticket-lines/85e20a2f-33e5-4e76-9e7b-8967705d1983 200 in 7ms (next.js: 1553µs, application-code: 5ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 26ms (next.js: 8ms, application-code: 19ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 16ms (next.js: 4ms, application-code: 12ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 22ms (next.js: 7ms, application-code: 16ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 4ms (next.js: 851µs, application-code: 4ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 25ms (next.js: 6ms, application-code: 20ms)
+ PATCH /api/ticket-lines/ab82d754-134b-4eef-8ae4-ca1814e09d3b 200 in 21ms (next.js: 7ms, application-code: 15ms)
+ POST /api/ingest/whatsapp/live 200 in 57ms (next.js: 49ms, application-code: 8ms)
+ POST /api/ingest/whatsapp/live 200 in 57ms (next.js: 44ms, application-code: 13ms)
+ GET /tickets 200 in 76ms (next.js: 10ms, application-code: 66ms)
+ GET /tickets 200 in 141ms (next.js: 4ms, application-code: 137ms)
+ GET /tickets/93284643-e40e-4113-b082-fabcde8b6c0b 200 in 148ms (next.js: 8ms, application-code: 140ms)
+ GET /api/tickets/93284643-e40e-4113-b082-fabcde8b6c0b/commercial-summary 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/tickets/93284643-e40e-4113-b082-fabcde8b6c0b/commercial-summary 200 in 6ms (next.js: 1212µs, application-code: 5ms)
+ GET /tickets 200 in 74ms (next.js: 3ms, application-code: 71ms)
+WhatsApp live ingest failed: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.ingestionEvent.create()` invocation:
+
+
+Unique constraint failed on the fields: (`"sourceId"`, `"externalMessageId"`)
+    at Gr.handleRequestError (src/generated/prisma/runtime/client.js:69:8286)
+    at Gr.handleAndLogRequestError (src/generated/prisma/runtime/client.js:69:7581)
+    at Gr.request (src/generated/prisma/runtime/client.js:69:7288)
+    at async a (src/generated/prisma/runtime/client.js:79:6730)
+    at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+  67 | ...
+  68 | ...
+> 69 | ...t u=s?{modelName:s,...t.meta}:t.meta;throw new b.PrismaClientKnownRequestError(l,{code:...
+     |                                               ^
+  70 | ...
+  71 | ...
+  72 | ... {
+  code: 'P2002',
+  meta: {
+    modelName: 'IngestionEvent',
+    driverAdapterError: Error [DriverAdapterError]: UniqueConstraintViolation
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:44601)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:45045)
+        at async e.interpretNode (src/generated/prisma/runtime/client.js:15:46265)
+        at async e.run (src/generated/prisma/runtime/client.js:15:43315)
+        at async e.execute (src/generated/prisma/runtime/client.js:61:815)
+        at async jt.request (src/generated/prisma/runtime/client.js:62:2399)
+        at async Object.singleLoader (src/generated/prisma/runtime/client.js:69:6569)
+        at async Gr.request (src/generated/prisma/runtime/client.js:69:7175)
+        at async a (src/generated/prisma/runtime/client.js:79:6730)
+        at async POST (src/app/api/ingest/whatsapp/live/route.ts:170:19)
+      13 | ...
+      14 | ...
+    > 15 | ...r(let o of n){let s=Ra(o,r.sqlCommenter),a=await this.#u(s,r.queryable,()=>r.queryable....
+         |                                               ^
+      16 | ...
+      17 | ...
+      18 | ... {
+      [cause]: [Object]
+    }
+  },
+  clientVersion: '7.6.0'
+}
+ POST /api/ingest/whatsapp/live 500 in 155ms (next.js: 1345µs, application-code: 153ms)
+ POST /api/ingest/whatsapp/live 200 in 176ms (next.js: 4ms, application-code: 171ms)
+ GET /tickets/1a39299c-3605-4850-a2d3-78f81af957e8 200 in 139ms (next.js: 5ms, application-code: 134ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/commercial-summary 200 in 6ms (next.js: 1728µs, application-code: 5ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/commercial-summary 200 in 4ms (next.js: 589µs, application-code: 3ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/order-reconciliation 200 in 16ms (next.js: 4ms, application-code: 11ms)
+ GET /api/tickets/1a39299c-3605-4850-a2d3-78f81af957e8/order-reconciliation 200 in 7ms (next.js: 896µs, application-code: 6ms)
+[autoLinkThread] thread=1c85f2ff-1b9a-4515-bd9b-2ea8fc65bc32 score=10 LOW — reasons: Within 72h of ticket activity
+ POST /api/automation/sync/outlook 200 in 2.5s (next.js: 3ms, application-code: 2.5s)
+ POST /api/automation/process 200 in 13ms (next.js: 1882µs, application-code: 11ms)
+ GET /tickets 200 in 61ms (next.js: 4ms, application-code: 58ms)
+ GET / 200 in 24ms (next.js: 3ms, application-code: 21ms)
+ GET /command-centre 200 in 24ms (next.js: 3ms, application-code: 20ms)
+ GET /command-centre 200 in 13ms (next.js: 1068µs, application-code: 12ms)
+ GET /api/command-centre/v2 200 in 16ms (next.js: 1811µs, application-code: 14ms)
+ GET /api/command-centre/v2 200 in 16ms (next.js: 6ms, application-code: 10ms)
+ GET /tickets 200 in 60ms (next.js: 4ms, application-code: 57ms)
+ GET /tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d 200 in 141ms (next.js: 7ms, application-code: 134ms)
+ GET /api/tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d/commercial-summary 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d/commercial-summary 200 in 4ms (next.js: 773µs, application-code: 3ms)
+ GET /inbox 200 in 26ms (next.js: 5ms, application-code: 21ms)
+ GET /api/customers 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/commercial-links 200 in 10ms (next.js: 6ms, application-code: 4ms)
+ GET /api/sites 200 in 15ms (next.js: 5ms, application-code: 9ms)
+ GET /api/tickets?active=1 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/customers 200 in 4ms (next.js: 989µs, application-code: 3ms)
+ GET /api/commercial-links 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/sites 200 in 14ms (next.js: 5ms, application-code: 9ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 32ms (next.js: 5ms, application-code: 27ms)
+ GET /api/tickets?active=1 200 in 13ms (next.js: 8ms, application-code: 5ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 19ms (next.js: 4ms, application-code: 15ms)
+ PATCH /api/inbox/threads/1c85f2ff-1b9a-4515-bd9b-2ea8fc65bc32 200 in 3.3s (next.js: 4ms, application-code: 3.3s)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 27ms (next.js: 1650µs, application-code: 26ms)
+ PATCH /api/inbox/threads/612482ee-e2ad-494a-841d-565c45186ec2 200 in 2.1s (next.js: 3ms, application-code: 2.1s)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 20ms (next.js: 1613µs, application-code: 19ms)
+ DELETE /api/inbox/threads/04090777-48f3-4635-89d0-af72a8d6ccab?force=1 200 in 34ms (next.js: 6ms, application-code: 28ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 23ms (next.js: 1756µs, application-code: 22ms)
+ DELETE /api/inbox/threads/1c04937d-f2af-4d3e-8646-7c8dc115b0ec?force=1 200 in 23ms (next.js: 5ms, application-code: 19ms)
+ DELETE /api/inbox/threads/15ebeda6-1edc-4a15-8c74-811b703e5ae4?force=1 200 in 29ms (next.js: 1345µs, application-code: 27ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 17ms (next.js: 1659µs, application-code: 16ms)
+ DELETE /api/inbox/threads/8d490504-00e9-4ad4-872b-1ef38b479fc4?force=1 200 in 26ms (next.js: 4ms, application-code: 21ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 28ms (next.js: 1378µs, application-code: 26ms)
+ DELETE /api/inbox/threads/68f95d1c-9c4b-4af5-a9d9-7e30e03db2bc?force=1 200 in 30ms (next.js: 6ms, application-code: 24ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 17ms (next.js: 1322µs, application-code: 16ms)
+ GET /inbox 200 in 16ms (next.js: 4ms, application-code: 12ms)
+ GET /tickets 200 in 51ms (next.js: 3ms, application-code: 48ms)
+ GET /tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d 200 in 137ms (next.js: 7ms, application-code: 130ms)
+ GET /api/tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d/commercial-summary 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/tickets/fb7f0a73-8c10-4f15-a9cc-244b1a814c4d/commercial-summary 200 in 4ms (next.js: 607µs, application-code: 3ms)
+ GET / 200 in 13ms (next.js: 1844µs, application-code: 11ms)
+ GET /command-centre 200 in 22ms (next.js: 3ms, application-code: 19ms)
+ GET /command-centre 200 in 8ms (next.js: 991µs, application-code: 7ms)
+ GET /api/command-centre/v2 200 in 18ms (next.js: 1299µs, application-code: 17ms)
+ GET /api/command-centre/v2 200 in 19ms (next.js: 6ms, application-code: 13ms)
+ GET / 200 in 16ms (next.js: 974µs, application-code: 15ms)
+ GET /command-centre 200 in 16ms (next.js: 1081µs, application-code: 14ms)
+ GET /command-centre 200 in 8ms (next.js: 1086µs, application-code: 7ms)
+ GET /api/command-centre/v2 200 in 10ms (next.js: 730µs, application-code: 9ms)
+ GET /api/command-centre/v2 200 in 10ms (next.js: 5ms, application-code: 6ms)
+ GET /api/command-centre/v2 200 in 28ms (next.js: 3ms, application-code: 25ms)
+ GET /api/command-centre/v2 200 in 29ms (next.js: 3ms, application-code: 27ms)
+ GET /api/command-centre/v2 200 in 29ms (next.js: 3ms, application-code: 27ms)
+ GET /inbox 200 in 24ms (next.js: 4ms, application-code: 20ms)
+ GET /api/customers 200 in 5ms (next.js: 1721µs, application-code: 4ms)
+ GET /api/sites 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/commercial-links 200 in 8ms (next.js: 5ms, application-code: 3ms)
+ GET /api/customers 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/tickets?active=1 200 in 13ms (next.js: 2ms, application-code: 11ms)
+ GET /api/sites 200 in 16ms (next.js: 6ms, application-code: 10ms)
+ GET /api/commercial-links 200 in 8ms (next.js: 5ms, application-code: 3ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 30ms (next.js: 5ms, application-code: 24ms)
+ GET /api/tickets?active=1 200 in 17ms (next.js: 8ms, application-code: 9ms)
+ GET /api/inbox/threads?status=NEW&limit=500 200 in 17ms (next.js: 763µs, application-code: 16ms)
+ POST /api/automation/sync/outlook 200 in 1299ms (next.js: 4ms, application-code: 1295ms)
+ POST /api/automation/process 200 in 7ms (next.js: 1999µs, application-code: 5ms)
+ GET /tickets 200 in 105ms (next.js: 22ms, application-code: 83ms)
+ GET / 200 in 32ms (next.js: 6ms, application-code: 26ms)
+ GET /command-centre 200 in 25ms (next.js: 11ms, application-code: 13ms)
+ GET /command-centre 200 in 13ms (next.js: 1577µs, application-code: 12ms)
+ GET /api/command-centre/v2 200 in 20ms (next.js: 1242µs, application-code: 19ms)
+ GET /api/command-centre/v2 200 in 21ms (next.js: 7ms, application-code: 14ms)
+ GET /tickets?status=CAPTURED 200 in 55ms (next.js: 3ms, application-code: 52ms)
