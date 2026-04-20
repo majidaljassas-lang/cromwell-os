@@ -1348,8 +1348,16 @@ export function TicketDetail({
         l.status === "INVOICED"
     );
 
+  const [quoteNotesOpen, setQuoteNotesOpen] = useState(false);
+  const [quoteNotes, setQuoteNotes] = useState("");
+
   async function handleCreateQuote() {
+    setQuoteNotesOpen(true);
+  }
+
+  async function submitQuote() {
     setCreatingQuote(true);
+    setQuoteNotesOpen(false);
     try {
       const lineIds = selectedLineIds.size > 0 ? [...selectedLineIds] : undefined;
       const res = await fetch(`/api/tickets/${ticket.id}/quotes`, {
@@ -1360,10 +1368,12 @@ export function TicketDetail({
           customerId: ticket.payingCustomer.id,
           siteId: ticket.site?.id,
           siteCommercialLinkId: ticket.siteCommercialLink?.id,
+          notes: quoteNotes || undefined,
           lineIds,
         }),
       });
       if (res.ok) {
+        setQuoteNotes("");
         router.refresh();
       } else {
         const err = await res.json();
@@ -2292,6 +2302,30 @@ export function TicketDetail({
                     {creatingQuote ? "Creating..." : "Generate Quote"}
                   </Button>
                 )}
+
+              {/* Quote notes modal */}
+              {quoteNotesOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setQuoteNotesOpen(false)}>
+                  <div className="bg-[#0F0F0F] border-2 border-[#FF6600] rounded-lg p-4 w-[500px] max-h-[60vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-sm font-bold text-[#FF6600] mb-3">Generate Quote</div>
+                    <label className="text-[10px] uppercase tracking-wider text-[#888] block mb-1">Notes (appears at bottom of PDF)</label>
+                    <textarea
+                      value={quoteNotes}
+                      onChange={(e) => setQuoteNotes(e.target.value)}
+                      className="w-full h-32 px-3 py-2 text-xs bg-[#0A0A0A] border border-[#333] rounded resize-none"
+                      placeholder="e.g. Delivery within 3-5 working days. Prices valid for 30 days. Payment terms: 30 days net."
+                      autoFocus
+                    />
+                    <div className="flex gap-2 justify-end mt-3">
+                      <Button size="sm" variant="outline" onClick={() => setQuoteNotesOpen(false)}>Cancel</Button>
+                      <Button size="sm" className="bg-[#FF6600] hover:bg-[#FF9900] text-black font-bold" onClick={submitQuote} disabled={creatingQuote}>
+                        {creatingQuote ? "Creating..." : "Create Quote"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!isQuoteReady &&
                 ticket.lines.length > 0 &&
                 ticket.status !== "QUOTED" &&

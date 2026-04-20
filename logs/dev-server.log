@@ -6,11 +6,5 @@
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.174:3000
 - Environments: .env.local, .env
-✓ Ready in 195ms
+✓ Ready in 225ms
 
- GET /api/system/health 200 in 901ms (next.js: 866ms, application-code: 35ms)
- GET /quotes/b21308cf-c5f7-421d-90af-196d03d974ac/view 200 in 4.0s (next.js: 2.7s, application-code: 1357ms)
- GET /tickets/36040286-d7dd-4d4b-870e-9d10a50424d6 200 in 4.3s (next.js: 3.0s, application-code: 1284ms)
- GET /api/tickets/36040286-d7dd-4d4b-870e-9d10a50424d6/commercial-summary 200 in 529ms (next.js: 521ms, application-code: 9ms)
- POST /api/tickets/36040286-d7dd-4d4b-870e-9d10a50424d6/lines 201 in 637ms (next.js: 621ms, application-code: 16ms)
- GET /tickets/36040286-d7dd-4d4b-870e-9d10a50424d6 200 in 142ms (next.js: 3ms, application-code: 139ms)
