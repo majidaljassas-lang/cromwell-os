@@ -319,6 +319,7 @@ function InlineLineRow({
   const [saleVal, setSaleVal] = useState("");
   const [fromStockVal, setFromStockVal] = useState("");
   const [notesVal, setNotesVal] = useState("");
+  const [priceMatchData, setPriceMatchData] = useState<{ field: string; value: unknown; siblings: Array<{ id: string; sectionLabel: string | null }>; message: string; description: string } | null>(null);
   const [marginPctVal, setMarginPctVal] = useState("");
   const [mounted, setMounted] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -471,20 +472,15 @@ function InlineLineRow({
     const data = await res.json().catch(() => ({}));
     setSaving(false);
 
-    // If matching siblings found, ask user to apply same price
+    // If matching siblings found, show approval prompt
     if (data._matchingSiblings?.length > 0) {
-      const apply = confirm(data._matchMessage + "\n\nClick OK to apply, Cancel to skip.");
-      if (apply) {
-        const sibIds = data._matchingSiblings.map((s: { id: string }) => s.id);
-        const priceData: Record<string, unknown> = {};
-        if (field === "expectedCostUnit" || field === "actualSaleUnit") priceData[field] = value;
-        await fetch("/api/ticket-lines/apply-price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lineIds: sibIds, ...priceData }),
-        });
-        router.refresh();
-      }
+      setPriceMatchData({
+        field,
+        value,
+        siblings: data._matchingSiblings,
+        message: data._matchMessage,
+        description: line.description,
+      });
     }
   }
 
@@ -1167,6 +1163,49 @@ function InlineLineRow({
         <TableCell className="p-1 w-16" />
       </TableRow>
     ))}
+
+    {/* Price match approval modal */}
+    {priceMatchData && (
+      <tr>
+        <td colSpan={20}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPriceMatchData(null)}>
+            <div className="bg-[#0F0F0F] border-2 border-[#FFCC00] rounded-lg p-4 w-[450px]" onClick={(e) => e.stopPropagation()}>
+              <div className="text-sm font-bold text-[#FFCC00] mb-2">Same item found</div>
+              <div className="text-xs text-[#ccc] mb-3">
+                <span className="font-medium">{priceMatchData.description}</span> exists in {priceMatchData.siblings.length} other section{priceMatchData.siblings.length > 1 ? "s" : ""}:
+              </div>
+              <div className="space-y-1 mb-4">
+                {priceMatchData.siblings.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs bg-[#1A1A1A] border border-[#333] rounded px-3 py-1.5">
+                    <span className="text-[#FFCC00] font-bold">→</span>
+                    <span className="text-[#ccc]">{s.sectionLabel || "Main"}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-[#888] mb-4">
+                Apply <span className="text-[#00CC66] font-bold">£{Number(priceMatchData.value || 0).toFixed(2)}</span> to all matching lines?
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="outline" onClick={() => setPriceMatchData(null)}>Skip</Button>
+                <Button size="sm" className="bg-[#FFCC00] hover:bg-[#FFD633] text-black font-bold" onClick={async () => {
+                  const sibIds = priceMatchData.siblings.map(s => s.id);
+                  await fetch("/api/ticket-lines/apply-price", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ lineIds: sibIds, [priceMatchData.field]: priceMatchData.value }),
+                  });
+                  setPriceMatchData(null);
+                  router.refresh();
+                }}>
+                  Apply to all
+                </Button>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )}
+
     </>
   );
 }
