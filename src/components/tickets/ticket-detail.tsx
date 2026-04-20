@@ -654,6 +654,31 @@ function InlineLineRow({
       if (res.ok) {
         setBomSheetOpen(false);
         setBomExpanded(true);
+
+        // Check for matching lines in other sections — offer to copy BOM
+        const allLines = await fetch(`/api/ticket-lines?ticketId=${ticketId}`).then(r => r.ok ? r.json() : []);
+        const normalDesc = line.description.trim().toLowerCase();
+        const siblings = (Array.isArray(allLines) ? allLines : allLines.lines ?? []).filter(
+          (l: any) => l.id !== line.id && l.description?.trim().toLowerCase() === normalDesc && !l.isBomParent
+        );
+
+        if (siblings.length > 0) {
+          const sections = siblings.map((s: any) => s.sectionLabel || "Main").join(", ");
+          setPriceMatchData({
+            field: "_copyBom",
+            value: valid.map((c) => ({
+              description: c.description.trim(),
+              qty: Number(c.qty) || 1,
+              unit: c.unit || "EA",
+              expectedCostUnit: Number(c.expectedCostUnit) || 0,
+              supplierName: c.supplierName?.trim() || undefined,
+            })),
+            siblings: siblings.map((s: any) => ({ id: s.id, sectionLabel: s.sectionLabel })),
+            message: `Same item in ${siblings.length} other section${siblings.length > 1 ? "s" : ""} — copy BOM?`,
+            description: line.description,
+          });
+        }
+
         router.refresh();
       } else {
         const err = await res.json().catch(() => null);
@@ -1183,21 +1208,35 @@ function InlineLineRow({
                 ))}
               </div>
               <div className="text-xs text-[#888] mb-4">
-                Apply <span className="text-[#00CC66] font-bold">£{Number(priceMatchData.value || 0).toFixed(2)}</span> to all matching lines?
+                {priceMatchData.field === "_copyBom"
+                  ? `Copy BOM (${(priceMatchData.value as any[]).length} components) to all matching lines?`
+                  : <>Apply <span className="text-[#00CC66] font-bold">£{Number(priceMatchData.value || 0).toFixed(2)}</span> to all matching lines?</>
+                }
               </div>
               <div className="flex gap-2 justify-end">
                 <Button size="sm" variant="outline" onClick={() => setPriceMatchData(null)}>Skip</Button>
                 <Button size="sm" className="bg-[#FFCC00] hover:bg-[#FFD633] text-black font-bold" onClick={async () => {
-                  const sibIds = priceMatchData.siblings.map(s => s.id);
-                  await fetch("/api/ticket-lines/apply-price", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ lineIds: sibIds, [priceMatchData.field]: priceMatchData.value }),
-                  });
+                  if (priceMatchData.field === "_copyBom") {
+                    // Copy BOM to each sibling
+                    for (const sib of priceMatchData.siblings) {
+                      await fetch(`/api/ticket-lines/${sib.id}/bom`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ components: priceMatchData.value }),
+                      });
+                    }
+                  } else {
+                    const sibIds = priceMatchData.siblings.map(s => s.id);
+                    await fetch("/api/ticket-lines/apply-price", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ lineIds: sibIds, [priceMatchData.field]: priceMatchData.value }),
+                    });
+                  }
                   setPriceMatchData(null);
                   router.refresh();
                 }}>
-                  Apply to all
+                  {priceMatchData.field === "_copyBom" ? "Copy BOM to all" : "Apply to all"}
                 </Button>
               </div>
             </div>
