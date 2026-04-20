@@ -34,6 +34,32 @@ export async function PATCH(
   try {
     const body = await request.json();
 
+    // Handle move up/down
+    if (body._move === "up" || body._move === "down") {
+      const current = await prisma.ticketLine.findUnique({ where: { id }, select: { ticketId: true, createdAt: true, sectionLabel: true } });
+      if (!current) return Response.json({ error: "Not found" }, { status: 404 });
+
+      const sibling = await prisma.ticketLine.findFirst({
+        where: {
+          ticketId: current.ticketId,
+          sectionLabel: current.sectionLabel,
+          parentLineId: null,
+          createdAt: body._move === "up" ? { lt: current.createdAt } : { gt: current.createdAt },
+        },
+        orderBy: { createdAt: body._move === "up" ? "desc" : "asc" },
+        select: { id: true, createdAt: true },
+      });
+
+      if (sibling) {
+        // Swap createdAt timestamps
+        const tempDate = new Date(current.createdAt.getTime() - 1);
+        await prisma.ticketLine.update({ where: { id }, data: { createdAt: sibling.createdAt } });
+        await prisma.ticketLine.update({ where: { id: sibling.id }, data: { createdAt: current.createdAt } });
+      }
+
+      return Response.json({ ok: true, moved: body._move });
+    }
+
     // Whitelist allowed fields
     const allowed: Record<string, unknown> = {};
     const fields = [

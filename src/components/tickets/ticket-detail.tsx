@@ -319,6 +319,10 @@ function InlineLineRow({
   const [saleVal, setSaleVal] = useState("");
   const [fromStockVal, setFromStockVal] = useState("");
   const [notesVal, setNotesVal] = useState("");
+
+  // Clipboard for copy/paste between lines — stored in window so it persists across renders
+  const getClipboard = () => (window as any).__ticketLineClipboard ?? null;
+  const setClipboard = (data: any) => { (window as any).__ticketLineClipboard = data; };
   const [priceMatchData, setPriceMatchData] = useState<{ field: string; value: unknown; siblings: Array<{ id: string; sectionLabel: string | null }>; message: string; description: string } | null>(null);
   const [marginPctVal, setMarginPctVal] = useState("");
   const [mounted, setMounted] = useState(false);
@@ -1066,20 +1070,96 @@ function InlineLineRow({
             </button>
           )}
           <button
-            onClick={async () => {
-              const r = await fetch(`/api/ticket-lines/${line.id}/copy-to-matching`, { method: "POST" });
-              const d = await r.json().catch(() => ({}));
-              if (r.ok && d.updated > 0) {
-                alert(`Copied to ${d.updated} matching line${d.updated > 1 ? "s" : ""}`);
-                router.refresh();
-              } else if (r.ok) {
-                alert("No matching lines found");
-              }
+            onClick={() => {
+              setClipboard({
+                productCode: line.productCode,
+                supplierName: supplierVal || line.supplierName,
+                expectedCostUnit: costVal ? Number(costVal) : Number(line.expectedCostUnit || 0),
+                actualSaleUnit: saleVal ? Number(saleVal) : Number(line.actualSaleUnit || 0),
+                description: line.description,
+                isBomParent: line.isBomParent,
+                lineId: line.id,
+              });
+              alert("Copied — click 📋 on another line to paste");
             }}
             className="p-0.5 text-[#888] hover:text-[#FFCC00] transition-colors"
-            title="Copy code, supplier, cost, sale to all matching lines"
+            title="Copy this line's details"
           >
-            <span className="text-[9px]">⬇</span>
+            <span className="text-[9px]">📄</span>
+          </button>
+          <button
+            onClick={async () => {
+              const clip = getClipboard();
+              if (!clip) { alert("Nothing copied — click 📄 on a line first"); return; }
+              const data: Record<string, unknown> = {};
+              if (clip.productCode) data.productCode = clip.productCode;
+              if (clip.supplierName) data.supplierName = clip.supplierName;
+              if (clip.expectedCostUnit > 0) data.expectedCostUnit = clip.expectedCostUnit;
+              if (clip.actualSaleUnit > 0) data.actualSaleUnit = clip.actualSaleUnit;
+
+              const r = await fetch(`/api/ticket-lines/${line.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+              });
+              if (r.ok) {
+                // Also copy BOM if source had one
+                if (clip.isBomParent && clip.lineId) {
+                  await fetch(`/api/ticket-lines/${line.id}/bom`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sourceLineId: clip.lineId }),
+                  }).catch(() => {});
+                  // Fetch source BOM and copy
+                  const bomRes = await fetch(`/api/ticket-lines/${clip.lineId}/bom`);
+                  if (bomRes.ok) {
+                    const bomData = await bomRes.json();
+                    const comps = (bomData.components || []).map((c: any) => ({
+                      description: c.description, qty: Number(c.qty), unit: c.unit || "EA",
+                      expectedCostUnit: Number(c.expectedCostUnit || 0), supplierName: c.supplierName || undefined,
+                    }));
+                    if (comps.length > 0) {
+                      await fetch(`/api/ticket-lines/${line.id}/bom`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ components: comps }),
+                      });
+                    }
+                  }
+                }
+                router.refresh();
+              }
+            }}
+            className="p-0.5 text-[#888] hover:text-[#00CC66] transition-colors"
+            title="Paste copied line details here"
+          >
+            <span className="text-[9px]">📋</span>
+          </button>
+          <button
+            onClick={async () => {
+              await fetch(`/api/ticket-lines/${line.id}`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ _move: "up" }),
+              });
+              router.refresh();
+            }}
+            className="p-0.5 text-[#666] hover:text-[#ccc] transition-colors"
+            title="Move up"
+          >
+            <span className="text-[9px]">▲</span>
+          </button>
+          <button
+            onClick={async () => {
+              await fetch(`/api/ticket-lines/${line.id}`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ _move: "down" }),
+              });
+              router.refresh();
+            }}
+            className="p-0.5 text-[#666] hover:text-[#ccc] transition-colors"
+            title="Move down"
+          >
+            <span className="text-[9px]">▼</span>
           </button>
           <button
             onClick={handleDelete}
