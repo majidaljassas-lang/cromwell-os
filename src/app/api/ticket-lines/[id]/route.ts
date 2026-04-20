@@ -165,13 +165,29 @@ export async function PATCH(
       await autoProgressTicket(line.ticketId);
     }
 
-    // If matching siblings exist, suggest applying same price
-    if (matchingSiblings.length > 0) {
-      return Response.json({
-        ...line,
-        _matchingSiblings: matchingSiblings.map(s => ({ id: s.id, sectionLabel: s.sectionLabel })),
-        _matchMessage: `Same item in ${matchingSiblings.length} other section${matchingSiblings.length > 1 ? "s" : ""} — apply same price?`,
-      });
+    // Auto-apply to matching siblings on the SERVER — don't rely on client
+    if (matchingSiblings.length > 0 && pricingChanged) {
+      let applied = 0;
+      for (const sib of matchingSiblings) {
+        const sibLine = await prisma.ticketLine.findUnique({ where: { id: sib.id }, select: { qty: true } });
+        if (!sibLine) continue;
+        const sibQty = Number(sibLine.qty);
+        const updates: Record<string, unknown> = {};
+        if (allowed.expectedCostUnit !== undefined) {
+          updates.expectedCostUnit = allowed.expectedCostUnit;
+          updates.expectedCostTotal = Math.round(Number(allowed.expectedCostUnit) * sibQty * 100) / 100;
+        }
+        if (allowed.actualSaleUnit !== undefined) {
+          updates.actualSaleUnit = allowed.actualSaleUnit;
+          updates.actualSaleTotal = Math.round(Number(allowed.actualSaleUnit) * sibQty * 100) / 100;
+        }
+        if (allowed.supplierName !== undefined) updates.supplierName = allowed.supplierName;
+        if (Object.keys(updates).length > 0) {
+          await prisma.ticketLine.update({ where: { id: sib.id }, data: updates });
+          applied++;
+        }
+      }
+      return Response.json({ ...line, _applied: applied });
     }
 
     return Response.json(line);

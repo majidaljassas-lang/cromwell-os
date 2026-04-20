@@ -6,6 +6,5 @@
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.174:3000
 - Environments: .env.local, .env
-✓ Ready in 216ms
+✓ Ready in 239ms
 
- PATCH /api/ticket-lines/598122df-670e-4b68-9aed-b96daefce95d 200 in 985ms (next.js: 819ms, application-code: 166ms)
