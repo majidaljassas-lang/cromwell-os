@@ -2779,8 +2779,7 @@ export function TicketDetail({
                     const firstSection = activeLines[0]?.sectionLabel;
                     const showSectionHeader =
                       !!line.sectionLabel &&
-                      line.sectionLabel !== prevLine?.sectionLabel &&
-                      line.sectionLabel !== firstSection;
+                      line.sectionLabel !== prevLine?.sectionLabel;
                     return (
                     <React.Fragment key={line.id}>
                       {showSectionHeader && (
