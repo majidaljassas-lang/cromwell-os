@@ -129,22 +129,27 @@ export async function PATCH(
     });
 
     // Check for matching lines in other sections — suggest (don't auto-apply)
+    // Triggers on ANY field change, not just price
     const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
+    const anyFieldChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.supplierName !== undefined || allowed.description !== undefined;
     let matchingSiblings: Array<{ id: string; description: string; sectionLabel: string | null }> = [];
-    if (pricingChanged && line.description) {
-      // Find matching lines — normalize by trimming and lowercasing
+    if (anyFieldChanged && line.description) {
       const normalDesc = line.description.trim();
       const allSiblings = await prisma.ticketLine.findMany({
         where: {
           ticketId: line.ticketId,
           id: { not: line.id },
         },
-        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true },
+        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true, actualSaleUnit: true },
       });
       matchingSiblings = allSiblings.filter(s => {
-        // Match if descriptions are the same (trimmed, case-insensitive)
         const sDesc = s.description.trim();
-        return sDesc.toLowerCase() === normalDesc.toLowerCase() && !Number(s.expectedCostUnit || 0);
+        if (sDesc.toLowerCase() !== normalDesc.toLowerCase()) return false;
+        // Only suggest if sibling doesn't already have the value being set
+        if (pricingChanged && !Number(s.expectedCostUnit || 0) && !Number(s.actualSaleUnit || 0)) return true;
+        if (allowed.supplierName !== undefined && !s.description) return true; // always suggest supplier
+        if (pricingChanged) return true; // always suggest price changes
+        return false;
       });
     }
 
