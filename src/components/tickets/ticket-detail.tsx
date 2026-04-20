@@ -1218,13 +1218,18 @@ function InlineLineRow({
                 <Button size="sm" className="bg-[#FFCC00] hover:bg-[#FFD633] text-black font-bold" onClick={async () => {
                   if (priceMatchData.field === "_copyBom") {
                     // Copy BOM to each sibling
+                    let copied = 0;
                     for (const sib of priceMatchData.siblings) {
-                      await fetch(`/api/ticket-lines/${sib.id}/bom`, {
+                      const r = await fetch(`/api/ticket-lines/${sib.id}/bom`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ components: priceMatchData.value }),
                       });
+                      if (r.ok) copied++;
+                      else { const err = await r.json().catch(() => ({})); console.error("BOM copy failed for", sib.id, err); }
                     }
+                    if (copied > 0) alert(`BOM copied to ${copied} line${copied > 1 ? "s" : ""}`);
+                    else alert("BOM copy failed — check console");
                   } else {
                     const sibIds = priceMatchData.siblings.map(s => s.id);
                     await fetch("/api/ticket-lines/apply-price", {
