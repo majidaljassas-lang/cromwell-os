@@ -1066,6 +1066,22 @@ function InlineLineRow({
             </button>
           )}
           <button
+            onClick={async () => {
+              const r = await fetch(`/api/ticket-lines/${line.id}/copy-to-matching`, { method: "POST" });
+              const d = await r.json().catch(() => ({}));
+              if (r.ok && d.updated > 0) {
+                alert(`Copied to ${d.updated} matching line${d.updated > 1 ? "s" : ""}`);
+                router.refresh();
+              } else if (r.ok) {
+                alert("No matching lines found");
+              }
+            }}
+            className="p-0.5 text-[#888] hover:text-[#FFCC00] transition-colors"
+            title="Copy code, supplier, cost, sale to all matching lines"
+          >
+            <span className="text-[9px]">⬇</span>
+          </button>
+          <button
             onClick={handleDelete}
             disabled={deleting}
             className="p-0.5 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
