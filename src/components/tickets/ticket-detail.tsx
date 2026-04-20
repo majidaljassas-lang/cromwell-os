@@ -472,15 +472,18 @@ function InlineLineRow({
     const data = await res.json().catch(() => ({}));
     setSaving(false);
 
-    // If matching siblings found, show approval prompt
+    // If matching siblings found, auto-apply same change across all sections
     if (data._matchingSiblings?.length > 0) {
-      setPriceMatchData({
-        field,
-        value,
-        siblings: data._matchingSiblings,
-        message: data._matchMessage,
-        description: line.description,
+      const sibIds = data._matchingSiblings.map((s: { id: string }) => s.id);
+      const r = await fetch("/api/ticket-lines/apply-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineIds: sibIds, [field]: value }),
       });
+      if (r.ok) {
+        const d = await r.json();
+        console.log(`Auto-applied ${field}=${value} to ${d.updated} matching lines`);
+      }
     }
   }
 

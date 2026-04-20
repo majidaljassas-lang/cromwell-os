@@ -145,11 +145,8 @@ export async function PATCH(
       matchingSiblings = allSiblings.filter(s => {
         const sDesc = s.description.trim();
         if (sDesc.toLowerCase() !== normalDesc.toLowerCase()) return false;
-        // Only suggest if sibling doesn't already have the value being set
-        if (pricingChanged && !Number(s.expectedCostUnit || 0) && !Number(s.actualSaleUnit || 0)) return true;
-        if (allowed.supplierName !== undefined && !s.description) return true; // always suggest supplier
-        if (pricingChanged) return true; // always suggest price changes
-        return false;
+        // Always suggest if same description and we changed something
+        return true;
       });
     }
 
