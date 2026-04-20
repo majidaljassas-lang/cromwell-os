@@ -483,6 +483,7 @@ function InlineLineRow({
       if (r.ok) {
         const d = await r.json();
         console.log(`Auto-applied ${field}=${value} to ${d.updated} matching lines`);
+        router.refresh();
       }
     }
   }
