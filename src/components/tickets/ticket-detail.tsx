@@ -1010,6 +1010,57 @@ function InlineLineRow({
           >
             <Layers className="size-3" />
           </button>
+          {!line.isBomParent && (
+            <button
+              onClick={async () => {
+                // Find BOM parents on this ticket to copy from
+                const res = await fetch(`/api/ticket-lines?ticketId=${ticketId}`);
+                const allLines = await res.json();
+                const bomSources = (Array.isArray(allLines) ? allLines : []).filter(
+                  (l: any) => l.isBomParent && l.id !== line.id
+                );
+                if (bomSources.length === 0) { alert("No BOMs found on this ticket to copy from"); return; }
+
+                // Show picker
+                const options = bomSources.map((s: any, i: number) => `${i + 1}. ${s.description?.slice(0, 50)} (${s.sectionLabel || "Main"})`).join("\n");
+                const choice = prompt("Copy BOM from which line?\n\n" + options + "\n\nEnter number:");
+                if (!choice) return;
+                const idx = parseInt(choice) - 1;
+                if (isNaN(idx) || idx < 0 || idx >= bomSources.length) return;
+
+                const source = bomSources[idx];
+                // Fetch the source BOM components
+                const bomRes = await fetch(`/api/ticket-lines/${source.id}/bom`);
+                const bomData = await bomRes.json();
+                const components = (bomData.components || []).map((c: any) => ({
+                  description: c.description,
+                  qty: Number(c.qty),
+                  unit: c.unit || "EA",
+                  expectedCostUnit: Number(c.expectedCostUnit || 0),
+                  supplierName: c.supplierName || undefined,
+                }));
+
+                if (components.length === 0) { alert("Source BOM has no components"); return; }
+
+                // Apply BOM to this line
+                const applyRes = await fetch(`/api/ticket-lines/${line.id}/bom`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ components }),
+                });
+                if (applyRes.ok) {
+                  router.refresh();
+                } else {
+                  const err = await applyRes.json().catch(() => ({}));
+                  alert("Copy failed: " + (err.error || "unknown error"));
+                }
+              }}
+              className="p-0.5 text-[#888] hover:text-[#FFCC00] transition-colors"
+              title="Copy BOM from another line"
+            >
+              <span className="text-[9px] leading-none">📋</span>
+            </button>
+          )}
           <button
             onClick={handleDelete}
             disabled={deleting}
