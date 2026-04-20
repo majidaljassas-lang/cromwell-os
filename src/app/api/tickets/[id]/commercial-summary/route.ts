@@ -20,6 +20,7 @@ export async function GET(
     const lines = await prisma.ticketLine.findMany({
       where: {
         ticketId: id,
+        parentLineId: null, // Exclude BOM children — their cost is in the parent
         status: { in: ACTIVE_STATUSES as ("CAPTURED" | "PRICED" | "READY_FOR_QUOTE" | "PARTIALLY_ORDERED" | "ORDERED" | "PARTIALLY_COSTED" | "FULLY_COSTED" | "INVOICED")[] },
       },
       select: {
