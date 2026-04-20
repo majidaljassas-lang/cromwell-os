@@ -132,14 +132,19 @@ export async function PATCH(
     const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
     let matchingSiblings: Array<{ id: string; description: string; sectionLabel: string | null }> = [];
     if (pricingChanged && line.description) {
-      matchingSiblings = await prisma.ticketLine.findMany({
+      // Find matching lines — normalize by trimming and lowercasing
+      const normalDesc = line.description.trim();
+      const allSiblings = await prisma.ticketLine.findMany({
         where: {
           ticketId: line.ticketId,
           id: { not: line.id },
-          description: { equals: line.description, mode: "insensitive" },
-          expectedCostUnit: { equals: null },
         },
-        select: { id: true, description: true, sectionLabel: true },
+        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true },
+      });
+      matchingSiblings = allSiblings.filter(s => {
+        // Match if descriptions are the same (trimmed, case-insensitive)
+        const sDesc = s.description.trim();
+        return sDesc.toLowerCase() === normalDesc.toLowerCase() && !Number(s.expectedCostUnit || 0);
       });
     }
 
