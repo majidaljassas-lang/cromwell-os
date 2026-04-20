@@ -215,7 +215,7 @@ export function EnableBankingPanel({ connected, credentialsConfigured }: Props) 
                   <option>Barclaycard</option>
                 </select>
                 <button
-                  onClick={handleConnect}
+                  onClick={() => handleConnect()}
                   disabled={connecting}
                   className="text-[10px] px-2 py-1 border border-[#444444] text-[#CCCCCC] hover:bg-[#333333] disabled:opacity-50 disabled:cursor-not-allowed"
                 >

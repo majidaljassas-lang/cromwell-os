@@ -69,7 +69,8 @@ function buildHtml(
   proformaNumber: string,
   validUntil: Date | null,
   totalSale: number,
-  fontBase64: string
+  fontBase64: string,
+  customerPO?: { poNo: string; customer: { name: string; billingAddress: string | null } } | null
 ): string {
   const issuedDate = quote.proformaIssuedAt ?? new Date();
   const dateStr = issuedDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -140,8 +141,11 @@ function buildHtml(
 <div style="display:flex;justify-content:space-between;padding:16px 0 20px">
   <div>
     <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:#999;margin-bottom:4px">Bill To</div>
-    <div style="font-size:14px;font-weight:700">${quote.customer.legalName || quote.customer.name}</div>
-    ${addressLines.map((l) => `<div style="font-size:11px;color:#444;margin-top:1px">${l}</div>`).join("")}
+    <div style="font-size:14px;font-weight:700">${customerPO?.customer?.name || quote.customer.legalName || quote.customer.name}</div>
+    ${(() => {
+      const addr = customerPO?.customer?.billingAddress || quote.customer.billingAddress || "";
+      return addr.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean).map((l: string) => `<div style="font-size:11px;color:#444;margin-top:1px">${l}</div>`).join("");
+    })()}
     ${quote.customer.companyNumber ? `<div style="font-size:10px;color:#777;margin-top:3px">Company No: ${quote.customer.companyNumber}</div>` : ""}
     ${quote.customer.vatNumber ? `<div style="font-size:10px;color:#777">VAT: ${quote.customer.vatNumber}</div>` : ""}
   </div>
@@ -150,6 +154,7 @@ function buildHtml(
     <div><span style="color:#888">Valid Until:</span> <strong>${validStr}</strong></div>
     <div><span style="color:#888">Terms:</span> Pro-Forma (paid before delivery)</div>
     ${quote.site ? `<div><span style="color:#888">Site:</span> ${quote.site.siteName}</div>` : ""}
+    ${customerPO?.poNo ? `<div><span style="color:#888">Customer PO:</span> <strong>${customerPO.poNo}</strong></div>` : ""}
   </div>
 </div>
 
@@ -249,6 +254,12 @@ export async function POST(
       return Response.json({ error: "Quote not found" }, { status: 404 });
     }
 
+    // Fetch linked Customer PO (if any)
+    const customerPO = await prisma.customerPO.findFirst({
+      where: { quoteId: id },
+      select: { poNo: true, customerId: true, customer: { select: { name: true, billingAddress: true } } },
+    });
+
     // Sort lines to match ticket order (matches the invoice generator's behaviour).
     quote.lines.sort((a, b) => {
       const ta = a.ticketLine?.createdAt ? new Date(a.ticketLine.createdAt).getTime() : 0;
@@ -266,7 +277,8 @@ export async function POST(
       proformaNumber,
       quote.expiresAt,
       totalSale,
-      fontBase64
+      fontBase64,
+      customerPO
     );
 
     const puppeteer = await import("puppeteer");

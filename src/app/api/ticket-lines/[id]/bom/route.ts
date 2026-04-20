@@ -188,6 +188,68 @@ export async function POST(
       return updated;
     });
 
+    // Cascade BOM to siblings with same canonicalProductId
+    const updatedLine = await prisma.ticketLine.findUnique({
+      where: { id },
+      select: { canonicalProductId: true, ticketId: true },
+    });
+    if (updatedLine?.canonicalProductId) {
+      const siblings = await prisma.ticketLine.findMany({
+        where: {
+          ticketId: updatedLine.ticketId,
+          canonicalProductId: updatedLine.canonicalProductId,
+          id: { not: id },
+          parentLineId: null,
+          isBomParent: false,
+        },
+        select: { id: true, qty: true },
+      });
+      for (const sib of siblings) {
+        try {
+          // Copy BOM to sibling
+          const sibQty = Number(sib.qty);
+          await prisma.$transaction(async (tx) => {
+            // Delete existing components
+            await tx.ticketLine.deleteMany({ where: { parentLineId: sib.id } });
+            // Create new components
+            for (const comp of components) {
+              const compQty = Number(comp.qty || 0);
+              const compCostUnit = Number(comp.expectedCostUnit || 0);
+              await tx.ticketLine.create({
+                data: {
+                  ticketId: parent!.ticketId,
+                  parentLineId: sib.id,
+                  lineType: parent!.lineType,
+                  description: comp.description,
+                  qty: compQty,
+                  unit: comp.unit || "EA",
+                  expectedCostUnit: compCostUnit,
+                  expectedCostTotal: compQty * compCostUnit,
+                  payingCustomerId: parent!.payingCustomerId,
+                  siteId: parent!.siteId,
+                  siteCommercialLinkId: parent!.siteCommercialLinkId,
+                  sectionLabel: parent!.sectionLabel,
+                  status: "CAPTURED",
+                  supplierName: comp.supplierName || null,
+                },
+              });
+            }
+            // Update sibling as BOM parent with cascaded cost
+            await tx.ticketLine.update({
+              where: { id: sib.id },
+              data: {
+                isBomParent: true,
+                expectedCostUnit: parentCostUnit,
+                expectedCostTotal: parentCostUnit * sibQty,
+              },
+            });
+          });
+        } catch (e) {
+          console.error(`Failed to cascade BOM to sibling ${sib.id}:`, e);
+        }
+      }
+    }
+
     return Response.json(result, { status: 201 });
   } catch (error) {
     console.error("Failed to create BOM:", error);

@@ -72,7 +72,7 @@ export async function PATCH(
       "evidenceStatus", "costStatus", "salesStatus",
       "supplierStrategyType", "siteId", "siteCommercialLinkId",
       "supplierId", "supplierName", "supplierReference",
-      "fromStock", "toOrder", "status",
+      "fromStock", "toOrder", "status", "canonicalProductId",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) allowed[f] = body[f];
@@ -127,7 +127,7 @@ export async function PATCH(
 
     // Auto-create or link supplier when supplierName is set
     if (allowed.supplierName && !allowed.supplierId) {
-      const trimmed = allowed.supplierName.trim();
+      const trimmed = String(allowed.supplierName).trim();
       allowed.supplierName = trimmed;
       // Try exact match first, then contains match for partial names
       const existingSupplier = await prisma.supplier.findFirst({
@@ -151,33 +151,10 @@ export async function PATCH(
     const line = await prisma.ticketLine.update({
       where: { id },
       data: allowed,
-      select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true },
+      select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true, canonicalProductId: true, isBomParent: true },
     });
 
-    // Check for matching lines in other sections — suggest (don't auto-apply)
-    // Triggers on ANY field change, not just price
     const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
-    const anyFieldChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.supplierName !== undefined || allowed.description !== undefined;
-    let matchingSiblings: Array<{ id: string; description: string; sectionLabel: string | null }> = [];
-    if (anyFieldChanged && line.description) {
-      const normalDesc = line.description.trim();
-      const allSiblings = await prisma.ticketLine.findMany({
-        where: {
-          ticketId: line.ticketId,
-          id: { not: line.id },
-        },
-        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true, actualSaleUnit: true, productCode: true },
-      });
-      const lineProductCode = (line as any).productCode?.trim().toLowerCase();
-      matchingSiblings = allSiblings.filter(s => {
-        const sDesc = s.description.trim().toLowerCase();
-        const sCode = (s as any).productCode?.trim().toLowerCase();
-        // Match by description OR product code
-        if (sDesc === normalDesc.toLowerCase()) return true;
-        if (lineProductCode && sCode && lineProductCode === sCode) return true;
-        return false;
-      });
-    }
 
     // Auto-progress ticket status when lines change
     if (pricingChanged) {
@@ -191,14 +168,28 @@ export async function PATCH(
       await autoProgressTicket(line.ticketId);
     }
 
-    // Auto-apply to matching siblings on the SERVER — don't rely on client
-    if (matchingSiblings.length > 0 && pricingChanged) {
+    // ── CASCADE: push changes to all linked lines (same canonicalProductId) ──
+    // Fields that cascade: description, cost, sale, supplier, productCode, BOM
+    const cascadeFields = ["description", "expectedCostUnit", "actualSaleUnit", "suggestedSaleUnit", "supplierName", "supplierId", "productCode", "benchmarkUnit"];
+    const hasCascadeChange = cascadeFields.some(f => allowed[f] !== undefined);
+
+    if (hasCascadeChange && line.canonicalProductId) {
+      // Find all sibling lines with the same canonicalProductId on this ticket
+      const siblings = await prisma.ticketLine.findMany({
+        where: {
+          ticketId: line.ticketId,
+          canonicalProductId: line.canonicalProductId,
+          id: { not: line.id },
+          parentLineId: null,
+        },
+        select: { id: true, qty: true, isBomParent: true },
+      });
+
       let applied = 0;
-      for (const sib of matchingSiblings) {
-        const sibLine = await prisma.ticketLine.findUnique({ where: { id: sib.id }, select: { qty: true } });
-        if (!sibLine) continue;
-        const sibQty = Number(sibLine.qty);
+      for (const sib of siblings) {
+        const sibQty = Number(sib.qty);
         const updates: Record<string, unknown> = {};
+
         if (allowed.expectedCostUnit !== undefined) {
           updates.expectedCostUnit = allowed.expectedCostUnit;
           updates.expectedCostTotal = Math.round(Number(allowed.expectedCostUnit) * sibQty * 100) / 100;
@@ -207,12 +198,60 @@ export async function PATCH(
           updates.actualSaleUnit = allowed.actualSaleUnit;
           updates.actualSaleTotal = Math.round(Number(allowed.actualSaleUnit) * sibQty * 100) / 100;
         }
+        if (allowed.suggestedSaleUnit !== undefined) {
+          updates.suggestedSaleUnit = allowed.suggestedSaleUnit;
+        }
+        if (allowed.description !== undefined) updates.description = allowed.description;
         if (allowed.supplierName !== undefined) updates.supplierName = allowed.supplierName;
+        if (allowed.supplierId !== undefined) updates.supplierId = allowed.supplierId;
+        if (allowed.productCode !== undefined) updates.productCode = allowed.productCode;
+        if (allowed.benchmarkUnit !== undefined) updates.benchmarkUnit = allowed.benchmarkUnit;
+
+        // Recalculate margins for sibling
+        const costUnit = Number(updates.expectedCostUnit ?? line.expectedCostUnit ?? 0);
+        const saleUnit = Number(updates.actualSaleUnit ?? line.actualSaleUnit ?? 0);
+        const sugSaleUnit = Number(updates.suggestedSaleUnit ?? line.suggestedSaleUnit ?? 0);
+        if (updates.expectedCostUnit !== undefined || updates.actualSaleUnit !== undefined) {
+          updates.expectedMarginTotal = (saleUnit - costUnit) * sibQty;
+          updates.actualMarginTotal = (saleUnit - costUnit) * sibQty;
+          updates.varianceTotal = (saleUnit - sugSaleUnit) * sibQty;
+        }
+
         if (Object.keys(updates).length > 0) {
           await prisma.ticketLine.update({ where: { id: sib.id }, data: updates });
           applied++;
         }
       }
+
+      // If source line is a BOM parent, copy BOM to siblings that aren't BOM parents yet
+      if (line.isBomParent && applied > 0) {
+        const components = await prisma.ticketLine.findMany({
+          where: { parentLineId: id },
+          select: { description: true, qty: true, unit: true, expectedCostUnit: true, supplierName: true },
+        });
+        if (components.length > 0) {
+          for (const sib of siblings) {
+            if (sib.isBomParent) continue;
+            try {
+              // Use internal fetch to create BOM on sibling
+              const bomRes = await fetch(`http://localhost:3000/api/ticket-lines/${sib.id}/bom`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  components: components.map(c => ({
+                    description: c.description,
+                    qty: Number(c.qty),
+                    unit: c.unit || "EA",
+                    expectedCostUnit: Number(c.expectedCostUnit || 0),
+                    supplierName: c.supplierName || undefined,
+                  })),
+                }),
+              });
+            } catch {}
+          }
+        }
+      }
+
       return Response.json({ ...line, _applied: applied });
     }
 

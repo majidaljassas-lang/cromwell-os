@@ -34,10 +34,25 @@ export async function POST(
     select: { id: true, description: true, qty: true, productCode: true, isBomParent: true },
   });
 
+  // Strip SKU prefix for fuzzy matching (e.g. "BSW0290T Crosswater..." → "Crosswater...")
+  const BRANDS = ["Geberit","Crosswater","VADO","Saneux","Coalbrook","D-Neo","Scudo","Merlyn","TrayMate","Level25","Ellis","Kensington"];
+  function stripSku(desc: string): string {
+    const t = desc.trim();
+    for (const b of BRANDS) { if (t.toLowerCase().startsWith(b.toLowerCase())) return t; }
+    for (const b of BRANDS) { const i = t.toLowerCase().indexOf(b.toLowerCase()); if (i > 0) return t.substring(i).trim(); }
+    return t;
+  }
+  function normDesc(desc: string): string {
+    return stripSku(desc).toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
+  const srcNorm = normDesc(source.description);
   const matching = siblings.filter(s => {
-    const sDesc = s.description.trim().toLowerCase();
-    if (sDesc === normalDesc) return true;
-    // Also match by product code if both have one
+    const sNorm = normDesc(s.description);
+    if (srcNorm === sNorm) return true;
+    if (srcNorm.length > 10 && sNorm.length > 10) {
+      if (srcNorm.startsWith(sNorm) || sNorm.startsWith(srcNorm)) return true;
+    }
     if (source.productCode && s.productCode && source.productCode.trim().toLowerCase() === s.productCode.trim().toLowerCase()) return true;
     return false;
   });

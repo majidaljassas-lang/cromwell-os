@@ -145,7 +145,7 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
     const quote = quotes.find(q => q.id === poQuoteId);
     if (!quote) { setSubmittingPO(false); return; }
 
-    const { links } = getSitesForQuote(quote.customer.id);
+    const { links } = getSitesForQuote(quote.customer?.id);
 
     try {
       const noteParts: string[] = [];
@@ -154,7 +154,7 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
 
       const body: Record<string, unknown> = {
         ticketId,
-        customerId: quote.customer.id,
+        customerId: quote.customer?.id,
         poNo: poNumber.trim(),
         poType: "STANDARD_FIXED",
         poDate: poDate || undefined,
@@ -228,7 +228,7 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerId: quote.customer.id,
+          customerId: quote.customer?.id,
           invoiceType: "STANDARD",
           notes: `From quote ${quote.quoteNo} v${quote.versionNo}`,
         }),
@@ -419,7 +419,7 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
                     </button>
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-[#888888]">
-                        {quote.customer.name}
+                        {quote.customer?.name ?? "—"}
                       </span>
                       <span className="text-sm font-medium tabular-nums">
                         {dec(quote.totalSell)}
@@ -588,7 +588,7 @@ export function QuotePanel({ ticketId, quotes, customers, sites = [], commercial
               {poQuoteId && (() => {
                 const quote = quotes.find(q => q.id === poQuoteId);
                 if (!quote) return null;
-                const { sites: siteList, hasLinks } = getSitesForQuote(quote.customer.id);
+                const { sites: siteList, hasLinks } = getSitesForQuote(quote.customer?.id);
                 return (
                   <>
                     {!hasLinks && siteList.length > 0 && (

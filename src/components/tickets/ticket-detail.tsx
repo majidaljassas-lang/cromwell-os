@@ -171,6 +171,7 @@ type TicketLine = {
   supplierId: string | null;
   supplierName: string | null;
   supplierReference: string | null;
+  productCode?: string | null;
   sectionLabel: string | null;
   status: string;
   createdAt: Date;
@@ -180,6 +181,7 @@ type TicketLine = {
   prices?: Array<{ id: string; supplierName: string; costPerUnit: Decimal; costTotal: Decimal; isWinner: boolean; isManual: boolean; leadTimeDays: number | null }>;
   parentLineId?: string | null;
   isBomParent?: boolean;
+  canonicalProductId?: string | null;
   components?: BOMComponent[];
 };
 
@@ -260,7 +262,7 @@ type EvidencePackData = {
   items: EvidencePackItemData[];
 };
 
-type CustomerOption = { id: string; name: string };
+type CustomerOption = { id: string; name: string; parentCustomerEntityId?: string | null };
 type SupplierOption = { id: string; name: string };
 type SiteOption = { id: string; siteName: string };
 type CommercialLinkOption = {
@@ -2061,13 +2063,13 @@ export function TicketDetail({
   const [poSiteId, setPoSiteId] = useState(ticket.site?.id || "");
   const [poNotes, setPoNotes] = useState("");
 
-  // Filter sites by customer commercial links
+  // Filter sites by customer commercial links — ONLY show linked sites
   const filteredSites = useMemo(() => {
     if (!commercialLinks || commercialLinks.length === 0) return sites || [];
     const customerLinkSiteIds = commercialLinks
       .filter((cl) => cl.customerId === ticket.payingCustomer.id)
       .map((cl) => cl.siteId);
-    if (customerLinkSiteIds.length === 0) return sites || [];
+    if (customerLinkSiteIds.length === 0) return [];
     return (sites || []).filter((s) => customerLinkSiteIds.includes(s.id));
   }, [sites, commercialLinks, ticket.payingCustomer.id]);
 
@@ -2367,7 +2369,7 @@ export function TicketDetail({
       {ticket.description && (
         <Card>
           <CardContent className="pt-4">
-            <p className="text-sm text-[#888888]">{ticket.description}</p>
+            <div className="text-sm text-[#888888] whitespace-pre-wrap max-h-40 overflow-y-auto">{ticket.description}</div>
           </CardContent>
         </Card>
       )}
@@ -2590,18 +2592,103 @@ export function TicketDetail({
                   </div>
                 )}
 
-              {/* Convert to Invoice button */}
+              {/* Selection actions */}
               {selectedLineIds.size > 0 && (
-                <Button
-                  onClick={handleConvertToInvoice}
-                  disabled={creatingInvoice}
-                  className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
-                  size="sm"
-                >
-                  {creatingInvoice
-                    ? "Creating..."
-                    : `Convert ${selectedLineIds.size} to Invoice`}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={async () => {
+                      if (selectedLineIds.size < 2) { alert("Select at least 2 lines to link"); return; }
+                      // Check if any selected line already has a canonicalProductId
+                      const selectedLines = activeLines.filter(l => selectedLineIds.has(l.id));
+                      let canonId = selectedLines.find(l => l.canonicalProductId)?.canonicalProductId;
+
+                      if (!canonId) {
+                        // Create a new CanonicalProduct from the first selected line
+                        const first = selectedLines[0];
+                        const res = await fetch("/api/canonical-products", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ name: first.description, code: `LINK-${Date.now()}`, canonicalUom: first.unit || "EA" }),
+                        });
+                        if (res.ok) { canonId = (await res.json()).id; }
+                      }
+                      if (!canonId) { alert("Failed to create link"); return; }
+
+                      // Find the "source" line — the one with the most data filled in
+                      const source = selectedLines.reduce((best, l) => {
+                        const score = (Number(l.expectedCostUnit) > 0 ? 1 : 0) + (Number(l.actualSaleUnit) > 0 ? 1 : 0) + (l.supplierName ? 1 : 0) + (l.isBomParent ? 1 : 0);
+                        const bestScore = (Number(best.expectedCostUnit) > 0 ? 1 : 0) + (Number(best.actualSaleUnit) > 0 ? 1 : 0) + (best.supplierName ? 1 : 0) + (best.isBomParent ? 1 : 0);
+                        return score > bestScore ? l : best;
+                      }, selectedLines[0]);
+
+                      // Build cascade data from source
+                      const cascadeData: Record<string, unknown> = { canonicalProductId: canonId };
+                      if (Number(source.expectedCostUnit) > 0) cascadeData.expectedCostUnit = Number(source.expectedCostUnit);
+                      if (Number(source.actualSaleUnit) > 0) cascadeData.actualSaleUnit = Number(source.actualSaleUnit);
+                      if (source.supplierName) cascadeData.supplierName = source.supplierName;
+                      if (source.productCode) cascadeData.productCode = source.productCode;
+
+                      // Update all selected lines — source first (to set canonicalProductId), then others get cascade
+                      await fetch(`/api/ticket-lines/${source.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ canonicalProductId: canonId }),
+                      });
+                      for (const lid of selectedLineIds) {
+                        if (lid === source.id) continue;
+                        await fetch(`/api/ticket-lines/${lid}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(cascadeData),
+                        });
+                      }
+
+                      // Trigger one final save on source to cascade BOM + all data
+                      if (Number(source.expectedCostUnit) > 0 || Number(source.actualSaleUnit) > 0 || source.supplierName) {
+                        await fetch(`/api/ticket-lines/${source.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(cascadeData),
+                        });
+                      }
+
+                      setSelectedLineIds(new Set());
+                      router.refresh();
+                    }}
+                    size="sm"
+                    className="bg-[#3399FF] text-black hover:bg-[#2277DD] font-bold"
+                  >
+                    🔗 Link {selectedLineIds.size}
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      for (const lid of selectedLineIds) {
+                        await fetch(`/api/ticket-lines/${lid}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ canonicalProductId: null }),
+                        });
+                      }
+                      setSelectedLineIds(new Set());
+                      router.refresh();
+                    }}
+                    size="sm"
+                    variant="outline"
+                    className="bg-[#222222] text-[#E0E0E0] border-[#333333] hover:bg-[#2A2A2A]"
+                  >
+                    Unlink {selectedLineIds.size}
+                  </Button>
+                  <Button
+                    onClick={handleConvertToInvoice}
+                    disabled={creatingInvoice}
+                    className="bg-[#00CC66] text-black hover:bg-[#00AA55] font-bold"
+                    size="sm"
+                  >
+                    {creatingInvoice
+                      ? "Creating..."
+                      : `Convert ${selectedLineIds.size} to Invoice`}
+                  </Button>
+                </div>
               )}
 
               {/* Add Section */}
@@ -3185,6 +3272,12 @@ function QuotePanelWithPO({
   const [poIssuer, setPOIssuer] = useState("");
   const [poSiteId, setPOSiteId] = useState(ticket.site?.id || "");
   const [poNotes, setPONotes] = useState("");
+  const [poCustomerId, setPOCustomerId] = useState(ticket.payingCustomer.id);
+
+  // Find subsidiaries of the paying customer
+  const subsidiaries = customers.filter(
+    (c) => c.parentCustomerEntityId === ticket.payingCustomer.id
+  );
 
   function openEnterPO(quoteId: string) {
     setPOQuoteId(quoteId);
@@ -3194,6 +3287,7 @@ function QuotePanelWithPO({
     setPOIssuer("");
     setPOSiteId(ticket.site?.id || "");
     setPONotes("");
+    setPOCustomerId(ticket.payingCustomer.id);
   }
 
   async function handleCreatePO() {
@@ -3209,7 +3303,8 @@ function QuotePanelWithPO({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticketId,
-          customerId: ticket.payingCustomer.id,
+          customerId: poCustomerId || ticket.payingCustomer.id,
+          quoteId: poQuoteId || undefined,
           siteId: poSiteId || ticket.site?.id || undefined,
           siteCommercialLinkId: ticket.siteCommercialLink?.id || undefined,
           poNo: poNo.trim(),
@@ -3217,6 +3312,7 @@ function QuotePanelWithPO({
           poDate: poDate || undefined,
           status: "RECEIVED",
           totalValue,
+          issuer: poIssuer.trim() || undefined,
           notes: poNotes
             ? `Issuer: ${poIssuer}\n${poNotes}`
             : poIssuer
@@ -3302,6 +3398,30 @@ function QuotePanelWithPO({
                 placeholder="Who issued the PO?"
               />
             </div>
+            {/* Ordering Entity — show subsidiaries if parent has any */}
+            {subsidiaries.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Ordering Entity</Label>
+                <Select
+                  value={poCustomerId}
+                  onValueChange={(v) => setPOCustomerId(v ?? ticket.payingCustomer.id)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select ordering entity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ticket.payingCustomer.id}>
+                      {ticket.payingCustomer.name} (Parent)
+                    </SelectItem>
+                    {subsidiaries.map((sub) => (
+                      <SelectItem key={sub.id} value={sub.id}>
+                        {sub.name} (Subsidiary)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Site</Label>
               <Select
