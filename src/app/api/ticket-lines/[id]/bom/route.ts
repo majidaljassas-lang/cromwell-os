@@ -85,20 +85,20 @@ export async function POST(
       ]);
     }
 
-    // Calculate parent cost total from component costs
-    let parentCostTotal = 0;
-    let parentCostUnit = 0;
+    // Calculate parent cost from component costs
+    // Component sum = cost per ONE unit of the parent
+    // Parent total = component sum × parent qty
     const parentQty = Number(parent.qty);
+    let componentSumPerUnit = 0;
 
     for (const comp of components) {
       const compQty = Number(comp.qty || 0);
       const compCostUnit = Number(comp.expectedCostUnit || 0);
-      parentCostTotal += compQty * compCostUnit;
+      componentSumPerUnit += compQty * compCostUnit;
     }
 
-    if (parentQty > 0) {
-      parentCostUnit = parentCostTotal / parentQty;
-    }
+    const parentCostUnit = componentSumPerUnit;
+    const parentCostTotal = componentSumPerUnit * parentQty;
 
     // Create all components and update parent in a transaction
     const result = await prisma.$transaction(async (tx) => {
