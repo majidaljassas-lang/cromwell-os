@@ -8,3 +8,7 @@
 - Environments: .env.local, .env
 ✓ Ready in 228ms
 
+ GET /tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee 200 in 4.3s (next.js: 2.9s, application-code: 1415ms)
+ GET /api/tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee/commercial-summary 200 in 648ms (next.js: 630ms, application-code: 18ms)
+ POST /api/automation/sync/outlook 200 in 2.4s (next.js: 252ms, application-code: 2.2s)
+ POST /api/automation/process 200 in 56ms (next.js: 35ms, application-code: 20ms)
