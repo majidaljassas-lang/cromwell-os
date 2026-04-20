@@ -6,18 +6,6 @@
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.174:3000
 - Environments: .env.local, .env
-✓ Ready in 228ms
+✓ Ready in 216ms
 
- GET /tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee 200 in 4.3s (next.js: 2.9s, application-code: 1415ms)
- GET /api/tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee/commercial-summary 200 in 648ms (next.js: 630ms, application-code: 18ms)
- POST /api/automation/sync/outlook 200 in 2.4s (next.js: 252ms, application-code: 2.2s)
- POST /api/automation/process 200 in 56ms (next.js: 35ms, application-code: 20ms)
-[autoLinkThread] thread=ef6a1cf7-6440-4e3a-b45b-03e0c84295dd score=15 LOW — reasons: Text references customer "Criterion Capital"
-[autoLinkThread] thread=1f33b01a-27fe-4c30-b2fe-2c6c7808f097 score=15 LOW — reasons: Text references customer "Criterion Capital"
- POST /api/automation/sync/outlook 200 in 3.8s (next.js: 10ms, application-code: 3.8s)
- POST /api/automation/process 200 in 11ms (next.js: 1251µs, application-code: 9ms)
- GET /tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee 200 in 484ms (next.js: 11ms, application-code: 473ms)
- GET /api/tickets/914d46fb-7884-4a8b-82e0-afb4622af2ee/commercial-summary 200 in 17ms (next.js: 5ms, application-code: 12ms)
- PATCH /api/ticket-lines/fb41a4f3-a5bb-47ed-bd34-20427a09e9b3 200 in 700ms (next.js: 683ms, application-code: 17ms)
- PATCH /api/ticket-lines/fb41a4f3-a5bb-47ed-bd34-20427a09e9b3 200 in 25ms (next.js: 7ms, application-code: 18ms)
- PATCH /api/ticket-lines/fb41a4f3-a5bb-47ed-bd34-20427a09e9b3 200 in 35ms (next.js: 9ms, application-code: 26ms)
+ PATCH /api/ticket-lines/598122df-670e-4b68-9aed-b96daefce95d 200 in 985ms (next.js: 819ms, application-code: 166ms)

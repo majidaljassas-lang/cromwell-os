@@ -140,13 +140,16 @@ export async function PATCH(
           ticketId: line.ticketId,
           id: { not: line.id },
         },
-        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true, actualSaleUnit: true },
+        select: { id: true, description: true, sectionLabel: true, expectedCostUnit: true, actualSaleUnit: true, productCode: true },
       });
+      const lineProductCode = (line as any).productCode?.trim().toLowerCase();
       matchingSiblings = allSiblings.filter(s => {
-        const sDesc = s.description.trim();
-        if (sDesc.toLowerCase() !== normalDesc.toLowerCase()) return false;
-        // Always suggest if same description and we changed something
-        return true;
+        const sDesc = s.description.trim().toLowerCase();
+        const sCode = (s as any).productCode?.trim().toLowerCase();
+        // Match by description OR product code
+        if (sDesc === normalDesc.toLowerCase()) return true;
+        if (lineProductCode && sCode && lineProductCode === sCode) return true;
+        return false;
       });
     }
 
