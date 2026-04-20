@@ -128,50 +128,19 @@ export async function PATCH(
       select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true },
     });
 
-    // Auto-fill same prices on matching lines in other sections
+    // Check for matching lines in other sections — suggest (don't auto-apply)
     const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
+    let matchingSiblings: Array<{ id: string; description: string; sectionLabel: string | null }> = [];
     if (pricingChanged && line.description) {
-      // Find other lines on the same ticket with the same description (different sections)
-      const siblings = await prisma.ticketLine.findMany({
+      matchingSiblings = await prisma.ticketLine.findMany({
         where: {
           ticketId: line.ticketId,
           id: { not: line.id },
           description: { equals: line.description, mode: "insensitive" },
+          expectedCostUnit: { equals: null },
         },
-        select: { id: true, expectedCostUnit: true, actualSaleUnit: true },
+        select: { id: true, description: true, sectionLabel: true },
       });
-      if (siblings.length > 0) {
-        const updates: Record<string, unknown> = {};
-        if (allowed.expectedCostUnit !== undefined) updates.expectedCostUnit = allowed.expectedCostUnit;
-        if (allowed.actualSaleUnit !== undefined) updates.actualSaleUnit = allowed.actualSaleUnit;
-        if (allowed.suggestedSaleUnit !== undefined) updates.suggestedSaleUnit = allowed.suggestedSaleUnit;
-        if (allowed.supplierName !== undefined) updates.supplierName = allowed.supplierName;
-        if (allowed.supplierId !== undefined) updates.supplierId = allowed.supplierId;
-
-        if (Object.keys(updates).length > 0) {
-          // Only update siblings that don't already have a price set
-          for (const sib of siblings) {
-            const sibHasCost = Number(sib.expectedCostUnit || 0) > 0;
-            const sibHasSale = Number(sib.actualSaleUnit || 0) > 0;
-            const sibUpdates: Record<string, unknown> = {};
-            if (updates.expectedCostUnit !== undefined && !sibHasCost) sibUpdates.expectedCostUnit = updates.expectedCostUnit;
-            if (updates.actualSaleUnit !== undefined && !sibHasSale) sibUpdates.actualSaleUnit = updates.actualSaleUnit;
-            if (updates.suggestedSaleUnit !== undefined) sibUpdates.suggestedSaleUnit = updates.suggestedSaleUnit;
-            if (updates.supplierName !== undefined) sibUpdates.supplierName = updates.supplierName;
-            if (updates.supplierId !== undefined) sibUpdates.supplierId = updates.supplierId;
-
-            if (Object.keys(sibUpdates).length > 0) {
-              // Recalculate totals for sibling
-              const sibLine = await prisma.ticketLine.findUnique({ where: { id: sib.id }, select: { qty: true } });
-              const sibQty = Number(sibLine?.qty || 1);
-              if (sibUpdates.expectedCostUnit) sibUpdates.expectedCostTotal = Number(sibUpdates.expectedCostUnit) * sibQty;
-              if (sibUpdates.actualSaleUnit) sibUpdates.actualSaleTotal = Number(sibUpdates.actualSaleUnit) * sibQty;
-
-              await prisma.ticketLine.update({ where: { id: sib.id }, data: sibUpdates });
-            }
-          }
-        }
-      }
     }
 
     // Auto-progress ticket status when lines change
@@ -184,6 +153,15 @@ export async function PATCH(
 
     if (allowed.status === "ORDERED" || allowed.status === "FROM_STOCK" || allowed.status === "FULLY_COSTED" || allowed.status === "INVOICED") {
       await autoProgressTicket(line.ticketId);
+    }
+
+    // If matching siblings exist, suggest applying same price
+    if (matchingSiblings.length > 0) {
+      return Response.json({
+        ...line,
+        _matchingSiblings: matchingSiblings.map(s => ({ id: s.id, sectionLabel: s.sectionLabel })),
+        _matchMessage: `Same item in ${matchingSiblings.length} other section${matchingSiblings.length > 1 ? "s" : ""} — apply same price?`,
+      });
     }
 
     return Response.json(line);

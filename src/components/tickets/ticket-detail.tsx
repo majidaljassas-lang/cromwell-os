@@ -463,13 +463,29 @@ function InlineLineRow({
 
   async function saveField(field: string, value: unknown) {
     setSaving(true);
-    await fetch(`/api/ticket-lines/${line.id}`, {
+    const res = await fetch(`/api/ticket-lines/${line.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value || undefined }),
     });
+    const data = await res.json().catch(() => ({}));
     setSaving(false);
-    // Silent save — do NOT call onSaved/router.refresh
+
+    // If matching siblings found, ask user to apply same price
+    if (data._matchingSiblings?.length > 0) {
+      const apply = confirm(data._matchMessage + "\n\nClick OK to apply, Cancel to skip.");
+      if (apply) {
+        const sibIds = data._matchingSiblings.map((s: { id: string }) => s.id);
+        const priceData: Record<string, unknown> = {};
+        if (field === "expectedCostUnit" || field === "actualSaleUnit") priceData[field] = value;
+        await fetch("/api/ticket-lines/apply-price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lineIds: sibIds, ...priceData }),
+        });
+        router.refresh();
+      }
+    }
   }
 
   async function saveMultipleFields(fields: Record<string, unknown>) {
