@@ -772,6 +772,8 @@ model QuoteLine {
   quoteId      String
   ticketLineId String
   description  String
+  sectionLabel String?
+  sortOrder    Int        @default(0)
   qty          Decimal    @db.Decimal(14, 4)
   unitPrice    Decimal    @db.Decimal(14, 4)
   lineTotal    Decimal    @db.Decimal(14, 2)

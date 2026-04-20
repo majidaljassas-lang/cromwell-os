@@ -52,7 +52,7 @@ export default async function TicketDetailPage({
   const quotes = await prisma.quote.findMany({
     where: { ticketId: id },
     include: {
-      lines: true,
+      lines: { orderBy: { sortOrder: "asc" } },
       customer: true,
     },
     orderBy: { createdAt: "desc" },

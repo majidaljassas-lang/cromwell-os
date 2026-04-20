@@ -75,5 +75,12 @@
     "value": "Pensioners Footy Club",
     "label": "Pensioners Footy Club",
     "blockedAt": "2026-04-17T13:04:42.218Z"
+  },
+  {
+    "type": "BLACKLIST",
+    "matchType": "CHAT_NAME",
+    "value": "Mayes Al Jassas",
+    "label": "Mayes Al Jassas",
+    "blockedAt": "2026-04-20T08:19:34.789Z"
   }
 ]

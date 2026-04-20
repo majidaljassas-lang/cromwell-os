@@ -51,12 +51,14 @@ export async function POST(
     const versionNo = (latestQuote?.versionNo ?? 0) + 1;
 
     // Get ticket lines — filter by selected lineIds if provided, exclude BOM children
+    // Order by createdAt to preserve ticket line sequence (sections flow through)
     const ticketLines = await prisma.ticketLine.findMany({
       where: {
         ticketId: id,
         parentLineId: null,
         ...(lineIds && lineIds.length > 0 ? { id: { in: lineIds } } : {}),
       },
+      orderBy: { createdAt: "asc" },
     });
 
     // FILTER OUT lines with no unit price (only quote priced lines)
@@ -71,7 +73,7 @@ export async function POST(
 
     // Calculate total sell from priced lines only
     let totalSell = 0;
-    const quoteLineData = pricedLines.map((line) => {
+    const quoteLineData = pricedLines.map((line, index) => {
       const unitPrice = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
       const lineTotal = unitPrice * Number(line.qty);
       totalSell += lineTotal;
@@ -81,6 +83,8 @@ export async function POST(
         qty: line.qty,
         unitPrice,
         lineTotal,
+        sectionLabel: line.sectionLabel,
+        sortOrder: index,
       };
     });
 

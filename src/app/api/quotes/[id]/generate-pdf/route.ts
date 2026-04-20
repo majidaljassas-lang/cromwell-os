@@ -165,7 +165,7 @@ export async function POST(
     const quote = await prisma.quote.findUnique({
       where: { id },
       include: {
-        lines: { include: { ticketLine: { select: { unit: true, sectionLabel: true, isBomParent: true, components: { select: { description: true, qty: true, unit: true, expectedCostUnit: true, supplierName: true }, orderBy: { createdAt: "asc" } } } } } },
+        lines: { orderBy: { sortOrder: "asc" }, include: { ticketLine: { select: { unit: true, sectionLabel: true, isBomParent: true, components: { select: { description: true, qty: true, unit: true, expectedCostUnit: true, supplierName: true }, orderBy: { createdAt: "asc" } } } } } },
         customer: true,
         site: true,
         ticket: { select: { title: true } },
