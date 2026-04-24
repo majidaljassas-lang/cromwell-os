@@ -61,10 +61,13 @@ export async function POST(
       orderBy: { createdAt: "asc" },
     });
 
-    // FILTER OUT lines with no unit price (only quote priced lines)
+    // Include every line with an explicit price, including FOC (£0.00) lines.
+    // Only exclude lines that have NO price anywhere (all three fields NULL) —
+    // those are not yet ready to quote.
     const pricedLines = ticketLines.filter((line) => {
-      const price = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
-      return price > 0;
+      return line.actualSaleUnit !== null
+          || line.actualSaleTotal !== null
+          || line.suggestedSaleUnit !== null;
     });
 
     if (pricedLines.length === 0) {

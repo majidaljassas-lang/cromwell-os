@@ -83,22 +83,25 @@ function buildHtml(
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const firstSection = quote.lines[0]?.ticketLine?.sectionLabel;
-
   const lineRows = quote.lines.map((line, i) => {
     const prevSection = i > 0 ? quote.lines[i - 1].ticketLine?.sectionLabel : null;
     const sectionHeader =
       line.ticketLine?.sectionLabel &&
-      line.ticketLine.sectionLabel !== prevSection &&
-      line.ticketLine.sectionLabel !== firstSection
+      line.ticketLine.sectionLabel !== prevSection
         ? `<tr><td colspan="5" style="padding:8px 10px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#555;background:#f5f5f5;border-top:2px solid #ddd">${line.ticketLine.sectionLabel}</td></tr>`
         : "";
-    return `${sectionHeader}<tr style="border-bottom:1px solid #eee">
+    const isFoc = Number(line.unitPrice) === 0 && Number(line.lineTotal) === 0;
+    const focBadge = `<span style="display:inline-block;font-size:8px;font-weight:700;letter-spacing:0.1em;background:#E8F4FD;color:#0066CC;padding:2px 5px;margin-left:6px;border-radius:2px">FOC</span>`;
+    const priceCell = isFoc ? `FOC` : fmt(line.unitPrice);
+    const totalCell = isFoc ? `FOC` : fmt(line.lineTotal);
+    const priceStyle = isFoc ? "color:#0066CC;font-weight:700" : "";
+    const rowStyle = isFoc ? "background:#FBFCFE;" : "";
+    return `${sectionHeader}<tr style="border-bottom:1px solid #eee;${rowStyle}">
       <td style="padding:8px 10px;color:#888;font-size:12px;width:35px">${i + 1}</td>
-      <td style="padding:8px 10px;font-size:12px">${line.description}</td>
+      <td style="padding:8px 10px;font-size:12px">${line.description}${isFoc ? focBadge : ""}</td>
       <td style="padding:8px 10px;text-align:center;font-size:12px;white-space:nowrap">${Number(line.qty)} ${line.ticketLine?.unit || "LOT"}</td>
-      <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmt(line.unitPrice)}</td>
-      <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:700">${fmt(line.lineTotal)}</td>
+      <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;${priceStyle}">${priceCell}</td>
+      <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:700;${priceStyle}">${totalCell}</td>
     </tr>`;
   }).join("");
 

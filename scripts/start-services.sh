@@ -1,60 +1,134 @@
 #!/bin/bash
 # Cromwell OS — Start all background services
-# Run: ./scripts/start-services.sh
-# To stop: kill the process group or close the terminal
+# Launched automatically at login via ~/Library/LaunchAgents/com.cromwell.os.plist
+# If any critical service dies the script exits non-zero and launchd respawns it.
 
+set -u
 cd "$(dirname "$0")/.."
 
-# Source SCHEDULER_SECRET from .env for curl calls into /api/automation/*
-if [ -z "$SCHEDULER_SECRET" ] && [ -f .env ]; then
-  SCHEDULER_SECRET=$(grep ^SCHEDULER_SECRET .env | cut -d= -f2- | tr -d '"')
+LOG_DIR="./logs"
+mkdir -p "$LOG_DIR"
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+# Load .env so SCHEDULER_SECRET is available for automation curls
+if [ -f .env ]; then
+  while IFS='=' read -r key value; do
+    case "$key" in
+      ''|'#'*) continue ;;
+      *)
+        value="${value%\"}"
+        value="${value#\"}"
+        export "$key=$value"
+        ;;
+    esac
+  done < .env
 fi
-if [ -z "$SCHEDULER_SECRET" ]; then
-  echo "⚠️  SCHEDULER_SECRET not set — /api/automation/* curls will 401"
+
+if [ -z "${SCHEDULER_SECRET:-}" ]; then
+  log "⚠ SCHEDULER_SECRET not set — /api/automation/* will 401"
 fi
-export SCHEDULER_SECRET
 
-echo "🔧 Starting Cromwell OS services..."
+log "🔧 Starting Cromwell OS services"
 
-# 1. Start Prisma dev DB (if not running)
-echo "📦 Starting database..."
-npx prisma dev &>/dev/null &
-sleep 5
+# ── 1. DATABASE ────────────────────────────────────────────────────────────
+log "📦 Ensuring Homebrew Postgres 17 is running on :51214"
+if ! /usr/sbin/lsof -iTCP:51214 -sTCP:LISTEN >/dev/null 2>&1; then
+  /opt/homebrew/bin/brew services start postgresql@17 >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    /usr/sbin/lsof -iTCP:51214 -sTCP:LISTEN >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+if ! /usr/sbin/lsof -iTCP:51214 -sTCP:LISTEN >/dev/null 2>&1; then
+  log "❌ Database did not come up within 30s — aborting so launchd retries"
+  exit 1
+fi
+log "   DB is up"
 
-# 2. Start Next.js dev server (if not running)
-if ! lsof -ti:3000 &>/dev/null; then
-  echo "🌐 Starting web server on port 3000..."
-  npx next dev --port 3000 &>/dev/null &
-  sleep 3
+# ── 2. NEXT.JS WEB SERVER ──────────────────────────────────────────────────
+NEXT_PID=""
+if ! /usr/sbin/lsof -ti:3000 >/dev/null 2>&1; then
+  log "🌐 Starting Next.js dev server on :3000"
+  nohup /opt/homebrew/bin/npx next dev --port 3000 > "$LOG_DIR/web.log" 2>&1 &
+  NEXT_PID=$!
+  for _ in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null || echo 000)
+    if [ "$code" = "200" ] || [ "$code" = "307" ]; then
+      log "   Web ready"
+      break
+    fi
+    sleep 1
+  done
 else
-  echo "🌐 Web server already running on port 3000"
+  log "🌐 Web already running on :3000"
 fi
 
-# 3. Start WhatsApp listener
-echo "📱 Starting WhatsApp listener on port 3001..."
-node scripts/whatsapp-qr-server.js &
+# ── 3. WHATSAPP LISTENER ───────────────────────────────────────────────────
+if /usr/sbin/lsof -ti:3001 >/dev/null 2>&1; then
+  log "📱 Killing orphan WhatsApp listener on :3001"
+  # shellcheck disable=SC2046
+  kill $(/usr/sbin/lsof -ti:3001) 2>/dev/null || true
+  sleep 2
+fi
+log "📱 Starting WhatsApp listener on :3001"
+nohup /opt/homebrew/bin/node scripts/whatsapp-qr-server.js > "$LOG_DIR/whatsapp.log" 2>&1 &
 WA_PID=$!
 
-# 4. Start email poller + auto-processor (every 10 mins)
-echo "📧 Starting email poller (every 10 mins)..."
+# ── 4. BOOT-TIME CATCH-UP ──────────────────────────────────────────────────
+# One-shot: pull anything that arrived while the machine was asleep
+(
+  sleep 20
+  log "🔄 Boot-time catch-up: outlook sync + process"
+  curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
+    http://localhost:3000/api/automation/sync/outlook >/dev/null 2>&1 || true
+  curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
+    http://localhost:3000/api/automation/process >/dev/null 2>&1 || true
+
+  # WhatsApp backfill last 24h, once the listener is connected
+  for _ in $(seq 1 60); do
+    if curl -s http://localhost:3001 2>/dev/null | grep -q "Connected"; then
+      SINCE=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+      curl -s -X POST -H "Content-Type: application/json" \
+        http://localhost:3001/backfill \
+        -d "{\"since\":\"$SINCE\"}" >/dev/null 2>&1 || true
+      log "   WhatsApp backfill since $SINCE"
+      break
+    fi
+    sleep 5
+  done
+  log "🔄 Boot-time catch-up complete"
+) &
+CATCHUP_PID=$!
+
+# ── 5. POLLER LOOP (every 10 min) ──────────────────────────────────────────
+log "📧 Poller loop running every 10 min"
 (
   while true; do
-    curl -s -X POST -H "x-scheduler-secret: $SCHEDULER_SECRET" http://localhost:3000/api/automation/sync/outlook > /dev/null 2>&1
-    curl -s -X POST -H "x-scheduler-secret: $SCHEDULER_SECRET" http://localhost:3000/api/automation/process > /dev/null 2>&1
     sleep 600
+    curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
+      http://localhost:3000/api/automation/sync/outlook >/dev/null 2>&1 || true
+    curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
+      http://localhost:3000/api/automation/process >/dev/null 2>&1 || true
   done
 ) &
 POLLER_PID=$!
 
-echo ""
-echo "✅ All services running:"
-echo "   🌐 Web:      http://localhost:3000"
-echo "   📱 WhatsApp:  http://localhost:3001 (QR if needed)"
-echo "   📧 Email:     polling every 10 mins"
-echo "   🔄 Processor: auto-acting on new events"
-echo ""
-echo "   Press Ctrl+C to stop all services"
+log "✅ All services up — Web :3000, WhatsApp :3001, poller running"
 
-# Wait for Ctrl+C
-trap "echo '⏹ Stopping...'; kill $WA_PID $POLLER_PID 2>/dev/null; exit 0" INT TERM
-wait
+cleanup() {
+  log "⏹ Stopping — SIGTERM received"
+  kill "$WA_PID" "$POLLER_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
+  exit 0
+}
+trap cleanup INT TERM
+
+# Watchdog: if WA or the poller die, exit non-zero so launchd respawns everything.
+while kill -0 "$WA_PID" 2>/dev/null && kill -0 "$POLLER_PID" 2>/dev/null; do
+  sleep 30
+done
+
+log "⚠ A critical service exited — shutting down so launchd restarts us"
+kill "$WA_PID" "$POLLER_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
+exit 1

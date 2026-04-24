@@ -228,6 +228,45 @@ export function RfqExploder({
     setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => c.id === candidateId ? { ...c, status: "DISCARDED" } : c) } : null);
   }
 
+  async function handleAcceptAllSelected() {
+    if (selected.size < 1) return;
+    setProcessing(true);
+    try {
+      const ids = [...selected];
+      for (const id of ids) {
+        await fetch("/api/rfq/candidates/accept", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateIds: [id], ticketId, payingCustomerId }),
+        });
+      }
+      setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => selected.has(c.id) ? { ...c, status: "ACCEPTED" } : c) } : null);
+      setSelected(new Set());
+      router.refresh();
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function handleDiscardAllSelected() {
+    if (selected.size < 1) return;
+    setProcessing(true);
+    try {
+      const ids = [...selected];
+      for (const id of ids) {
+        await fetch(`/api/rfq/candidates/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "DISCARDED" }),
+        });
+      }
+      setBatch((prev) => prev ? { ...prev, candidates: prev.candidates.map((c) => selected.has(c.id) ? { ...c, status: "DISCARDED" } : c) } : null);
+      setSelected(new Set());
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   async function handleMergeSelected() {
     if (selected.size < 1 || !mergeLabel.trim()) return;
     setProcessing(true);
@@ -370,8 +409,14 @@ export function RfqExploder({
       {selected.size > 0 && (
         <div className="flex items-center gap-2 border border-[#3399FF]/30 bg-[#3399FF]/5 px-3 py-2">
           <span className="text-xs text-[#3399FF] bb-mono font-bold">{selected.size} selected</span>
+          <Button size="sm" onClick={handleAcceptAllSelected} disabled={processing} className="bg-[#00CC66] text-black hover:bg-[#00AA55]">
+            <Check className="size-3 mr-1" /> Accept as Separate Lines
+          </Button>
           <Button size="sm" onClick={() => setShowMerge(true)} className="bg-[#3399FF] text-black hover:bg-[#2277DD]">
             <Merge className="size-3 mr-1" /> Merge into Package
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleDiscardAllSelected} disabled={processing} className="bg-[#222222] border-[#FF3333]/40 text-[#FF3333] hover:bg-[#FF3333]/10">
+            <X className="size-3 mr-1" /> Discard
           </Button>
           <Button size="sm" variant="outline" onClick={selectNone} className="bg-[#222222] border-[#333333] text-[#E0E0E0]">Clear</Button>
           {filterGroup && filterGroup !== "Ungrouped" && (

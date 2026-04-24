@@ -298,6 +298,16 @@ function extractQty(text: string): QtyExtraction | null {
     };
   }
 
+  // ── Leading "xN " (e.g. "x10 Delabie basin mixer") — email-collapsed RFQs
+  const leadingXN = text.match(/^x\s*(\d+)\s+(?=[A-Za-z])/i);
+  if (leadingXN) {
+    return {
+      qty: parseInt(leadingXN[1]),
+      unit: "EA",
+      remaining: text.slice(leadingXN[0].length).trim(),
+    };
+  }
+
   // ── Leading "Nx" where x is a multiplier (but NOT "15mm x 22mm") ─────────
   const leadingNx = text.match(/^(\d+)\s*[xX×]\s+/);
   if (leadingNx) {
@@ -324,6 +334,23 @@ function extractQty(text: string): QtyExtraction | null {
       qty: parseInt(leadingNo[1]),
       unit: "EA",
       remaining: text.replace(leadingNo[0], "").trim(),
+    };
+  }
+
+  // ── Trailing "- N UNIT" (e.g. "Pipe 15mm - 100m", "Elbow - 20 no.") ─────
+  const trailingDash = text.match(
+    /\s+-\s*(\d+)\s*(no|nr|nos|pcs|pc|off|packs?|metres?|meters?|m|ea|each|lengths?|coils?)\b\.?\s*$/i
+  );
+  if (trailingDash) {
+    const raw = trailingDash[2].toLowerCase();
+    let unit = "EA";
+    if (/^packs?$/.test(raw)) unit = "PACK";
+    else if (/^(m|metres?|meters?)$/.test(raw)) unit = "M";
+    else if (/^(lengths?|coils?)$/.test(raw)) unit = "LENGTH";
+    return {
+      qty: parseInt(trailingDash[1]),
+      unit,
+      remaining: text.replace(trailingDash[0], "").trim(),
     };
   }
 
@@ -502,10 +529,14 @@ function splitIntoLines(text: string): string[] {
   for (const line of expanded) {
     const xMatches = line.match(/\b\d+\s*[xX×]\s+\d/g);
     const mOfMatches = line.match(/\b\d+\s*(?:meters?|metres?|m)\s+of\s+\d/gi);
-    const totalMarkers = (xMatches?.length || 0) + (mOfMatches?.length || 0);
+    // Leading "xN " pattern (e.g. "x10 Delabie ... x10 Armitage ...") — common
+    // when an email collapses line breaks. Only counts when preceded by a word
+    // boundary (so it doesn't trigger inside "56x278x200").
+    const leadingXNMatches = line.match(/\bx\s*\d+\s+[A-Za-z]/g);
+    const totalMarkers = (xMatches?.length || 0) + (mOfMatches?.length || 0) + (leadingXNMatches?.length || 0);
 
     if (totalMarkers >= 2) {
-      const fragments = line.split(/(?=\b\d+\s*(?:[xX×]|meters?|metres?|m)\s+(?:of\s+)?\d)/);
+      const fragments = line.split(/(?=\b\d+\s*(?:[xX×]|meters?|metres?|m)\s+(?:of\s+)?\d)|(?=\bx\s*\d+\s+[A-Za-z])/);
       for (const frag of fragments) {
         const t = frag.trim();
         if (t.length > 2) finalLines.push(t);
