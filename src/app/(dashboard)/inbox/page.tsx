@@ -1,4 +1,4 @@
-import { InboxThreadsPanel } from "@/components/inbox/inbox-threads-panel";
+import { InboxMessagesPanel } from "@/components/inbox/inbox-messages-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -6,7 +6,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const { status } = await searchParams;
   return (
     <div className="p-4">
-      <InboxThreadsPanel initialStatus={status} />
+      <InboxMessagesPanel initialStatus={status} />
     </div>
   );
 }

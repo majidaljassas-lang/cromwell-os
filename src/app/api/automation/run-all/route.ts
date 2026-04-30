@@ -130,12 +130,18 @@ export async function POST(request: Request) {
   const uninvoicedDeliveries     = await runStep("uninvoicedDeliveries",     "/api/automation/uninvoiced-deliveries");
   const surplusMatcher           = await runStep("surplusMatcher",           "/api/automation/surplus-matcher");
   const classify                 = await runStep("classify",                 "/api/automation/classify");
-  const aiAnalyse                = await runStep("aiAnalyse",                "/api/automation/ai-analyse");
-  const threadLinker             = await runStep("threadLinker",             "/api/automation/thread-linker");
+
+  // Inbox AI silenced: user classifies emails manually via tags. The bill
+  // parser, procurement, etc. still run when triggered by a manual tag.
+  const inboxAiSilent = process.env.INBOX_AI_SILENT === "true";
+  const skip = (step: "aiAnalyse" | "threadLinker" | "supplierRfqLinker") =>
+    ({ step, endpoint: "", ok: true, status: 200, durationMs: 0, result: { skipped: true, reason: "INBOX_AI_SILENT — manual classification only" } } as const);
+  const aiAnalyse                = inboxAiSilent ? skip("aiAnalyse")     : await runStep("aiAnalyse",     "/api/automation/ai-analyse");
+  const threadLinker             = inboxAiSilent ? skip("threadLinker") : await runStep("threadLinker", "/api/automation/thread-linker");
   // Phase 13a: link supplier-sender threads to open tickets BEFORE the
   // auto-ticket-creator runs, so we don't accidentally create a new
   // ticket from a supplier reply when an existing ticket fits.
-  const supplierRfqLinker        = await runStep("supplierRfqLinker",        "/api/automation/supplier-rfq-linker");
+  const supplierRfqLinker        = inboxAiSilent ? skip("supplierRfqLinker") : await runStep("supplierRfqLinker", "/api/automation/supplier-rfq-linker");
   // DISABLED: auto-ticket creator was creating junk tickets from noise.
   // Tickets are created manually from inbox triage only.
   // const autoCreateTickets        = await runStep("autoCreateTickets",        "/api/automation/auto-create-tickets");

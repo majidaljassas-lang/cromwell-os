@@ -192,18 +192,11 @@ export async function resolveCustomer(
     }
   }
 
-  // Strategy 4: Auto-create customer
-  const fallbackName =
-    (typeof aiName === "string" && aiName.length >= 2)
-      ? aiName
-      : (thread.participants[0] ?? "Unknown").split("@")[0] ?? "Unknown";
-  const created = await prisma.customer.create({
-    data: {
-      name: `${fallbackName} (auto-intake)`,
-      isBillingEntity: false,
-    },
-  });
-  return { customerId: created.id, customerName: created.name, autoCreated: true };
+  // No match across strategies 1-3. Do NOT auto-create a Customer — senders are
+  // often buyers/contacts at existing customer organisations (e.g. an NHS buyer
+  // emailing from a hospital). Auto-creating poisons reporting. Return null so
+  // the caller can flag the thread for human triage instead.
+  return null;
 }
 
 // ── Site resolution ─────────────────────────────────────────────────────────
@@ -254,7 +247,7 @@ Rules:
 - "10 x 15mm copper elbows" → {"description":"15mm copper elbows","qty":10,"unit":"EA"}
 - "2 packs Geberit 110mm soil pipe" → {"description":"Geberit 110mm soil pipe","qty":2,"unit":"PACK"}`;
 
-async function extractLineItems(threadText: string): Promise<ExtractedLine[]> {
+export async function extractLineItems(threadText: string): Promise<ExtractedLine[]> {
   if (!isAiEnabled()) return [];
   if (threadText.trim().length < 30) return [];
 
@@ -291,7 +284,7 @@ async function extractLineItems(threadText: string): Promise<ExtractedLine[]> {
 
 // ── Thread text builder ─────────────────────────────────────────────────────
 
-async function buildThreadText(threadId: string): Promise<string> {
+export async function buildThreadText(threadId: string): Promise<string> {
   const messages = await prisma.inboxThreadMessage.findMany({
     where: { threadId },
     orderBy: { occurredAt: "asc" },
@@ -403,7 +396,20 @@ export async function runAutoCreateTickets(
       });
 
       if (!customerResult) {
-        result.errors.push(`Thread ${thread.id}: could not resolve customer`);
+        // Customer can't be resolved from contact links, AI name match, or
+        // email domain. Flag for human triage rather than auto-creating a
+        // bogus Customer record.
+        const boostedScore = Math.min(100, (thread.dealScore ?? 0) + 30);
+        await prisma.inboxThread.update({
+          where: { id: thread.id },
+          data: { dealScore: boostedScore },
+        });
+        result.flaggedForReview.push({
+          threadId: thread.id,
+          subject: thread.subject,
+          aiSummary: thread.aiSummary,
+          aiConfidence: confidence,
+        });
         continue;
       }
 

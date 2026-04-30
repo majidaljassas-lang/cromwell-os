@@ -111,6 +111,8 @@ model Site {
   tickets             Ticket[]
   ticketLines         TicketLine[]
   billLineAllocations BillLineAllocation[]  @relation("BillLineAllocationSite")
+  journalLines        JournalLine[]
+  zohoSiteLinks       ZohoSiteLink[]
 
   @@index([siteName])
   @@index([siteCode])
@@ -153,6 +155,9 @@ model Customer {
   salesCreditNotes       SalesCreditNote[]
   backlogCases           BacklogCase[]
   billLineAllocations    BillLineAllocation[] @relation("BillLineAllocationCustomer")
+  journalLines           JournalLine[]
+  zohoCustomerLinks      ZohoCustomerLink[]
+  zohoInvoiceOverrides   ZohoImportedInvoice[] @relation("ZohoInvoiceOverride")
 
   @@index([name])
 }
@@ -488,6 +493,8 @@ model Ticket {
   lines                     TicketLine[]
   phases                    TicketPhase[]
   inboxThreads              InboxThread[]            @relation("InboxThreadTicket")
+  reconciliations           Reconciliation[]
+  journalLines              JournalLine[]
 
   @@index([status])
   @@index([payingCustomerId])
@@ -517,6 +524,7 @@ model TicketLine {
   id                    String                   @id @default(uuid())
   ticketId              String
   ticketPhaseId         String?
+  displayOrder          Int                      @default(0)
   lineType              TicketLineType
   description           String
   normalizedItemName    String?
@@ -553,6 +561,7 @@ model TicketLine {
   fromStock             Int?
   toOrder               Int?
   isLocked              Boolean                  @default(false)
+  priceOverride         Boolean                  @default(false)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   sectionLabel          String?
@@ -587,6 +596,7 @@ model TicketLine {
   parentLine            TicketLine?              @relation("BOMComponents", fields: [parentLineId], references: [id])
   components            TicketLine[]             @relation("BOMComponents")
   isBomParent           Boolean                  @default(false)
+  reconciliationLines   ReconciliationLine[]
 
   siteCommercialLink  SiteCommercialLink?  @relation(fields: [siteCommercialLinkId], references: [id])
   site                Site?                @relation(fields: [siteId], references: [id])
@@ -595,8 +605,10 @@ model TicketLine {
   ticketPhase         TicketPhase?         @relation(fields: [ticketPhaseId], references: [id])
   billLineAllocations BillLineAllocation[] @relation("BillLineAllocationTicketLine")
   prices              TicketLinePrice[]
+  journalLines        JournalLine[]
 
   @@index([ticketId])
+  @@index([ticketId, displayOrder])
   @@index([status])
   @@index([payingCustomerId])
   @@index([parentLineId])
@@ -679,19 +691,19 @@ model DealSheet {
 }
 
 model DealSheetLineSnapshot {
-  id                    String     @id @default(uuid())
+  id                    String      @id @default(uuid())
   dealSheetId           String
-  ticketLineId          String
+  ticketLineId          String?
   versionNo             Int
   supplierSourceSummary String?
-  benchmarkUnit         Decimal?   @db.Decimal(14, 4)
-  expectedCostUnit      Decimal?   @db.Decimal(14, 4)
-  suggestedSaleUnit     Decimal?   @db.Decimal(14, 4)
-  actualSaleUnit        Decimal?   @db.Decimal(14, 4)
-  expectedMarginUnit    Decimal?   @db.Decimal(14, 4)
+  benchmarkUnit         Decimal?    @db.Decimal(14, 4)
+  expectedCostUnit      Decimal?    @db.Decimal(14, 4)
+  suggestedSaleUnit     Decimal?    @db.Decimal(14, 4)
+  actualSaleUnit        Decimal?    @db.Decimal(14, 4)
+  expectedMarginUnit    Decimal?    @db.Decimal(14, 4)
   notes                 String?
-  dealSheet             DealSheet  @relation(fields: [dealSheetId], references: [id])
-  ticketLine            TicketLine @relation(fields: [ticketLineId], references: [id])
+  dealSheet             DealSheet   @relation(fields: [dealSheetId], references: [id])
+  ticketLine            TicketLine? @relation(fields: [ticketLineId], references: [id], onDelete: SetNull)
 }
 
 model Benchmark {
@@ -807,6 +819,7 @@ model Supplier {
   paymentsMade      PaymentMade[]
   aliases           SupplierAlias[]
   productMappings   SupplierProductMapping[]
+  journalLines      JournalLine[]
 
   @@index([name])
 }
@@ -1192,6 +1205,9 @@ model SalesInvoice {
   dueDate              DateTime?
   paidAt               DateTime?
   totalSell            Decimal                @default(0) @db.Decimal(14, 2)
+  totalNet             Decimal                @default(0) @db.Decimal(14, 2)
+  totalVat             Decimal                @default(0) @db.Decimal(14, 2)
+  totalGross           Decimal                @default(0) @db.Decimal(14, 2)
   notes                String?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
@@ -1224,6 +1240,7 @@ model SalesInvoiceLine {
   poMatched        Boolean      @default(false)
   poMatchStatus    String?
   costUnconfirmed  Boolean      @default(false)
+  displayOrder     Int          @default(0)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
   salesInvoice     SalesInvoice @relation(fields: [salesInvoiceId], references: [id])
@@ -1231,6 +1248,7 @@ model SalesInvoiceLine {
 
   @@index([ticketLineId])
   @@index([costUnconfirmed])
+  @@index([salesInvoiceId, displayOrder])
 }
 
 model Payment {
@@ -1504,6 +1522,7 @@ model CashSale {
   paymentMethod  String
   receiptRef     String?
   status         String
+  journalEntryId String?  @unique
   createdAt      DateTime @default(now())
   ticket         Ticket   @relation(fields: [ticketId], references: [id])
 }
@@ -2481,6 +2500,7 @@ enum TicketLineStatus {
   DISPUTED
   CLOSED
   FROM_STOCK
+  REMOVED_BY_CUSTOMER
 }
 
 enum InquiryStatus {
@@ -2553,7 +2573,7 @@ enum SourceType {
   IMAGE_UPLOAD
   MANUAL
   API
-  ENABLE_BANKING
+  OPEN_BANKING
 }
 
 enum EnquiryType {
@@ -2865,12 +2885,30 @@ model TaxRate {
   @@index([taxType])
 }
 
+model FiscalPeriod {
+  id        String         @id @default(uuid())
+  label     String         @unique // e.g. "2026-04"
+  startDate DateTime
+  endDate   DateTime
+  status    String         @default("OPEN") // OPEN, CLOSED, LOCKED
+  closedAt  DateTime?
+  closedBy  String?
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  entries   JournalEntry[]
+
+  @@index([startDate, endDate])
+  @@index([status])
+}
+
 model JournalEntry {
   id           String        @id @default(uuid())
   entryDate    DateTime
+  periodId     String?
   reference    String?
   description  String
-  sourceType   String // SALES_INVOICE, SUPPLIER_BILL, PAYMENT_RECEIVED, PAYMENT_MADE, BANK_TRANSFER, MANUAL_JOURNAL, OPENING_BALANCE, VAT_PAYMENT, SALES_CREDIT_NOTE, SUPPLIER_CREDIT_NOTE
+  sourceType   String // SALES_INVOICE, SUPPLIER_BILL, PAYMENT_RECEIVED, PAYMENT_MADE, BANK_TRANSFER, MANUAL_JOURNAL, OPENING_BALANCE, VAT_PAYMENT, SALES_CREDIT_NOTE, SUPPLIER_CREDIT_NOTE, BANK_TRANSACTION, CASH_SALE
   sourceId     String?
   isAdjustment Boolean       @default(false)
   isReversed   Boolean       @default(false)
@@ -2879,9 +2917,11 @@ model JournalEntry {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   lines        JournalLine[]
+  period       FiscalPeriod? @relation(fields: [periodId], references: [id])
 
   @@index([sourceType, sourceId])
   @@index([entryDate])
+  @@index([periodId])
   @@index([reference])
 }
 
@@ -2892,37 +2932,81 @@ model JournalLine {
   description    String?
   debit          Decimal        @default(0) @db.Decimal(14, 2)
   credit         Decimal        @default(0) @db.Decimal(14, 2)
+  // Analytic dimensions: every penny is account-coded AND line-traced
+  customerId     String?
+  siteId         String?
+  ticketId       String?
+  ticketLineId   String?
+  supplierId     String?
   journalEntry   JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account        ChartOfAccount @relation(fields: [accountId], references: [id])
+  customer       Customer?      @relation(fields: [customerId], references: [id])
+  site           Site?          @relation(fields: [siteId], references: [id])
+  ticket         Ticket?        @relation(fields: [ticketId], references: [id])
+  ticketLine     TicketLine?    @relation(fields: [ticketLineId], references: [id])
+  supplier       Supplier?      @relation(fields: [supplierId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([customerId])
+  @@index([siteId])
+  @@index([ticketId])
+  @@index([ticketLineId])
+  @@index([supplierId])
 }
 
 model BankAccount {
-  id                  String            @id @default(uuid())
-  accountId           String            @unique
-  bankName            String
-  accountName         String
-  accountNumber       String
-  sortCode            String
-  currency            String            @default("GBP")
-  currentBalance      Decimal           @default(0) @db.Decimal(14, 2)
-  isDefault           Boolean           @default(false)
-  isActive            Boolean           @default(true)
-  yapilyConsentToken  String?
-  yapilyAccountId     String?
-  yapilyInstitutionId String?
-  // Enable Banking (replaces Yapily)
-  enableSessionId     String?           // Enable Banking session ID stored after consent
-  enableAccountId     String?           @unique // Enable's account UID — unique per account
-  lastSyncedAt        DateTime?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  account             ChartOfAccount    @relation(fields: [accountId], references: [id])
-  transactions        BankTransaction[]
+  id                String            @id @default(uuid())
+  accountId         String            @unique
+  bankName          String
+  accountName       String
+  accountNumber     String
+  sortCode          String
+  currency          String            @default("GBP")
+  currentBalance    Decimal           @default(0) @db.Decimal(14, 2)
+  isDefault         Boolean           @default(false)
+  isActive          Boolean           @default(true)
+  // Open banking (TrueLayer). Null when account exists for CSV-only / manual ledger use.
+  connectionId      String?
+  providerAccountId String?           @unique
+  lastSyncedAt      DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  account           ChartOfAccount    @relation(fields: [accountId], references: [id])
+  connection        BankConnection?   @relation(fields: [connectionId], references: [id])
+  transactions      BankTransaction[]
 
   @@index([accountNumber])
+  @@index([connectionId])
+}
+
+// One row per consented open-banking link. Each connection holds the OAuth
+// tokens and 90-day SCA expiry for one provider (e.g. ob-barclays). A
+// connection may expose 1+ BankAccount rows.
+model BankConnection {
+  id                   String        @id @default(uuid())
+  provider             BankProvider  @default(TRUELAYER)
+  providerName         String        // TrueLayer provider id, e.g. "ob-barclays", "ob-barclaycard"
+  displayName          String        // human label, e.g. "Barclays Business"
+  providerConnectionId String?       // TrueLayer credentials_id
+  accessToken          String?
+  refreshToken         String?
+  tokenExpiresAt       DateTime?
+  consentExpiresAt     DateTime?     // FCA-mandated 90-day SCA expiry
+  status               String        @default("PENDING") // PENDING, ACTIVE, EXPIRED, REVOKED, ERROR
+  lastSyncedAt         DateTime?
+  lastSyncError        String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  accounts             BankAccount[]
+
+  @@index([status])
+  @@index([consentExpiresAt])
+}
+
+enum BankProvider {
+  TRUELAYER
+  CSV
 }
 
 model BankTransaction {
@@ -2950,7 +3034,7 @@ model BankTransaction {
   @@index([bankAccountId])
 }
 
-// Auto-reconciliation suggestions raised by the Enable Banking sync.
+// Auto-reconciliation suggestions raised by the open-banking sync.
 // DO NOT auto-post — only surface for human review.
 model BankTransactionMatch {
   id                  String   @id @default(uuid())
@@ -3060,6 +3144,293 @@ model SystemSetting {
   id    String @id @default(uuid())
   key   String @unique
   value String
+}
+
+// ─── Zoho historical import staging (F6) ─────────────────────────────────
+// Mirror tables for one-shot historical import from Zoho Books. Records
+// land in QUARANTINED status — never visible to GL / AR / AP / reports
+// until promoted via the Backlog workspace (F7).
+
+enum ZohoImportStatus {
+  QUARANTINED
+  PROMOTED
+  MERGED
+  REJECTED
+}
+
+model ZohoImportedBill {
+  id            String           @id @default(uuid())
+  zohoId        String           @unique
+  zohoNumber    String?
+  zohoVendorId  String?
+  vendorName    String?
+  billDate      DateTime?
+  dueDate       DateTime?
+  total         Decimal?         @db.Decimal(14, 2)
+  balance       Decimal?         @db.Decimal(14, 2)
+  currencyCode  String?
+  status        String?
+  payload       Json
+  importStatus  ZohoImportStatus @default(QUARANTINED)
+  promotedToId  String?
+  promotedAt    DateTime?
+  rejectedReason String?
+  notes         String?
+  importedAt    DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  lines         ZohoImportedBillLine[]
+
+  @@index([importStatus])
+  @@index([billDate])
+  @@index([zohoVendorId])
+}
+
+model ZohoImportedBillLine {
+  id                   String              @id @default(uuid())
+  billId               String
+  bill                 ZohoImportedBill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  lineNumber           Int
+  itemName             String?
+  itemDesc             String?
+  productId            String?
+  sku                  String?
+  quantity             Decimal?            @db.Decimal(14, 4)
+  usageUnit            String?
+  rate                 Decimal?            @db.Decimal(14, 6)
+  itemTotal            Decimal?            @db.Decimal(14, 2)
+  account              String?
+  accountCode          String?
+  itemTaxPercent       Decimal?            @db.Decimal(6, 3)
+  itemTaxAmount        Decimal?            @db.Decimal(14, 2)
+  cfSite               String?
+  customerName         String?
+  payload              Json
+  importedAt           DateTime            @default(now())
+  clearStatus          String?
+  matchedInvoiceLineId String?
+  matchConfidence      Decimal?            @db.Decimal(5, 2)
+  matchReason          String?
+  matchedAt            DateTime?
+
+  @@index([billId])
+  @@index([productId])
+  @@index([sku])
+  @@index([cfSite])
+  @@index([clearStatus])
+  @@index([matchedInvoiceLineId])
+}
+
+model ZohoImportedBillableExpense {
+  id                       String    @id @default(uuid())
+  zohoTransactionId        String    // = ZohoImportedBill.zohoId (a.k.a. bill_id)
+  zohoTransactionNumber    String?   // bill number e.g. SIN337979
+  zohoItemId               String    // bill line item ID — pairs to ZohoImportedBillLine.payload->ProductID
+  zohoInvoiceId            String?   // = ZohoImportedInvoice.zohoId
+  zohoInvoiceNumber        String?
+  zohoCustomerId           String?
+  customerName             String?
+  vendorName               String?
+  status                   String?   // paid / open / draft etc.
+  transactionDate          DateTime?
+  invoiceDate              DateTime?
+  itemName                 String?
+  description              String?
+  productName              String?
+  quantityOrdered          Decimal?  @db.Decimal(14, 4)
+  bcyItemPrice             Decimal?  @db.Decimal(14, 6)
+  bcyTotal                 Decimal?  @db.Decimal(14, 2) // bill cost on this line
+  invoicedAmount           Decimal?  @db.Decimal(14, 2) // revenue on the paired invoice line
+  markupPercent            Decimal?  @db.Decimal(8, 2)
+  markedUpAmount           Decimal?  @db.Decimal(14, 2)
+  grossProfitPercentage    Decimal?  @db.Decimal(8, 2)
+  type                     String?
+  projectName              String?
+  branchName               String?
+  billCfSite               String?
+  billCfBillStatus         String?
+  referenceNumber          String?
+  payload                  Json
+  importedAt               DateTime  @default(now())
+  // Derived FK pointers (populated by link-bed-to-staging.mjs)
+  billLineId               String?
+  invoiceLineId            String?
+
+  @@unique([zohoTransactionId, zohoItemId])
+  @@index([zohoInvoiceId])
+  @@index([zohoTransactionId])
+  @@index([billLineId])
+  @@index([invoiceLineId])
+  @@index([customerName])
+  @@index([billCfSite])
+}
+
+model ZohoBillLineMatch {
+  id                  String    @id @default(uuid())
+  billLineId          String
+  // INVOICE target: invoiceLineId is set. Other targets (STOCK / WRITE_OFF /
+  // TICKET-only) leave invoiceLineId null and use targetCustomerName /
+  // targetSiteName / targetTicketRef to describe where the qty went.
+  invoiceLineId       String?
+  targetType          String    @default("INVOICE")  // INVOICE | STOCK | WRITE_OFF | TICKET | PENDING
+  targetCustomerName  String?
+  targetSiteName      String?
+  targetTicketRef     String?
+  qtyAllocated        Decimal   @db.Decimal(14, 4)
+  costAllocated       Decimal   @db.Decimal(14, 2)
+  source              String    // BED | T1_SKU | T2_SAME_JOB | T3_QTY | T4_DESC | MANUAL
+  confidence          Decimal?  @db.Decimal(5, 2)
+  excessMode          String?   // BURIED | ORPHAN | CARRY_FORWARD (for over-MOQ bill qty)
+  manualConfirmedAt   DateTime?
+  manualConfirmedBy   String?
+  manualNote          String?
+  splitParentId       String?
+  createdAt           DateTime  @default(now())
+
+  @@index([billLineId])
+  @@index([invoiceLineId])
+  @@index([source])
+  @@index([targetType])
+}
+
+model ZohoImportedInvoice {
+  id              String                    @id @default(uuid())
+  zohoId          String                    @unique
+  zohoNumber      String?
+  zohoCustomerId  String?
+  customerName    String?
+  invoiceDate     DateTime?
+  dueDate         DateTime?
+  total           Decimal?                  @db.Decimal(14, 2)
+  balance         Decimal?                  @db.Decimal(14, 2)
+  currencyCode    String?
+  status          String?
+  payload         Json
+  importStatus    ZohoImportStatus          @default(QUARANTINED)
+  promotedToId    String?
+  promotedAt      DateTime?
+  rejectedReason  String?
+  notes           String?
+  importedAt      DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  cleanupDecision     String?
+  cleanupDecisionAt   DateTime?
+  cleanupDecisionBy   String?
+  cleanupDecisionNote String?
+  overrideCustomerId  String?
+  overrideCustomer    Customer? @relation("ZohoInvoiceOverride", fields: [overrideCustomerId], references: [id], onDelete: SetNull)
+  overrideAt          DateTime?
+  overrideBy          String?
+  overrideReason      String?
+  lines           ZohoImportedInvoiceLine[]
+
+  @@index([importStatus])
+  @@index([invoiceDate])
+  @@index([zohoCustomerId])
+  @@index([cleanupDecision])
+  @@index([overrideCustomerId])
+}
+
+model ZohoCustomerLink {
+  zohoCustomerId   String   @id
+  zohoCustomerName String?
+  customerId       String
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  manualConfirmed  Boolean  @default(true)
+  confidence       Decimal? @db.Decimal(5, 2)
+  notes            String?
+  linkedAt         DateTime @default(now())
+  linkedBy         String?
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@index([customerId])
+}
+
+model ZohoSiteLink {
+  cfSite          String   @id
+  siteId          String
+  site            Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  manualConfirmed Boolean  @default(true)
+  confidence      Decimal? @db.Decimal(5, 2)
+  notes           String?
+  linkedAt        DateTime @default(now())
+  linkedBy        String?
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  @@index([siteId])
+}
+
+model ZohoImportedInvoiceLine {
+  id             String              @id @default(uuid())
+  invoiceId      String
+  invoice        ZohoImportedInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNumber     Int
+  itemName       String?
+  itemDesc       String?
+  productId      String?
+  sku            String?
+  quantity       Decimal?            @db.Decimal(14, 4)
+  usageUnit      String?
+  itemPrice      Decimal?            @db.Decimal(14, 6)
+  itemTotal      Decimal?            @db.Decimal(14, 2)
+  account        String?
+  accountCode    String?
+  itemTaxPercent Decimal?            @db.Decimal(6, 3)
+  itemTaxAmount  Decimal?            @db.Decimal(14, 2)
+  cfSite         String?
+  payload        Json
+  importedAt     DateTime            @default(now())
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@index([sku])
+  @@index([cfSite])
+}
+
+model ZohoImportedPayment {
+  id              String           @id @default(uuid())
+  zohoId          String           @unique
+  paymentSide     String           // "CUSTOMER" or "VENDOR"
+  zohoContactId   String?
+  contactName     String?
+  paymentDate     DateTime?
+  amount          Decimal?         @db.Decimal(14, 2)
+  paymentMode     String?
+  reference       String?
+  payload         Json
+  importStatus    ZohoImportStatus @default(QUARANTINED)
+  promotedToId    String?
+  promotedAt      DateTime?
+  rejectedReason  String?
+  notes           String?
+  importedAt      DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([importStatus])
+  @@index([paymentSide])
+  @@index([paymentDate])
+}
+
+model ZohoImportedContact {
+  id              String           @id @default(uuid())
+  zohoId          String           @unique
+  contactName     String?
+  companyName     String?
+  contactType     String?          // customer, vendor, both
+  email           String?
+  phone           String?
+  vatNumber       String?
+  payload         Json
+  importStatus    ZohoImportStatus @default(QUARANTINED)
+  promotedToId    String?          // OS Customer.id or Supplier.id
+  promotedKind    String?          // "CUSTOMER" or "SUPPLIER"
+  promotedAt      DateTime?
+  rejectedReason  String?
+  notes           String?
+  importedAt      DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([importStatus])
+  @@index([contactType])
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -3416,4 +3787,152 @@ model SchedulerLog {
 
   @@index([job, startedAt])
   @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reconciliation: customer sends back a revised item list against a quote we
+// already sent. We sort every parent TicketLine into four sections (A/B/C/D),
+// capture the customer's confirmation, and only then mutate the parent ticket
+// via the APPLIED state transition. Parent is protected until then.
+// ─────────────────────────────────────────────────────────────────────────────
+model Reconciliation {
+  id                String                      @id @default(uuid())
+  reconciliationNo  Int                         @unique @default(autoincrement())
+  parentTicketId    String
+  title             String
+  type              ReconciliationType
+  workflowState     ReconciliationWorkflowState @default(DRAFT)
+  notes             String?
+  customerListSize  Int                         @default(0)
+  customerListSnapshot Json?
+  discrepancy       Json?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  confirmedAt       DateTime?
+  appliedAt         DateTime?
+  closedAt          DateTime?
+  parentTicket      Ticket                      @relation(fields: [parentTicketId], references: [id])
+  lines             ReconciliationLine[]
+
+  @@index([parentTicketId])
+  @@index([workflowState])
+}
+
+model ReconciliationLine {
+  id                 String                   @id @default(uuid())
+  reconciliationId   String
+  parentTicketLineId String?
+  section            ReconciliationSection
+  action             ReconciliationLineAction
+  flag               ReconciliationFlag?
+  description        String
+  qty                Decimal                  @db.Decimal(14, 4)
+  unit               String
+  oldCode            String?
+  newCode            String?
+  note               String?
+  keepFlag           Boolean?
+  appliedAt          DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  reconciliation     Reconciliation           @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  parentTicketLine   TicketLine?              @relation(fields: [parentTicketLineId], references: [id], onDelete: SetNull)
+
+  @@index([reconciliationId])
+  @@index([section])
+}
+
+enum ReconciliationType {
+  VALSIR_GEBERIT_SWAP
+  CUSTOMER_LIST_REVISION
+}
+
+enum ReconciliationWorkflowState {
+  DRAFT
+  PENDING_CUSTOMER_CONFIRMATION
+  CUSTOMER_APPROVED
+  APPLIED
+  CLOSED
+}
+
+enum ReconciliationSection {
+  A
+  B
+  C
+  D
+}
+
+enum ReconciliationLineAction {
+  SWAP_CODE_AND_RECOST
+  NO_CHANGE
+  CONFIRM_WITH_CUSTOMER
+  CUSTOMER_ONLY
+}
+
+enum ReconciliationFlag {
+  OK
+  VERIFY
+  PRICE_FIX
+  CONFIRM
+}
+
+// ── Manual classification (replaces AI auto-tag on inbox) ──
+// User picks one or more tags per email + optional ticket(s). Each tag has a
+// routing handler that downstream engines (bill parser, procurement, etc.)
+// react to. AI keeps doing the work; the user makes the decision.
+
+model ClassificationTag {
+  id             String                 @id @default(uuid())
+  name           String                 @unique
+  label          String
+  category       ClassificationCategory
+  routingHandler String?
+  active         Boolean                @default(true)
+  sortOrder      Int                    @default(0)
+  description    String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  manualActions  ManualInboxAction[]
+}
+
+enum ClassificationCategory {
+  FINANCIAL
+  OPERATIONAL
+  BOTH
+}
+
+model ManualInboxAction {
+  id               String            @id @default(uuid())
+  ingestionEventId String
+  tagId            String
+  ticketId         String?
+  userId           String?
+  batchId          String?
+  notes            String?
+  createdAt        DateTime          @default(now())
+  tag              ClassificationTag @relation(fields: [tagId], references: [id])
+
+  @@index([ingestionEventId])
+  @@index([tagId])
+  @@index([ticketId])
+  @@index([batchId])
+}
+
+// WhatsApp group → customer/site mapping. The OS learns the link the first
+// time a user classifies a message from the group with a ticket selected;
+// every subsequent message from the same group auto-resolves the customer.
+model WhatsAppGroupLink {
+  id                   String   @id @default(uuid())
+  chatId               String   @unique
+  groupName            String?
+  customerId           String?
+  siteId               String?
+  siteCommercialLinkId String?
+  source               String   @default("INFERRED_FROM_TICKET")
+  confirmedAt          DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([siteId])
 }
