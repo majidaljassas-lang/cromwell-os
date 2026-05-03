@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { autoProgressTicket } from "@/lib/procurement/auto-progress-ticket";
+import { resolveSupplier, recordAlias } from "@/lib/suppliers/smart-match";
 
 export async function GET(
   request: Request,
@@ -73,9 +74,21 @@ export async function PATCH(
       "supplierStrategyType", "siteId", "siteCommercialLinkId",
       "supplierId", "supplierName", "supplierReference",
       "fromStock", "toOrder", "status", "canonicalProductId",
+      "priceOverride", "sectionLabel",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) allowed[f] = body[f];
+    }
+
+    // Lock cost/supplier from auto-recalc when the user edits them directly.
+    // Why: recalcWinner (manual prices panel + Phase 13 supplier-quote-linker + doc ingestion)
+    // would otherwise overwrite the user's value with the cheapest auto-discovered price.
+    const userTouchedCostOrSupplier =
+      body.expectedCostUnit !== undefined ||
+      body.supplierName !== undefined ||
+      body.supplierId !== undefined;
+    if (userTouchedCostOrSupplier && body.priceOverride === undefined) {
+      allowed.priceOverride = true;
     }
 
     // Auto-calculate totals if unit prices change
@@ -125,43 +138,83 @@ export async function PATCH(
       allowed.status = body.status;
     }
 
-    // Auto-create or link supplier when supplierName is set
-    if (allowed.supplierName && !allowed.supplierId) {
-      const trimmed = String(allowed.supplierName).trim();
-      allowed.supplierName = trimmed;
-      // Try exact match first, then contains match for partial names
-      const existingSupplier = await prisma.supplier.findFirst({
-        where: { name: { equals: trimmed, mode: "insensitive" } },
-      }) || await prisma.supplier.findFirst({
-        where: { name: { contains: trimmed, mode: "insensitive" } },
-      }) || await prisma.supplier.findFirst({
-        where: { name: { startsWith: trimmed.split(" ")[0], mode: "insensitive" } },
-      });
-      if (existingSupplier) {
-        allowed.supplierId = existingSupplier.id;
-        allowed.supplierName = existingSupplier.name; // Use canonical name
+    // Smart supplier resolution. Skip when caller already has a supplierId
+    // (frontend already picked from the grey-zone confirm dialog) or when
+    // body opts out via _supplierConfirmAsNew.
+    let supplierMatchInfo: ReturnType<typeof Object> | null = null;
+    if (allowed.supplierName && !allowed.supplierId && !body._supplierConfirmAsNew) {
+      const typed = String(allowed.supplierName).trim();
+      allowed.supplierName = typed;
+      const match = await resolveSupplier(typed);
+
+      if (match.status === "EXACT" || match.status === "ALIAS") {
+        allowed.supplierId = match.supplier!.id;
+        allowed.supplierName = match.supplier!.name;
+      } else if (match.status === "AUTO_MERGE") {
+        allowed.supplierId = match.supplier!.id;
+        allowed.supplierName = match.supplier!.name;
+        await recordAlias(match.supplier!.id, typed, "USER");
+      } else if (match.status === "CONFIRM") {
+        // Don't save the supplier change yet — return candidates for the UI to confirm.
+        delete allowed.supplierName;
+        delete allowed.supplierId;
+        supplierMatchInfo = { status: "CONFIRM", typed, candidates: match.candidates };
       } else {
-        const newSupplier = await prisma.supplier.create({
-          data: { name: trimmed },
-        });
-        allowed.supplierId = newSupplier.id;
+        // NEW — never auto-create. Surface a confirmation so the user has to
+        // explicitly opt in to a new Supplier record. Stops the duplicate
+        // bleed when typed strings differ subtly from existing names.
+        // (Aligns with "No Auto Party Intake".)
+        delete allowed.supplierName;
+        delete allowed.supplierId;
+        supplierMatchInfo = { status: "CONFIRM", typed, candidates: [] };
+      }
+    } else if (allowed.supplierName && !allowed.supplierId && body._supplierConfirmAsNew) {
+      const typed = String(allowed.supplierName).trim();
+      allowed.supplierName = typed;
+      const newSupplier = await prisma.supplier.create({ data: { name: typed } });
+      allowed.supplierId = newSupplier.id;
+    } else if (allowed.supplierName && allowed.supplierId) {
+      // User picked an existing supplier from the grey-zone dialog — record their typed string as alias.
+      if (body._supplierTypedAlias && typeof body._supplierTypedAlias === "string") {
+        await recordAlias(String(allowed.supplierId), body._supplierTypedAlias, "USER");
       }
     }
 
     const line = await prisma.ticketLine.update({
       where: { id },
       data: allowed,
-      select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true, canonicalProductId: true, isBomParent: true },
+      select: { id: true, ticketId: true, status: true, description: true, qty: true, unit: true, expectedCostUnit: true, expectedCostTotal: true, actualCostTotal: true, actualSaleUnit: true, actualSaleTotal: true, suggestedSaleUnit: true, expectedMarginTotal: true, actualMarginTotal: true, varianceTotal: true, normalizedItemName: true, productCode: true, specification: true, internalNotes: true, lineType: true, benchmarkUnit: true, benchmarkTotal: true, evidenceStatus: true, costStatus: true, salesStatus: true, supplierStrategyType: true, siteId: true, siteCommercialLinkId: true, supplierId: true, supplierName: true, supplierReference: true, sectionLabel: true, payingCustomerId: true, canonicalProductId: true, isBomParent: true, priceOverride: true },
     });
 
     const pricingChanged = allowed.expectedCostUnit !== undefined || allowed.actualSaleUnit !== undefined || allowed.suggestedSaleUnit !== undefined;
 
-    // Auto-progress ticket status when lines change
-    if (pricingChanged) {
-      const ticket = await prisma.ticket.findUnique({ where: { id: line.ticketId }, select: { status: true } });
-      if (ticket?.status === "CAPTURED") {
-        await prisma.ticket.update({ where: { id: line.ticketId }, data: { status: "PRICING", lastActivityAt: new Date() } });
-      }
+    // Auto-reopen CLOSED ticket on any line edit — a closed ticket that's
+    // being edited is, by definition, not closed anymore.
+    const parentTicket = await prisma.ticket.findUnique({
+      where: { id: line.ticketId },
+      select: { status: true, isLocked: true },
+    });
+    if (parentTicket?.status === "CLOSED") {
+      await prisma.$transaction([
+        prisma.ticket.update({
+          where: { id: line.ticketId },
+          data: { status: "PRICING", isLocked: false, lastActivityAt: new Date() },
+        }),
+        prisma.event.create({
+          data: {
+            ticketId: line.ticketId,
+            ticketLineId: line.id,
+            eventType: "QUOTE_REVISED",
+            timestamp: new Date(),
+            notes: "Auto-reopened: line edited on a CLOSED ticket",
+          },
+        }),
+      ]);
+    } else if (pricingChanged && parentTicket?.status === "CAPTURED") {
+      await prisma.ticket.update({
+        where: { id: line.ticketId },
+        data: { status: "PRICING", lastActivityAt: new Date() },
+      });
     }
 
     if (allowed.status === "ORDERED" || allowed.status === "FROM_STOCK" || allowed.status === "FULLY_COSTED" || allowed.status === "INVOICED") {
@@ -182,15 +235,17 @@ export async function PATCH(
           id: { not: line.id },
           parentLineId: null,
         },
-        select: { id: true, qty: true, isBomParent: true },
+        select: { id: true, qty: true, isBomParent: true, priceOverride: true },
       });
 
       let applied = 0;
       for (const sib of siblings) {
         const sibQty = Number(sib.qty);
         const updates: Record<string, unknown> = {};
+        // Locked siblings keep their cost/supplier; only non-pricing fields cascade.
+        const allowPricing = !sib.priceOverride;
 
-        if (allowed.expectedCostUnit !== undefined) {
+        if (allowPricing && allowed.expectedCostUnit !== undefined) {
           updates.expectedCostUnit = allowed.expectedCostUnit;
           updates.expectedCostTotal = Math.round(Number(allowed.expectedCostUnit) * sibQty * 100) / 100;
         }
@@ -202,8 +257,8 @@ export async function PATCH(
           updates.suggestedSaleUnit = allowed.suggestedSaleUnit;
         }
         if (allowed.description !== undefined) updates.description = allowed.description;
-        if (allowed.supplierName !== undefined) updates.supplierName = allowed.supplierName;
-        if (allowed.supplierId !== undefined) updates.supplierId = allowed.supplierId;
+        if (allowPricing && allowed.supplierName !== undefined) updates.supplierName = allowed.supplierName;
+        if (allowPricing && allowed.supplierId !== undefined) updates.supplierId = allowed.supplierId;
         if (allowed.productCode !== undefined) updates.productCode = allowed.productCode;
         if (allowed.benchmarkUnit !== undefined) updates.benchmarkUnit = allowed.benchmarkUnit;
 
@@ -252,10 +307,10 @@ export async function PATCH(
         }
       }
 
-      return Response.json({ ...line, _applied: applied });
+      return Response.json({ ...line, _applied: applied, ...(supplierMatchInfo ? { _supplierMatch: supplierMatchInfo } : {}) });
     }
 
-    return Response.json(line);
+    return Response.json({ ...line, ...(supplierMatchInfo ? { _supplierMatch: supplierMatchInfo } : {}) });
   } catch (error) {
     console.error("Failed to update ticket line:", error);
     return Response.json({ error: error instanceof Error ? error.message : "Failed to update ticket line" }, { status: 500 });
@@ -278,22 +333,22 @@ export async function DELETE(
       }, { status: 409 });
     }
 
-    // Clean up soft dependencies before deleting
-    // Also clean up BOM component lines if this is a BOM parent
-    await prisma.$transaction([
+    // Clean up soft dependencies before deleting — sequential to respect FK order
+    await prisma.$transaction(async (tx) => {
       // Clean up dependencies on component lines (if BOM parent)
-      prisma.costAllocation.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
-      prisma.stockUsage.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
-      prisma.quoteLine.deleteMany({ where: { ticketLine: { parentLineId: id } } }),
-      prisma.procurementOrderLine.updateMany({ where: { ticketLine: { parentLineId: id } }, data: { ticketLineId: null } }),
-      prisma.ticketLine.deleteMany({ where: { parentLineId: id } }),
+      await tx.costAllocation.deleteMany({ where: { ticketLine: { parentLineId: id } } });
+      await tx.stockUsage.deleteMany({ where: { ticketLine: { parentLineId: id } } });
+      await tx.quoteLine.deleteMany({ where: { ticketLine: { parentLineId: id } } });
+      await tx.procurementOrderLine.updateMany({ where: { ticketLine: { parentLineId: id } }, data: { ticketLineId: null } });
+      await tx.ticketLine.deleteMany({ where: { parentLineId: id } });
       // Clean up dependencies on the parent line itself
-      prisma.costAllocation.deleteMany({ where: { ticketLineId: id } }),
-      prisma.stockUsage.deleteMany({ where: { ticketLineId: id } }),
-      prisma.quoteLine.deleteMany({ where: { ticketLineId: id } }),
-      prisma.procurementOrderLine.updateMany({ where: { ticketLineId: id }, data: { ticketLineId: null } }),
-      prisma.ticketLine.delete({ where: { id } }),
-    ]);
+      await tx.costAllocation.deleteMany({ where: { ticketLineId: id } });
+      await tx.stockUsage.deleteMany({ where: { ticketLineId: id } });
+      await tx.quoteLine.deleteMany({ where: { ticketLineId: id } });
+      await tx.customerPOLine.deleteMany({ where: { ticketLineId: id } });
+      await tx.procurementOrderLine.updateMany({ where: { ticketLineId: id }, data: { ticketLineId: null } });
+      await tx.ticketLine.delete({ where: { id } });
+    });
 
     return Response.json({ deleted: true, id });
   } catch (error) {

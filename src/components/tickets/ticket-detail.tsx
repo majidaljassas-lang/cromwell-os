@@ -1383,9 +1383,19 @@ function InlineLineRow({
         <td colSpan={20}>
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setSupplierPrompt(null)}>
             <div className="bg-[#0F0F0F] border-2 border-[#3399FF] rounded-lg p-4 w-[480px]" onClick={(e) => e.stopPropagation()}>
-              <div className="text-sm font-bold text-[#3399FF] mb-2">Did you mean…?</div>
+              <div className="text-sm font-bold text-[#3399FF] mb-2">
+                {supplierPrompt.candidates.length > 0 ? "Did you mean…?" : "New supplier?"}
+              </div>
               <div className="text-xs text-[#ccc] mb-3">
-                You typed <span className="font-mono bg-[#1A1A1A] px-1.5 py-0.5 rounded text-[#FFCC00]">{supplierPrompt.typed}</span> — possible existing suppliers:
+                {supplierPrompt.candidates.length > 0 ? (
+                  <>
+                    You typed <span className="font-mono bg-[#1A1A1A] px-1.5 py-0.5 rounded text-[#FFCC00]">{supplierPrompt.typed}</span> — possible existing suppliers:
+                  </>
+                ) : (
+                  <>
+                    No existing supplier matches <span className="font-mono bg-[#1A1A1A] px-1.5 py-0.5 rounded text-[#FFCC00]">{supplierPrompt.typed}</span>. Create as a new supplier?
+                  </>
+                )}
               </div>
               <div className="space-y-1 mb-4">
                 {supplierPrompt.candidates.map((c) => (

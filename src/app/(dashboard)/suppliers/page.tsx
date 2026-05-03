@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Merge } from "lucide-react";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
 
 export const dynamic = 'force-dynamic';
@@ -136,6 +136,14 @@ export default async function SuppliersPage() {
           <span className="ml-auto underline">Review →</span>
         </Link>
       )}
+      <div className="flex justify-end">
+        <Link
+          href="/suppliers/dedupe"
+          className="inline-flex items-center gap-1 rounded border border-[#2A2A2A] bg-[#1A1A1A] px-2 py-1 text-[11px] bb-mono text-[#888888] hover:text-[#FF6600] hover:border-[#FF6600]"
+        >
+          <Merge className="size-3" /> Dedupe
+        </Link>
+      </div>
       <SuppliersTable suppliers={suppliersWithBalances} />
     </div>
   );
