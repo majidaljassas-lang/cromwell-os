@@ -81,6 +81,10 @@ type SupplierData = {
   legalName: string | null;
   email: string | null;
   phone: string | null;
+  bankAccount: string | null;
+  sortCode: string | null;
+  iban: string | null;
+  paymentMethod: string | null;
   notes: string | null;
   cleanNotes: string | null;
   paymentTerms: string | null;
@@ -92,6 +96,16 @@ type SupplierData = {
   recentBills: RecentBill[];
   recentReturns: RecentReturn[];
 };
+
+const PAYMENT_METHOD_OPTIONS = [
+  "BACS",
+  "FASTER_PAYMENT",
+  "CARD",
+  "DIRECT_DEBIT",
+  "CASH",
+  "CHEQUE",
+  "CREDIT_ACCOUNT",
+] as const;
 
 interface SuppliersTableProps {
   suppliers: SupplierData[];
@@ -167,6 +181,10 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
           legalName: (fd.get("legalName") as string) || undefined,
           email: (fd.get("email") as string) || undefined,
           phone: (fd.get("phone") as string) || undefined,
+          bankAccount: (fd.get("bankAccount") as string) || undefined,
+          sortCode: (fd.get("sortCode") as string) || undefined,
+          iban: (fd.get("iban") as string) || undefined,
+          paymentMethod: (fd.get("paymentMethod") as string) || undefined,
           notes: notes || undefined,
         }),
       });
@@ -206,6 +224,12 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
         body: JSON.stringify({
           name: fd.get("editName") as string,
           legalName: (fd.get("editLegalName") as string) || null,
+          email: (fd.get("editEmail") as string) || null,
+          phone: (fd.get("editPhone") as string) || null,
+          bankAccount: (fd.get("editBankAccount") as string) || null,
+          sortCode: (fd.get("editSortCode") as string) || null,
+          iban: (fd.get("editIban") as string) || null,
+          paymentMethod: (fd.get("editPaymentMethod") as string) || null,
           notes: notes,
         }),
       });
@@ -310,12 +334,46 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                 </Select>
               </div>
               <div className="space-y-1.5">
+                <Label>Default Payment Method</Label>
+                <select
+                  name="paymentMethod"
+                  defaultValue=""
+                  className="flex h-8 w-full rounded-lg border border-[#333333] bg-[#111111] px-2.5 py-1.5 text-sm text-[#E0E0E0] outline-none focus:border-[#FF6600]"
+                >
+                  <option value="">None</option>
+                  {PAYMENT_METHOD_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="s-accountRef">Account Ref</Label>
                 <Input
                   id="s-accountRef"
                   name="accountRef"
                   placeholder="Their account number for you"
                 />
+              </div>
+              <div className="border-t border-[#2A2A2A] pt-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#666666] font-bold mb-2">
+                  Bank details (optional)
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="s-sortCode">Sort code</Label>
+                    <Input id="s-sortCode" name="sortCode" placeholder="12-34-56" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="s-bankAccount">Account #</Label>
+                    <Input id="s-bankAccount" name="bankAccount" placeholder="12345678" />
+                  </div>
+                </div>
+                <div className="space-y-1.5 mt-2">
+                  <Label htmlFor="s-iban">IBAN</Label>
+                  <Input id="s-iban" name="iban" placeholder="GB00 BANK 0000 0000 0000 00" />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="s-notes">Notes</Label>
@@ -493,6 +551,26 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                   defaultValue={editSupplier.legalName || ""}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-email">Email</Label>
+                  <Input
+                    id="edit-email"
+                    name="editEmail"
+                    type="email"
+                    defaultValue={editSupplier.email || ""}
+                    placeholder="ap@supplier.com"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-phone">Phone</Label>
+                  <Input
+                    id="edit-phone"
+                    name="editPhone"
+                    defaultValue={editSupplier.phone || ""}
+                  />
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <Label>Payment Terms</Label>
                 <select
@@ -509,6 +587,21 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                 </select>
               </div>
               <div className="space-y-1.5">
+                <Label>Default Payment Method</Label>
+                <select
+                  name="editPaymentMethod"
+                  defaultValue={editSupplier.paymentMethod || ""}
+                  className="flex h-8 w-full rounded-lg border border-[#333333] bg-[#111111] px-2.5 py-1.5 text-sm text-[#E0E0E0] outline-none focus:border-[#FF6600]"
+                >
+                  <option value="">None</option>
+                  {PAYMENT_METHOD_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="edit-accountRef">Account Ref</Label>
                 <Input
                   id="edit-accountRef"
@@ -516,6 +609,44 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                   defaultValue={editSupplier.accountRef || ""}
                   placeholder="Their account number for you"
                 />
+              </div>
+              <div className="border-t border-[#2A2A2A] pt-3">
+                <div className="text-[10px] uppercase tracking-widest text-[#666666] font-bold mb-2">
+                  Bank details (BACS / Faster Payment)
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-sortCode">Sort code</Label>
+                    <Input
+                      id="edit-sortCode"
+                      name="editSortCode"
+                      defaultValue={editSupplier.sortCode || ""}
+                      placeholder="12-34-56"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-bankAccount">Account #</Label>
+                    <Input
+                      id="edit-bankAccount"
+                      name="editBankAccount"
+                      defaultValue={editSupplier.bankAccount || ""}
+                      placeholder="12345678"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5 mt-2">
+                  <Label htmlFor="edit-iban">IBAN (optional)</Label>
+                  <Input
+                    id="edit-iban"
+                    name="editIban"
+                    defaultValue={editSupplier.iban || ""}
+                    placeholder="GB00 BANK 0000 0000 0000 00"
+                  />
+                </div>
+                <div className="text-[10px] text-[#FF9900] mt-1">
+                  Bank details are stored for fraud-detection. Auto-updates from
+                  inbound documents are blocked — changes here are user-confirmed.
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="edit-notes">Notes</Label>
@@ -565,6 +696,23 @@ function SupplierDetail({
             )}
             {supplier.phone && <span>{supplier.phone}</span>}
           </div>
+          {(supplier.paymentMethod || supplier.sortCode || supplier.bankAccount) && (
+            <div className="text-[11px] text-[#888888] flex items-center gap-3 pt-1">
+              {supplier.paymentMethod && (
+                <span>
+                  <span className="text-[#666666] mr-1">Pay via</span>
+                  <span className="text-[#FF9900] font-medium">
+                    {supplier.paymentMethod.replace(/_/g, " ")}
+                  </span>
+                </span>
+              )}
+              {supplier.sortCode && supplier.bankAccount && (
+                <span className="text-[#666666] font-mono">
+                  {supplier.sortCode} · ••••{supplier.bankAccount.slice(-4)}
+                </span>
+              )}
+            </div>
+          )}
           {supplier.cleanNotes && (
             <p className="text-xs text-[#666666] max-w-lg">{supplier.cleanNotes}</p>
           )}

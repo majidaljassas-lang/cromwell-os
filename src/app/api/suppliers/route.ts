@@ -15,7 +15,17 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, legalName, email, phone, notes } = body;
+    const {
+      name,
+      legalName,
+      email,
+      phone,
+      notes,
+      bankAccount,
+      sortCode,
+      iban,
+      paymentMethod,
+    } = body;
 
     if (!name) {
       return Response.json({ error: "name is required" }, { status: 400 });
@@ -30,7 +40,17 @@ export async function POST(request: Request) {
     }
 
     const supplier = await prisma.supplier.create({
-      data: { name: name.trim(), legalName, email, phone, notes },
+      data: {
+        name: name.trim(),
+        legalName,
+        email,
+        phone,
+        notes,
+        bankAccount,
+        sortCode,
+        iban,
+        paymentMethod,
+      },
     });
 
     return Response.json(supplier, { status: 201 });

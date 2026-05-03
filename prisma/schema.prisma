@@ -824,6 +824,11 @@ model Supplier {
   iban               String?
   bankLastVerifiedAt DateTime?
   bankLastVerifiedBy String?
+  // Default payment method we use when paying this supplier. Free-text for
+  // flexibility but UI offers BACS / FASTER_PAYMENT / CASH / CARD /
+  // DIRECT_DEBIT / CHEQUE / CREDIT_ACCOUNT. Mirrors PaymentMade.paymentMethod
+  // so an actual PaymentMade can default from this and override per-payment.
+  paymentMethod      String?
   costAllocations   CostAllocation[]
   creditNotes       CreditNote[]
   procurementOrders ProcurementOrder[]
