@@ -1,9 +1,18 @@
 import { prisma } from "@/lib/prisma";
+import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
 
 export const dynamic = 'force-dynamic';
 
 export default async function SuppliersPage() {
+  const reviewCount = await prisma.reviewQueueItem.count({
+    where: {
+      queueType: "UNRESOLVED_SUPPLIER",
+      status: { in: ["OPEN_REVIEW", "IN_PROGRESS_REVIEW"] },
+    },
+  });
+
   const suppliers = await prisma.supplier.findMany({
     orderBy: { name: "asc" },
     include: {
@@ -114,6 +123,19 @@ export default async function SuppliersPage() {
 
   return (
     <div className="p-4 space-y-4">
+      {reviewCount > 0 && (
+        <Link
+          href="/parties/review"
+          className="flex items-center gap-2 rounded border border-[#FF6600]/40 bg-[#FF6600]/10 px-3 py-2 text-xs text-[#E0E0E0] hover:bg-[#FF6600]/20"
+        >
+          <AlertTriangle className="size-4 text-[#FF9900]" />
+          <span>
+            {reviewCount} unknown supplier{reviewCount === 1 ? "" : "s"} pending review —
+            match to existing supplier or create.
+          </span>
+          <span className="ml-auto underline">Review →</span>
+        </Link>
+      )}
       <SuppliersTable suppliers={suppliersWithBalances} />
     </div>
   );

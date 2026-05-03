@@ -101,6 +101,10 @@ export async function processManualAck(args: {
   })();
   const participants: string[] = senderEmail ? [senderEmail] : [];
   const supplierId = await resolveSupplier({ name: parsed.supplierName, participants });
+  if (!supplierId) {
+    result.reason = `supplier could not be resolved (extracted: "${parsed.supplierName ?? "—"}"); parked in ReviewQueue (UNRESOLVED_SUPPLIER)`;
+    return result;
+  }
 
   // 5. Match
   const demand: DemandLine[] = ticket.lines.map((l) => ({

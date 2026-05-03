@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import { parseAcknowledgementText } from "@/lib/procurement/parse-acknowledgement";
 import { anchorToTicket, type AnchorMatch } from "@/lib/procurement/site-alias";
 import { checkSchedulerSecret } from "@/lib/scheduler/secret";
+import { enqueueUnresolvedParty } from "@/lib/parties/review-queue";
 import {
   matchAckLines,
   type DemandLine,
@@ -530,6 +531,21 @@ export async function POST(request: Request) {
           classification: cls.type,
         });
 
+        if ("skipped" in poResult) {
+          details.push({
+            eventId: ev.id,
+            subject,
+            classification: cls.type,
+            anchor,
+            linesParsed: parsed.lines.length,
+            stats: result.stats,
+            applied: false,
+            ticketNo: anchor.ticketNo,
+            note: `Skipped: ${poResult.reason}`,
+          });
+          continue;
+        }
+
         applied.ordersCreated += poResult.orderCreated ? 1 : 0;
         applied.linesUpdated += poResult.linesUpdated;
         applied.linesAdded += poResult.linesAdded;
@@ -602,20 +618,25 @@ interface ApplyResult {
   linesUpdated: number;
 }
 
-async function applyAck(args: ApplyArgs): Promise<ApplyResult> {
+async function applyAck(args: ApplyArgs): Promise<ApplyResult | { skipped: true; reason: string }> {
   const { prisma, eventId, anchor, parsed, result, classification } = args;
 
-  // 1. Resolve or create supplier
+  // 1. Resolve supplier — no auto-create. Unknown names park in ReviewQueue
+  //    (UNRESOLVED_SUPPLIER) and the ack is left for the user to triage.
   const supplierName = (parsed.supplierName || "Unknown Supplier").trim();
-  let supplier = await prisma.supplier.findFirst({
+  const supplier = await prisma.supplier.findFirst({
     where: { name: { equals: supplierName, mode: "insensitive" } },
     select: { id: true, name: true },
   });
   if (!supplier) {
-    supplier = await prisma.supplier.create({
-      data: { name: supplierName },
-      select: { id: true, name: true },
+    await enqueueUnresolvedParty({
+      party: "SUPPLIER",
+      rawValue: supplierName,
+      description: `Ack-matcher could not resolve supplier "${supplierName}" for ticket ${anchor.ticketId} (event ${eventId}).`,
+      entityType: "IngestionEvent",
+      entityId: eventId,
     });
+    return { skipped: true, reason: `unresolved supplier "${supplierName}" — parked in ReviewQueue` };
   }
 
   // 2. Compute PO number.

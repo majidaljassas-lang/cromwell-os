@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Building2, Plus, Check, X, Pencil, Users, Tag, Trash2, Network, Search } from "lucide-react";
+import { ArrowLeft, Building2, Plus, Check, X, Pencil, Users, Tag, Trash2, Network, Search, ChevronDown, ChevronRight } from "lucide-react";
+import { SiteEmbedded } from "@/components/sites/site-embedded";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ZohoCustomerHistoryTab } from "@/components/zoho/ZohoCustomerHistoryTab";
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import {
   Table,
@@ -38,6 +40,7 @@ type Customer = {
   vatNumber: string | null;
   paymentTerms: string | null;
   poRequiredDefault: boolean;
+  podRequired: boolean;
   isCashCustomer: boolean;
   isBillingEntity: boolean;
   parentCustomerEntityId: string | null;
@@ -60,8 +63,43 @@ type Customer = {
     roleOnSite: string | null;
     contact: { id: string; fullName: string; phone: string | null; email: string | null };
   }>;
-  ticketsAsPayer: Array<{ id: string; title: string; status: string; ticketMode: string; createdAt: string }>;
-  customerPOs: Array<{ id: string; poNo: string; poType: string; status: string; totalValue: number | null }>;
+  ticketsAsPayer: Array<{
+    id: string; title: string; status: string; ticketMode: string; createdAt: string;
+    sourceEntityId?: string | null; sourceEntityName?: string | null;
+  }>;
+  customerPOs: Array<{
+    id: string; poNo: string; poType: string; status: string; totalValue: number | null;
+    sourceEntityId?: string | null; sourceEntityName?: string | null;
+  }>;
+  invoices?: Array<{
+    id: string;
+    invoiceNo: string | null;
+    issuedAt: string | null;
+    dueDate: string | null;
+    paidAt: string | null;
+    totalSell: number | string;
+    totalGross: number | string;
+    status: string;
+    sourceEntityId?: string | null;
+    sourceEntityName?: string | null;
+  }>;
+};
+
+type EffectiveBillingProp = {
+  billingAddress: string | null;
+  billingEmail: string | null;
+  paymentTerms: string | null;
+  creditLimit: string | number | null;
+  vatNumber: string | null;
+  currency: string | null;
+  sources: {
+    billingAddress: string | null;
+    billingEmail: string | null;
+    paymentTerms: string | null;
+    creditLimit: string | null;
+    vatNumber: string | null;
+    currency: string | null;
+  };
 };
 
 type SupplierBillLineRow = {
@@ -81,11 +119,19 @@ export function CustomerDetail({
   allSites,
   allCustomers,
   supplierBillLines = [],
+  embedded = false,
+  isBucket = false,
+  effective = null,
+  inheritSourceNames = {},
 }: {
   customer: Customer;
   allSites: Array<{ id: string; siteName: string }>;
   allCustomers: Array<{ id: string; name: string }>;
   supplierBillLines?: SupplierBillLineRow[];
+  embedded?: boolean;
+  isBucket?: boolean;
+  effective?: EffectiveBillingProp | null;
+  inheritSourceNames?: Record<string, string>;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -117,6 +163,7 @@ export function CustomerDetail({
   const [creatingSub, setCreatingSub] = useState(false);
   const [subName, setSubName] = useState("");
   const [subLegalName, setSubLegalName] = useState("");
+  const [expandedSiteIds, setExpandedSiteIds] = useState<Set<string>>(new Set());
   const [subCompanyNumber, setSubCompanyNumber] = useState("");
   const [subVatNumber, setSubVatNumber] = useState("");
   const [subBillingAddress, setSubBillingAddress] = useState("");
@@ -281,6 +328,7 @@ export function CustomerDetail({
       paymentTerms: (fd.get("paymentTerms") as string) || null,
       notes: (fd.get("notes") as string) || null,
       poRequiredDefault: fd.get("poRequired") === "on",
+      podRequired:       fd.get("podRequired") === "on",
       entityType: (fd.get("entityType") as string) || null,
       isBillingEntity: fd.get("isBillingEntity") === "on",
     };
@@ -410,6 +458,7 @@ export function CustomerDetail({
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Header */}
+      {!embedded && (
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
@@ -419,6 +468,7 @@ export function CustomerDetail({
           <div className="flex items-center gap-2 ml-[72px] text-xs text-[#888888]">
             {customer.legalName && <span>{customer.legalName}</span>}
             {customer.poRequiredDefault && <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10">PO REQUIRED</Badge>}
+            {customer.podRequired && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10" title="Invoice send is blocked until POD is uploaded for every line.">POD REQUIRED</Badge>}
             {customer.isCashCustomer && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">CASH</Badge>}
             {customer.isBillingEntity ? (
               <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">BILLING ENTITY</Badge>
@@ -432,6 +482,14 @@ export function CustomerDetail({
                 </Badge>
               </Link>
             )}
+            {isBucket && (
+              <Badge
+                className="text-[8px] px-1 py-0 text-[#FFCC00] bg-[#FFCC00]/10"
+                title={`Group view — totals across ${customer.subsidiaries.length} subsidiar${customer.subsidiaries.length === 1 ? "y" : "ies"}.`}
+              >
+                ★ GROUP VIEW · {customer.subsidiaries.length} SUB{customer.subsidiaries.length === 1 ? "" : "S"}
+              </Badge>
+            )}
             {customer.entityType && <Badge className="text-[8px] px-1 py-0 text-[#888888] bg-[#333333]">{customer.entityType}</Badge>}
           </div>
         </div>
@@ -444,21 +502,26 @@ export function CustomerDetail({
           </Button>
         </div>
       </div>
+      )}
 
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="hierarchy">Hierarchy ({customer.subsidiaries.length})</TabsTrigger>
           <TabsTrigger value="aliases">Aliases ({customer.customerAliases.length})</TabsTrigger>
-          <TabsTrigger value="sites">Sites ({customer.siteCommercialLinks.length})</TabsTrigger>
+          {!embedded && <TabsTrigger value="sites">Sites ({customer.siteCommercialLinks.length})</TabsTrigger>}
           <TabsTrigger value="tickets">Tickets ({customer.ticketsAsPayer.length})</TabsTrigger>
           <TabsTrigger value="contacts">Contacts ({customer.siteContactLinks.length})</TabsTrigger>
           <TabsTrigger value="bills">Supplier Bills ({supplierBillLines.length})</TabsTrigger>
+          <TabsTrigger value="zoho">Historical (Zoho)</TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW */}
         <TabsContent value="overview" className="mt-4">
-          <div className="border border-[#333333] bg-[#1A1A1A] p-6 max-w-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* LEFT RAIL */}
+            <div className="lg:col-span-1 space-y-4">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-6">
             {editing ? (
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="space-y-1.5"><Label>Customer Name *</Label><Input name="name" defaultValue={customer.name} required /></div>
@@ -509,6 +572,10 @@ export function CustomerDetail({
                     <Label htmlFor="poRequired">PO Required</Label>
                   </div>
                   <div className="flex items-center gap-2">
+                    <input type="checkbox" name="podRequired" id="podRequired" defaultChecked={customer.podRequired} />
+                    <Label htmlFor="podRequired" title="Block invoice send until proof of delivery is uploaded for every line.">POD Required</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <input type="checkbox" name="isBillingEntity" id="isBillingEntity" defaultChecked={customer.isBillingEntity} />
                     <Label htmlFor="isBillingEntity" title="Untick if this is just a name/grouping, not a real legal entity that gets invoiced.">Billing Entity</Label>
                   </div>
@@ -537,18 +604,240 @@ export function CustomerDetail({
                     ) : "—"}
                   </dd>
                 </div>
-                <div><dt className="text-[#888888]">VAT Number</dt><dd>{customer.vatNumber || "—"}</dd></div>
+                <div>
+                  <dt className="text-[#888888]">VAT Number</dt>
+                  <dd>
+                    <EffectiveValue
+                      own={customer.vatNumber}
+                      effective={effective?.vatNumber ?? null}
+                      sourceId={effective?.sources.vatNumber ?? null}
+                      selfId={customer.id}
+                      sourceNames={inheritSourceNames}
+                    />
+                  </dd>
+                </div>
                 <div className="col-span-2">
                   <dt className="text-[#888888]">Billing Address</dt>
-                  <dd className="whitespace-pre-line">{customer.billingAddress || "—"}</dd>
+                  <dd className="whitespace-pre-line">
+                    <EffectiveValue
+                      own={customer.billingAddress}
+                      effective={effective?.billingAddress ?? null}
+                      sourceId={effective?.sources.billingAddress ?? null}
+                      selfId={customer.id}
+                      sourceNames={inheritSourceNames}
+                    />
+                  </dd>
                 </div>
-                <div><dt className="text-[#888888]">Payment Terms</dt><dd>{customer.paymentTerms || "—"}</dd></div>
+                <div>
+                  <dt className="text-[#888888]">Payment Terms</dt>
+                  <dd>
+                    <EffectiveValue
+                      own={customer.paymentTerms}
+                      effective={effective?.paymentTerms ?? null}
+                      sourceId={effective?.sources.paymentTerms ?? null}
+                      selfId={customer.id}
+                      sourceNames={inheritSourceNames}
+                    />
+                  </dd>
+                </div>
                 <div><dt className="text-[#888888]">Entity Type</dt><dd>{customer.entityType || "—"}</dd></div>
                 <div><dt className="text-[#888888]">PO Required</dt><dd>{customer.poRequiredDefault ? "Yes" : "No"}</dd></div>
+                <div><dt className="text-[#888888]">POD Required</dt><dd>{customer.podRequired ? "Yes" : "No"}</dd></div>
                 <div><dt className="text-[#888888]">Billing Entity</dt><dd>{customer.isBillingEntity ? "Yes" : "No"}</dd></div>
                 {customer.notes && <div className="col-span-2"><dt className="text-[#888888]">Notes</dt><dd>{customer.notes}</dd></div>}
               </dl>
             )}
+          </div>
+
+          {/* Linked Sites — compact */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">
+              Linked Sites ({customer.siteCommercialLinks.length})
+            </div>
+            {customer.siteCommercialLinks.length === 0 ? (
+              <div className="text-xs text-[#666666]">None</div>
+            ) : (
+              <div className="space-y-1">
+                {customer.siteCommercialLinks.map((link) => (
+                  <Link key={link.id} href={`/sites/${link.site.id}`} className="block hover:bg-[#222222] -mx-2 px-2 py-1">
+                    <div className="text-xs text-[#E0E0E0] truncate">{link.site.siteName}</div>
+                    <div className="text-[9px] text-[#666666]">
+                      {link.site.city || ""}{link.site.postcode ? ` · ${link.site.postcode}` : ""}
+                      {link.role ? ` · ${link.role}` : ""}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Contacts — compact */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">
+              Contacts ({customer.siteContactLinks.length})
+            </div>
+            {customer.siteContactLinks.length === 0 ? (
+              <div className="text-xs text-[#666666]">No primary contact</div>
+            ) : (
+              <div className="space-y-2">
+                {customer.siteContactLinks.slice(0, 5).map((cl) => (
+                  <div key={cl.id} className="text-xs">
+                    <div className="text-[#E0E0E0] font-medium">{cl.contact.fullName}</div>
+                    <div className="text-[9px] text-[#666666]">
+                      {cl.contact.phone || ""}{cl.contact.email ? ` · ${cl.contact.email}` : ""}
+                    </div>
+                  </div>
+                ))}
+                {customer.siteContactLinks.length > 5 && (
+                  <div className="text-[9px] text-[#666666]">
+                    +{customer.siteContactLinks.length - 5} more
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+            </div>
+
+            {/* RIGHT COLUMN */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Financials — Receivables + Cost/Margin (rolled up across family when bucket) */}
+              {(() => {
+                const invs = customer.invoices ?? [];
+                const totalRevenue = invs.reduce((s, i) => s + Number(i.totalSell ?? i.totalGross), 0);
+                const totalGross = invs.reduce((s, i) => s + Number(i.totalGross), 0);
+                const totalPaid = invs.filter((i) => i.status === "PAID").reduce((s, i) => s + Number(i.totalGross), 0);
+                const outstanding = totalGross - totalPaid;
+                const overdue = invs
+                  .filter((i) => i.status !== "PAID" && i.dueDate && new Date(i.dueDate) < new Date())
+                  .reduce((s, i) => s + Number(i.totalGross), 0);
+                const totalCost = supplierBillLines.reduce((s, l) => s + Number(l.lineTotal), 0);
+                const margin = totalRevenue - totalCost;
+                const marginPct = totalRevenue > 0 ? (margin / totalRevenue) * 100 : null;
+                const label = isBucket ? "Financials — Group" : "Financials";
+                return (
+                  <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold">{label}</div>
+                      {isBucket && (
+                        <Badge className="text-[8px] px-1 py-0 text-[#FFCC00] bg-[#FFCC00]/10">
+                          {customer.subsidiaries.length} SUBS
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mb-3">
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Revenue</div>
+                        <div className="text-lg tabular-nums text-[#E0E0E0]">£{totalRevenue.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Cost</div>
+                        <div className="text-lg tabular-nums text-[#E0E0E0]">£{totalCost.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Margin</div>
+                        <div className={`text-lg tabular-nums ${margin < 0 ? "text-[#FF3333]" : "text-[#00CC66]"}`}>
+                          £{margin.toFixed(2)}
+                          {marginPct !== null && (
+                            <span className="text-[9px] text-[#888888] ml-1">({marginPct.toFixed(1)}%)</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 pt-3 border-t border-[#333333]">
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Outstanding</div>
+                        <div className="text-sm tabular-nums text-[#E0E0E0]">£{outstanding.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Overdue</div>
+                        <div className={`text-sm tabular-nums ${overdue > 0 ? "text-[#FF3333]" : "text-[#E0E0E0]"}`}>£{overdue.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-[#666666] uppercase">Invoices</div>
+                        <div className="text-sm tabular-nums text-[#E0E0E0]">{invs.length}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Activity timeline */}
+              {(() => {
+                type Activity = { kind: "TICKET" | "PO" | "INVOICE"; date: Date; title: string; sub: string; href: string; badge: string; badgeClass: string; entity: string | null };
+                const activity: Activity[] = [];
+                const entityTagFor = (id: string | null | undefined) =>
+                  isBucket && id && id !== customer.id ? (inheritSourceNames[id] ?? null) : null;
+                for (const t of customer.ticketsAsPayer) {
+                  activity.push({
+                    kind: "TICKET",
+                    date: new Date(t.createdAt),
+                    title: t.title,
+                    sub: `${t.ticketMode.replace(/_/g, " ")} · ${t.status}`,
+                    href: `/tickets/${t.id}`,
+                    badge: "TICKET",
+                    badgeClass: "text-[#FF6600] bg-[#FF6600]/10",
+                    entity: entityTagFor(t.sourceEntityId),
+                  });
+                }
+                for (const p of customer.customerPOs) {
+                  activity.push({
+                    kind: "PO",
+                    date: new Date(),
+                    title: p.poNo,
+                    sub: `${p.poType} · ${p.status}${p.totalValue != null ? ` · £${Number(p.totalValue).toFixed(2)}` : ""}`,
+                    href: `/po-register`,
+                    badge: "PO",
+                    badgeClass: "text-[#3399FF] bg-[#3399FF]/10",
+                    entity: entityTagFor(p.sourceEntityId),
+                  });
+                }
+                for (const inv of customer.invoices ?? []) {
+                  if (!inv.issuedAt) continue;
+                  activity.push({
+                    kind: "INVOICE",
+                    date: new Date(inv.issuedAt),
+                    title: inv.invoiceNo || "(draft)",
+                    sub: `${inv.status} · £${Number(inv.totalGross).toFixed(2)}`,
+                    href: `/invoices`,
+                    badge: "INVOICE",
+                    badgeClass: "text-[#00CC66] bg-[#00CC66]/10",
+                    entity: entityTagFor(inv.sourceEntityId),
+                  });
+                }
+                activity.sort((a, b) => b.date.getTime() - a.date.getTime());
+                const top = activity.slice(0, 25);
+                return (
+                  <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-3">
+                      Activity
+                    </div>
+                    {top.length === 0 ? (
+                      <div className="text-xs text-[#666666]">No activity yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {top.map((a, i) => (
+                          <Link key={i} href={a.href} className="flex items-start gap-3 hover:bg-[#222222] -mx-2 px-2 py-1.5">
+                            <div className="text-[9px] text-[#666666] tabular-nums w-16 shrink-0 mt-0.5">
+                              {a.date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                            </div>
+                            <Badge className={`text-[8px] px-1 py-0 shrink-0 ${a.badgeClass}`}>{a.badge}</Badge>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs text-[#E0E0E0] truncate">{a.title}</div>
+                              <div className="text-[9px] text-[#666666]">
+                                {a.sub}
+                                {a.entity && (
+                                  <span className="ml-2 text-[#FFCC00]">↳ {a.entity}</span>
+                                )}
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </TabsContent>
 
@@ -806,6 +1095,7 @@ export function CustomerDetail({
         </TabsContent>
 
         {/* SITES */}
+        {!embedded && (
         <TabsContent value="sites" className="mt-4 space-y-3">
           <div className="flex justify-between items-center">
             <div className="text-[10px] uppercase tracking-widest text-[#888888]">LINKED SITES</div>
@@ -833,37 +1123,58 @@ export function CustomerDetail({
             <div className="border border-[#333333] bg-[#1A1A1A] p-8 text-center text-[#888888]">No sites linked yet.</div>
           ) : (
             <div className="space-y-2">
-              {customer.siteCommercialLinks.map((link) => (
-                <Link key={link.id} href={`/sites/${link.site.id}`}>
-                  <div className="border border-[#333333] bg-[#1A1A1A] p-4 hover:bg-[#222222] cursor-pointer flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Building2 className="size-5 text-[#FF6600]" />
-                      <div>
-                        <div className="font-medium text-[#E0E0E0]">{link.site.siteName}</div>
-                        <div className="text-[10px] text-[#666666]">
-                          {link.site.city && `${link.site.city} `}{link.site.postcode || ""}
-                          {link.site.siteCode && ` · ${link.site.siteCode}`}
-                        </div>
-                        {link.site.aliases.length > 0 && (
-                          <div className="flex gap-1 mt-0.5">
-                            {link.site.aliases.map((a, i) => (
-                              <span key={i} className="text-[8px] px-1 py-0 text-[#FF6600] bg-[#FF6600]/10 border border-[#FF6600]/20">{a}</span>
-                            ))}
+              {customer.siteCommercialLinks.map((link) => {
+                const expanded = expandedSiteIds.has(link.site.id);
+                const toggle = () => {
+                  setExpandedSiteIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(link.site.id)) next.delete(link.site.id);
+                    else next.add(link.site.id);
+                    return next;
+                  });
+                };
+                return (
+                  <div key={link.id} className="border border-[#333333] bg-[#1A1A1A]">
+                    <div className="p-4 hover:bg-[#222222] cursor-pointer flex items-center justify-between" onClick={toggle}>
+                      <div className="flex items-center gap-3">
+                        {expanded ? <ChevronDown className="size-4 text-[#888888]" /> : <ChevronRight className="size-4 text-[#888888]" />}
+                        <Building2 className="size-5 text-[#FF6600]" />
+                        <div>
+                          <div className="font-medium text-[#E0E0E0]">{link.site.siteName}</div>
+                          <div className="text-[10px] text-[#666666]">
+                            {link.site.city && `${link.site.city} `}{link.site.postcode || ""}
+                            {link.site.siteCode && ` · ${link.site.siteCode}`}
                           </div>
-                        )}
+                          {link.site.aliases.length > 0 && (
+                            <div className="flex gap-1 mt-0.5">
+                              {link.site.aliases.map((a, i) => (
+                                <span key={i} className="text-[8px] px-1 py-0 text-[#FF6600] bg-[#FF6600]/10 border border-[#FF6600]/20">{a}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className="text-[9px] px-1.5 py-0.5 text-[#888888] bg-[#333333]">{link.role}</Badge>
+                        {link.billingAllowed && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">BILLING</Badge>}
+                        {link.defaultBillingCustomer && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">DEFAULT</Badge>}
+                        <Link href={`/sites/${link.site.id}`} onClick={(e) => e.stopPropagation()} className="text-[10px] text-[#FF6600] hover:underline ml-2">
+                          Open page →
+                        </Link>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className="text-[9px] px-1.5 py-0.5 text-[#888888] bg-[#333333]">{link.role}</Badge>
-                      {link.billingAllowed && <Badge className="text-[8px] px-1 py-0 text-[#00CC66] bg-[#00CC66]/10">BILLING</Badge>}
-                      {link.defaultBillingCustomer && <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10">DEFAULT</Badge>}
-                    </div>
+                    {expanded && (
+                      <div className="border-t border-[#333333] p-4">
+                        <SiteEmbedded siteId={link.site.id} />
+                      </div>
+                    )}
                   </div>
-                </Link>
-              ))}
+                );
+              })}
             </div>
           )}
         </TabsContent>
+        )}
 
         {/* TICKETS */}
         <TabsContent value="tickets" className="mt-4">
@@ -1013,7 +1324,49 @@ export function CustomerDetail({
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="zoho" className="mt-4">
+          <ZohoCustomerHistoryTab customerId={customer.id} />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Renders a billing field showing the effective value with provenance:
+ *   - own value     → plain
+ *   - inherited     → value + "inherited from <ParentName>" badge
+ *   - nothing set   → "—"
+ */
+function EffectiveValue({
+  own,
+  effective,
+  sourceId,
+  selfId,
+  sourceNames,
+}: {
+  own: string | null;
+  effective: string | null;
+  sourceId: string | null;
+  selfId: string;
+  sourceNames: Record<string, string>;
+}) {
+  if (own !== null && own !== "") {
+    return <span>{own}</span>;
+  }
+  if (effective === null || effective === "") {
+    return <span className="text-[#666666]">—</span>;
+  }
+  const inheritedFrom = sourceId && sourceId !== selfId ? sourceNames[sourceId] ?? null : null;
+  return (
+    <span>
+      {effective}
+      {inheritedFrom && (
+        <span className="ml-2 inline-block text-[8px] uppercase tracking-wider text-[#FFCC00] bg-[#FFCC00]/10 px-1 py-0.5 rounded">
+          inherited from {inheritedFrom}
+        </span>
+      )}
+    </span>
   );
 }

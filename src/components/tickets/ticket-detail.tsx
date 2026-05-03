@@ -14,6 +14,8 @@ import {
   FileDown,
   Package,
   Layers,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +61,7 @@ import { RfqExploder } from "@/components/tickets/rfq-exploder";
 import { CompetitiveBidPanel } from "@/components/tickets/competitive-bid-panel";
 import { ComparisonPricing } from "@/components/tickets/comparison-pricing";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
+import { PODFolder } from "@/components/tickets/pod-folder";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -183,6 +186,7 @@ type TicketLine = {
   isBomParent?: boolean;
   canonicalProductId?: string | null;
   components?: BOMComponent[];
+  priceOverride?: boolean;
 };
 
 type EvidenceFragment = {
@@ -285,7 +289,7 @@ type TicketData = {
   poStatus: string | null;
   createdAt: Date;
   closedAt: Date | null;
-  payingCustomer: { id: string; name: string };
+  payingCustomer: { id: string; name: string; podRequired?: boolean };
   site: { id: string; siteName: string } | null;
   siteCommercialLink: { id: string } | null;
   lines: TicketLine[];
@@ -326,6 +330,7 @@ function InlineLineRow({
   const getClipboard = () => (window as any).__ticketLineClipboard ?? null;
   const setClipboard = (data: any) => { (window as any).__ticketLineClipboard = data; };
   const [priceMatchData, setPriceMatchData] = useState<{ field: string; value: unknown; siblings: Array<{ id: string; sectionLabel: string | null }>; message: string; description: string } | null>(null);
+  const [supplierPrompt, setSupplierPrompt] = useState<{ typed: string; candidates: Array<{ id: string; name: string; score: number; matchedOn: string; matchedText: string }> } | null>(null);
   const [marginPctVal, setMarginPctVal] = useState("");
   const [mounted, setMounted] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -473,10 +478,20 @@ function InlineLineRow({
     const res = await fetch(`/api/ticket-lines/${line.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: value || undefined }),
+      body: JSON.stringify({ [field]: value }),
     });
     const data = await res.json().catch(() => ({}));
     setSaving(false);
+
+    // Smart-match grey zone: server found similar suppliers but isn't sure — ask the user.
+    if (data._supplierMatch?.status === "CONFIRM") {
+      setSupplierPrompt({ typed: data._supplierMatch.typed, candidates: data._supplierMatch.candidates });
+      return;
+    }
+    // Auto-merge / alias / exact: server resolved to canonical name — sync the input.
+    if (field === "supplierName" && data.supplierName && data.supplierName !== value) {
+      setSupplierVal(data.supplierName);
+    }
 
     // If matching siblings found, auto-apply same change across all sections
     if (data._matchingSiblings?.length > 0) {
@@ -524,7 +539,7 @@ function InlineLineRow({
     if (!isNaN(v)) {
       setCostVal(v ? String(v) : "");
       if (v !== Number(line.expectedCostUnit || 0))
-        saveField("expectedCostUnit", v || undefined);
+        saveField("expectedCostUnit", v);
     }
   }
 
@@ -533,7 +548,7 @@ function InlineLineRow({
     if (!isNaN(v)) {
       setSaleVal(v ? String(v) : "");
       if (v !== Number(line.actualSaleUnit || 0))
-        saveField("actualSaleUnit", v || undefined);
+        saveField("actualSaleUnit", v);
     }
   }
 
@@ -830,14 +845,34 @@ function InlineLineRow({
         </select>
       </TableCell>
       <TableCell className="p-0">
-        <input
-          value={costVal}
-          onChange={(e) => setCostVal(e.target.value)}
-          onBlur={onBlurCost}
-          onKeyDown={kd}
-          className={`${INPUT_CLS} w-full text-right tabular-nums`}
-          placeholder="0.00"
-        />
+        <div className="relative flex items-center">
+          <input
+            value={costVal}
+            onChange={(e) => setCostVal(e.target.value)}
+            onBlur={onBlurCost}
+            onKeyDown={kd}
+            className={`${INPUT_CLS} w-full text-right tabular-nums ${line.priceOverride ? "pr-5 ring-1 ring-[#FF9900]/40" : ""}`}
+            placeholder="0.00"
+            title={line.priceOverride ? "Cost/supplier locked from auto-recalc — click lock to unlock" : undefined}
+          />
+          {line.priceOverride && (
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch(`/api/ticket-lines/${line.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ priceOverride: false }),
+                });
+                router.refresh();
+              }}
+              title="Unlock — allow auto-pick to overwrite cost/supplier again"
+              className="absolute right-1 text-[#FF9900] hover:text-[#E0E0E0]"
+            >
+              <Lock className="size-3" />
+            </button>
+          )}
+        </div>
       </TableCell>
       <TableCell className="p-0">
         <input
@@ -1342,6 +1377,71 @@ function InlineLineRow({
       </TableRow>
     ))}
 
+    {/* Supplier grey-zone prompt */}
+    {supplierPrompt && (
+      <tr>
+        <td colSpan={20}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setSupplierPrompt(null)}>
+            <div className="bg-[#0F0F0F] border-2 border-[#3399FF] rounded-lg p-4 w-[480px]" onClick={(e) => e.stopPropagation()}>
+              <div className="text-sm font-bold text-[#3399FF] mb-2">Did you mean…?</div>
+              <div className="text-xs text-[#ccc] mb-3">
+                You typed <span className="font-mono bg-[#1A1A1A] px-1.5 py-0.5 rounded text-[#FFCC00]">{supplierPrompt.typed}</span> — possible existing suppliers:
+              </div>
+              <div className="space-y-1 mb-4">
+                {supplierPrompt.candidates.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={async () => {
+                      await fetch(`/api/ticket-lines/${line.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          supplierId: c.id,
+                          supplierName: c.name,
+                          _supplierTypedAlias: supplierPrompt.typed,
+                        }),
+                      });
+                      setSupplierVal(c.name);
+                      setSupplierPrompt(null);
+                      router.refresh();
+                    }}
+                    className="w-full flex items-center justify-between gap-2 text-xs bg-[#1A1A1A] hover:bg-[#222] border border-[#333] hover:border-[#3399FF] rounded px-3 py-2 text-left transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#3399FF] font-bold">→</span>
+                      <span className="text-[#E0E0E0] font-medium">{c.name}</span>
+                      {c.matchedOn === "alias" && (
+                        <span className="text-[10px] text-[#888]">(alias: {c.matchedText})</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[#888] tabular-nums">{(c.score * 100).toFixed(0)}%</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="outline" onClick={() => setSupplierPrompt(null)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  className="bg-[#FF6600] hover:bg-[#FF7711] text-black font-bold"
+                  onClick={async () => {
+                    await fetch(`/api/ticket-lines/${line.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ supplierName: supplierPrompt.typed, _supplierConfirmAsNew: true }),
+                    });
+                    setSupplierPrompt(null);
+                    router.refresh();
+                  }}
+                >
+                  Create new "{supplierPrompt.typed}"
+                </Button>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )}
+
     {/* Price match approval modal */}
     {priceMatchData && (
       <tr>
@@ -1792,26 +1892,55 @@ export function TicketDetail({
   }
 
   function handleGenerateOrderList() {
-    const orderLines = ticket.lines.filter((l) => {
+    type Line = (typeof ticket.lines)[number];
+
+    function esc(s: string) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    const needsOrder = (l: Line) => {
       if (l.status === "ORDERED" && l.supplierName === "STOCK") return false;
       const fs = l.fromStock ?? 0;
       const q = Number(l.qty || 0);
-      const toOrd = fs > 0 ? Math.max(0, q - fs) : q;
-      return toOrd > 0;
+      return (fs > 0 ? Math.max(0, q - fs) : q) > 0;
+    };
+
+    // Group children under parents, then group parents by section in first-appearance order.
+    const allLines = ticket.lines.filter((l) => !(l.status === "ORDERED" && l.supplierName === "STOCK"));
+    const parents = allLines.filter((l) => !l.parentLineId);
+    const childrenByParent = new Map<string, Line[]>();
+    for (const l of allLines) {
+      if (l.parentLineId) {
+        const arr = childrenByParent.get(l.parentLineId) || [];
+        arr.push(l);
+        childrenByParent.set(l.parentLineId, arr);
+      }
+    }
+
+    // Keep parent if parent itself needs ordering OR any of its BOM children do.
+    const visibleParents = parents.filter((p) => {
+      if (needsOrder(p)) return true;
+      return (childrenByParent.get(p.id) || []).some(needsOrder);
     });
 
-    if (orderLines.length === 0) {
+    if (visibleParents.length === 0) {
       alert("All lines are covered from stock — nothing to order.");
       return;
+    }
+
+    const sectionOrder: string[] = [];
+    const sectionMap = new Map<string, Line[]>();
+    for (const p of visibleParents) {
+      const sec = p.sectionLabel || "—";
+      if (!sectionMap.has(sec)) {
+        sectionOrder.push(sec);
+        sectionMap.set(sec, []);
+      }
+      sectionMap.get(sec)!.push(p);
     }
 
     const customerName = ticket.payingCustomer?.name || "—";
     const siteName = ticket.site?.siteName || "—";
     const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-
-    function esc(s: string) {
-      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
 
     let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Order List — CP-${String(ticket.ticketNo).padStart(4, "0")}</title><style>
       *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,'Helvetica Neue',Arial,sans-serif}
@@ -1826,6 +1955,9 @@ export function TicketDetail({
       td{padding:6px 8px;border-bottom:1px solid #ccc;font-size:11px;vertical-align:top}
       .r{text-align:right}
       .stock{color:#888;font-size:9px;font-style:italic}
+      .sec td{background:#000;color:#fff;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:10px;padding:6px 8px}
+      .child td{background:#fafafa;color:#444;font-size:10px}
+      .child .desc{padding-left:22px}
       .total{font-weight:700;border-top:2px solid #000;font-size:12px}
       @page{margin:14mm}
     </style></head><body>
@@ -1836,21 +1968,22 @@ export function TicketDetail({
         <div><b>Customer:</b> ${esc(customerName)}</div>
         <div><b>Site:</b> ${esc(siteName)}</div>
         <div><b>Date:</b> ${today}</div>
-        <div><b>Lines:</b> ${orderLines.length}</div>
+        <div><b>Sections:</b> ${sectionOrder.length}</div>
       </div>
       <table><thead><tr>
         <th style="width:30px">#</th>
         <th>Description</th>
         <th class="r" style="width:60px">Qty</th>
         <th style="width:45px">Unit</th>
-        <th style="width:120px">Supplier</th>
+        <th style="width:140px">Supplier</th>
         <th class="r" style="width:70px">Unit £</th>
         <th class="r" style="width:80px">Total £</th>
         <th>Notes</th>
       </tr></thead><tbody>`;
 
     let grandTotal = 0;
-    orderLines.forEach((l, i) => {
+    let lineNo = 0;
+    function renderRow(l: Line, isChild: boolean): string {
       const fs = l.fromStock ?? 0;
       const q = Number(l.qty || 0);
       const toOrd = fs > 0 ? Math.max(0, q - fs) : q;
@@ -1858,17 +1991,30 @@ export function TicketDetail({
       const lineTotal = toOrd * cost;
       grandTotal += lineTotal;
       const stockNote = fs > 0 ? `<div class="stock">${fs} from stock</div>` : "";
-      html += `<tr>
-        <td>${i + 1}</td>
-        <td><b>${esc(l.description)}</b>${stockNote}</td>
-        <td class="r"><b>${toOrd}</b></td>
+      const numCell = isChild ? "" : String(++lineNo);
+      const cls = isChild ? "child" : "";
+      const descCls = isChild ? "desc" : "";
+      const descPrefix = isChild ? "└ " : "";
+      return `<tr class="${cls}">
+        <td>${numCell}</td>
+        <td class="${descCls}">${isChild ? "" : "<b>"}${descPrefix}${esc(l.description)}${isChild ? "" : "</b>"}${stockNote}</td>
+        <td class="r">${isChild ? toOrd : `<b>${toOrd}</b>`}</td>
         <td>${l.unit}</td>
         <td>${esc(l.supplierName && l.supplierName !== "MIXED" ? l.supplierName : "—")}</td>
         <td class="r">${cost > 0 ? "£" + cost.toFixed(2) : "—"}</td>
         <td class="r">${lineTotal > 0 ? "£" + lineTotal.toFixed(2) : "—"}</td>
         <td style="font-size:9px;color:#666">${esc(l.internalNotes || "")}</td>
       </tr>`;
-    });
+    }
+
+    for (const sec of sectionOrder) {
+      html += `<tr class="sec"><td colspan="8">${esc(sec)}</td></tr>`;
+      for (const p of sectionMap.get(sec)!) {
+        if (needsOrder(p)) html += renderRow(p, false);
+        const kids = (childrenByParent.get(p.id) || []).filter(needsOrder);
+        for (const c of kids) html += renderRow(c, true);
+      }
+    }
 
     html += `<tr class="total">
       <td colspan="6" class="r">TOTAL</td>
@@ -2063,6 +2209,15 @@ export function TicketDetail({
   const [poSiteId, setPoSiteId] = useState(ticket.site?.id || "");
   const [poNotes, setPoNotes] = useState("");
 
+  // ── Combine to BOM sheet state ──
+  const [bomCombineOpen, setBomCombineOpen] = useState(false);
+  const [bomCombineSubmitting, setBomCombineSubmitting] = useState(false);
+  const [bomCombineProductCode, setBomCombineProductCode] = useState("");
+  const [bomCombineDescription, setBomCombineDescription] = useState("");
+  const [bomCombineQty, setBomCombineQty] = useState("1");
+  const [bomCombineUnit, setBomCombineUnit] = useState("EA");
+  const [bomCombineCost, setBomCombineCost] = useState("");
+
   // Filter sites by customer commercial links — ONLY show linked sites
   const filteredSites = useMemo(() => {
     if (!commercialLinks || commercialLinks.length === 0) return sites || [];
@@ -2072,6 +2227,36 @@ export function TicketDetail({
     if (customerLinkSiteIds.length === 0) return [];
     return (sites || []).filter((s) => customerLinkSiteIds.includes(s.id));
   }, [sites, commercialLinks, ticket.payingCustomer.id]);
+
+  // ── Assign site to ticket ──
+  // The ticket header had no UI to set a site when one wasn't assigned, which
+  // blocked transactional state changes that require a site (SITE_REQUIRED).
+  const [assigningSite, setAssigningSite] = useState(false);
+  async function handleAssignSite(siteId: string) {
+    if (!siteId) return;
+    setAssigningSite(true);
+    try {
+      const link = (commercialLinks || []).find(
+        (cl) => cl.customerId === ticket.payingCustomer.id && cl.siteId === siteId
+      );
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteId,
+          siteCommercialLinkId: link?.id ?? null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || err.error || "Failed to assign site");
+        return;
+      }
+      window.location.reload();
+    } finally {
+      setAssigningSite(false);
+    }
+  }
 
   async function handleCreatePO() {
     if (!poNo.trim()) return;
@@ -2161,13 +2346,36 @@ export function TicketDetail({
             <span className="text-sm text-[#888888]">
               {ticket.payingCustomer.name}
             </span>
-            {ticket.site && (
-              <>
-                <span className="text-[#888888]">/</span>
-                <span className="text-sm text-[#888888]">
-                  {ticket.site.siteName}
-                </span>
-              </>
+            <span className="text-[#888888]">/</span>
+            {ticket.site ? (
+              <span className="text-sm text-[#888888]">
+                {ticket.site.siteName}
+              </span>
+            ) : (
+              <Select
+                value=""
+                onValueChange={(v) => handleAssignSite(v ?? "")}
+                disabled={assigningSite}
+              >
+                <SelectTrigger className="h-6 text-[10px] px-2 bg-[#222222] text-[#888888] border-[#333333] hover:text-[#FF6600] hover:border-[#FF6600] gap-1">
+                  <Plus className="size-3" />
+                  <SelectValue placeholder={assigningSite ? "Assigning…" : "Add Site"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredSites.length === 0 ? (
+                    <div className="px-3 py-2 text-[11px] text-[#888888]">
+                      No sites linked to {ticket.payingCustomer.name}.
+                      Link one in the customer record first.
+                    </div>
+                  ) : (
+                    filteredSites.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.siteName}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             )}
             <span className="text-xs text-[#888888] ml-2">
               ID: {ticket.id.slice(0, 8)}
@@ -2392,6 +2600,9 @@ export function TicketDetail({
           </TabsTrigger>
           <TabsTrigger value="procurement">
             Procurement ({procurementOrders.length})
+          </TabsTrigger>
+          <TabsTrigger value="pods">
+            PODs{ticket.payingCustomer.podRequired ? " ⚠" : ""}
           </TabsTrigger>
         </TabsList>
 
@@ -2688,8 +2899,216 @@ export function TicketDetail({
                       ? "Creating..."
                       : `Convert ${selectedLineIds.size} to Invoice`}
                   </Button>
+                  <Button
+                    onClick={async () => {
+                      const label = prompt(
+                        `Move ${selectedLineIds.size} line(s) to section:\n\n(Enter a section name, or leave blank to clear section)`,
+                        "",
+                      );
+                      if (label === null) return;
+                      const nextLabel = label.trim() === "" ? null : label.trim();
+                      await fetch(
+                        `/api/tickets/${ticket.id}/lines/move-to-section`,
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            lineIds: [...selectedLineIds],
+                            sectionLabel: nextLabel,
+                          }),
+                        },
+                      );
+                      setSelectedLineIds(new Set());
+                      router.refresh();
+                    }}
+                    size="sm"
+                    className="bg-[#FF9900] text-black hover:bg-[#DD7700] font-bold"
+                  >
+                    Move {selectedLineIds.size} to section
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (selectedLineIds.size < 2) {
+                        alert("Select at least 2 lines to combine into a BOM");
+                        return;
+                      }
+                      const selected = activeLines.filter((l) =>
+                        selectedLineIds.has(l.id),
+                      );
+                      const seedDesc = selected
+                        .map((l) => l.description)
+                        .join(" + ");
+                      setBomCombineProductCode("");
+                      setBomCombineDescription(seedDesc);
+                      setBomCombineQty("1");
+                      setBomCombineUnit(selected[0]?.unit || "EA");
+                      setBomCombineCost("");
+                      setBomCombineOpen(true);
+                    }}
+                    size="sm"
+                    className="bg-[#9966FF] text-black hover:bg-[#8855EE] font-bold"
+                  >
+                    Combine {selectedLineIds.size} to BOM
+                  </Button>
                 </div>
               )}
+
+              <Sheet
+                open={bomCombineOpen}
+                onOpenChange={(open) => {
+                  if (!bomCombineSubmitting) setBomCombineOpen(open);
+                }}
+              >
+                <SheetContent side="right">
+                  <SheetHeader>
+                    <SheetTitle>Combine into BOM</SheetTitle>
+                    <SheetDescription>
+                      The {selectedLineIds.size} selected lines become components of a
+                      new parent line. The parent carries the cost (e.g. the
+                      bundle SKU price); components remain for bill-matching.
+                    </SheetDescription>
+                  </SheetHeader>
+                  <div className="flex flex-col gap-4 px-4">
+                    <div className="space-y-1.5">
+                      <Label>Parent product code</Label>
+                      <Input
+                        value={bomCombineProductCode}
+                        onChange={(e) =>
+                          setBomCombineProductCode(e.target.value)
+                        }
+                        placeholder="e.g. PROCB2500RT"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Parent description *</Label>
+                      <Input
+                        value={bomCombineDescription}
+                        onChange={(e) =>
+                          setBomCombineDescription(e.target.value)
+                        }
+                        placeholder="e.g. Crossbox MPRO 3 Outlet Shower Valve"
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Qty *</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={bomCombineQty}
+                          onChange={(e) => setBomCombineQty(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Unit</Label>
+                        <Select
+                          value={bomCombineUnit}
+                          onValueChange={(v) => setBomCombineUnit(v ?? "EA")}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["EA", "M", "LENGTH", "PACK", "LOT", "SET"].map(
+                              (u) => (
+                                <SelectItem key={u} value={u}>
+                                  {u}
+                                </SelectItem>
+                              ),
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Unit cost £</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={bomCombineCost}
+                          onChange={(e) => setBomCombineCost(e.target.value)}
+                          placeholder="303.00"
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs text-[#888888] border border-[#333333] bg-[#161616] p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-[#666666] mb-1">
+                        Components ({selectedLineIds.size})
+                      </div>
+                      {activeLines
+                        .filter((l) => selectedLineIds.has(l.id))
+                        .map((l) => (
+                          <div
+                            key={l.id}
+                            className="text-[#AAAAAA] truncate"
+                          >
+                            <span className="text-[#3399FF] mr-1">└</span>
+                            {l.description}
+                          </div>
+                        ))}
+                    </div>
+                    <SheetFooter>
+                      <Button
+                        onClick={async () => {
+                          if (!bomCombineDescription.trim()) {
+                            alert("Parent description is required");
+                            return;
+                          }
+                          setBomCombineSubmitting(true);
+                          try {
+                            const res = await fetch(
+                              `/api/tickets/${ticket.id}/lines/combine-to-bom`,
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  childLineIds: [...selectedLineIds],
+                                  productCode:
+                                    bomCombineProductCode.trim() || undefined,
+                                  description: bomCombineDescription.trim(),
+                                  qty: Number(bomCombineQty || 1),
+                                  unit: bomCombineUnit,
+                                  expectedCostUnit: Number(
+                                    bomCombineCost || 0,
+                                  ),
+                                }),
+                              },
+                            );
+                            const data = await res
+                              .json()
+                              .catch(() => null as unknown as { error?: string; cascade?: { cascadedParents: number; skippedReason: string | null } });
+                            if (!res.ok) {
+                              alert((data as { error?: string })?.error || "Failed to combine");
+                              return;
+                            }
+                            const cascaded = data?.cascade?.cascadedParents || 0;
+                            if (cascaded > 0) {
+                              alert(`BOM created. Cascaded to ${cascaded} linked sibling set${cascaded === 1 ? "" : "s"}.`);
+                            }
+                            setBomCombineOpen(false);
+                            setSelectedLineIds(new Set());
+                            router.refresh();
+                          } finally {
+                            setBomCombineSubmitting(false);
+                          }
+                        }}
+                        disabled={
+                          bomCombineSubmitting ||
+                          !bomCombineDescription.trim()
+                        }
+                        className="bg-[#9966FF] text-black hover:bg-[#8855EE] font-bold"
+                      >
+                        {bomCombineSubmitting
+                          ? "Combining..."
+                          : "Create BOM parent"}
+                      </Button>
+                    </SheetFooter>
+                  </div>
+                </SheetContent>
+              </Sheet>
 
               {/* Add Section */}
               <Sheet
@@ -3240,6 +3659,14 @@ export function TicketDetail({
               parentLineId: l.parentLineId || null,
               parentDescription: l.parentLineId ? ticket.lines.find((p) => p.id === l.parentLineId)?.description || null : null,
             }))}
+          />
+        </TabsContent>
+
+        <TabsContent value="pods" className="mt-4">
+          <PODFolder
+            ticketId={ticket.id}
+            podRequired={!!ticket.payingCustomer.podRequired}
+            ticketLines={ticket.lines.map((l) => ({ id: l.id, description: l.description }))}
           />
         </TabsContent>
       </Tabs>

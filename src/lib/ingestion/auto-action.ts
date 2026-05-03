@@ -15,6 +15,21 @@
 import { prisma } from "@/lib/prisma";
 import { parseBillText } from "@/lib/ingestion/bill-parser";
 import { processBill } from "@/lib/finance/bill-processor";
+import { parseYesssPoText, type ParsedYesssPO } from "@/lib/ingestion/yesss-po-parser";
+import { parsePOWithAI, type ParsedAIPO } from "@/lib/ingestion/ai-po-parser";
+import { generateSupplierPODrafts } from "@/lib/procurement/supplier-po-drafter";
+import { triggerRegistry, type TriggerContext } from "@/lib/ingestion/trigger-registry";
+import { intentForClassification, type MessageClassification } from "@/lib/ingestion/classifier";
+import { enqueueUnresolvedParty } from "@/lib/parties/review-queue";
+// Handler registration: importing the module triggers triggerRegistry.register()
+// at the bottom of each handler file. Add new doctype handlers below.
+import "@/lib/ingestion/handlers/statement-handler";
+import "@/lib/ingestion/handlers/ack-handler";
+import "@/lib/ingestion/handlers/credit-note-handler";
+import "@/lib/ingestion/handlers/delivery-handler";
+import "@/lib/ingestion/handlers/supplier-quote-handler";
+import "@/lib/ingestion/handlers/return-request-handler";
+import "@/lib/ingestion/handlers/po-handler";
 import fs from "fs";
 import path from "path";
 
@@ -90,6 +105,31 @@ export async function processClassifiedEvents(): Promise<ActionResult[]> {
     const fromName = data.from?.name || "";
 
     try {
+      // Registry-first dispatch: any (docType, intent) registered via
+      // triggerRegistry.register() takes priority over the legacy switch
+      // below. Legacy switch is the fallback for handlers not yet migrated.
+      const classification = (event.eventKind ?? "UNKNOWN") as MessageClassification;
+      const ctx: TriggerContext = {
+        eventId: event.id,
+        classification,
+        intent: intentForClassification(classification),
+        subject,
+        text,
+        fromEmail,
+        fromName,
+        data,
+      };
+      const registered = await triggerRegistry.dispatch(ctx);
+      if (registered) {
+        results.push({
+          eventId: registered.eventId,
+          action: registered.action,
+          success: registered.success,
+          details: registered.details,
+        });
+        continue;
+      }
+
       switch (event.eventKind) {
         case "PO_DOCUMENT":
           results.push(await handlePODocument(event.id, subject, text, fromEmail, fromName));
@@ -171,7 +211,7 @@ async function findTicketByContext(subject: string, text: string, fromEmail: str
   return null;
 }
 
-function extractPONumber(subject: string, text: string): string | null {
+export function extractPONumber(subject: string, text: string): string | null {
   // Try subject first
   const subjectMatch = subject.match(/(?:PO|Purchase Order|P\.O\.?|Order)\s*#?\s*:?\s*([A-Z0-9/\-_.]+)/i)
     || subject.match(/\b(PO[A-Z]{0,3}\d{3,})\b/i)
@@ -187,123 +227,333 @@ function extractPONumber(subject: string, text: string): string | null {
 
 // ─── Action Handlers ────────────────────────────────────────────────────────
 
-async function handlePODocument(eventId: string, subject: string, text: string, fromEmail: string, fromName: string): Promise<ActionResult> {
-  const poNo = extractPONumber(subject, text);
-  const ticketId = await findTicketByContext(subject, text, fromEmail);
+export async function handlePODocument(eventId: string, subject: string, text: string, fromEmail: string, fromName: string): Promise<ActionResult> {
+  // 1. Load all PDF text (embedded + on-disk attachments)
+  const pdfText = await loadEventPdfText(eventId, text);
 
-  // Find customer from sender — try email domain, name, anything
+  // 2. Try template parsers first (fast, deterministic, free). Yesss is wired;
+  //    add more here (BES, Wolseley etc) as templates land. If no template
+  //    matches, fall through to the AI fallback.
+  let parsedYesss: ParsedYesssPO | null = null;
+  let parsedAI: ParsedAIPO | null = null;
+  if (pdfText) parsedYesss = parseYesssPoText(pdfText);
+
+  // Defensive: if the PDF parses as a PO whose "Supplier" header names someone
+  // other than Cromwell, it's not a sales PO to us.
+  if (parsedYesss && parsedYesss.direction === "OUTBOUND_REFLECTION") {
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: { status: "DISMISSED", errorMessage: `PO PDF names Cromwell as raiser, not supplier — skipped CustomerPO creation` },
+    });
+    return { eventId, action: "PO_DOCUMENT", success: true, details: `${parsedYesss.poNo} — outbound reflection, not a sales PO` };
+  }
+
+  if (!parsedYesss && pdfText) {
+    parsedAI = await parsePOWithAI(pdfText);
+  }
+
+  // Unified view so downstream code doesn't care about the source
+  const parsed: {
+    poNo: string;
+    poDate: string | null;
+    issuer: string | null;
+    totalExVat: number;
+    lines: Array<{ productCode: string; description: string; qty: number; unitPrice: number; lineTotal: number }>;
+    quoteRefCandidate: string | null;
+    branch: string;
+    source: "YESSS_TEMPLATE" | "AI_PARSER";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+  } | null = parsedYesss
+    ? {
+        poNo: parsedYesss.poNo,
+        poDate: parsedYesss.poDate,
+        issuer: parsedYesss.issuer,
+        totalExVat: parsedYesss.totalExVat,
+        lines: parsedYesss.lines,
+        quoteRefCandidate: parsedYesss.quoteRefCandidate,
+        branch: parsedYesss.branch,
+        source: "YESSS_TEMPLATE",
+        confidence: "HIGH",
+      }
+    : parsedAI
+      ? {
+          poNo: parsedAI.poNo,
+          poDate: parsedAI.poDate,
+          issuer: parsedAI.issuer,
+          totalExVat: parsedAI.totalExVat,
+          lines: parsedAI.lines,
+          quoteRefCandidate: parsedAI.quoteRefCandidate,
+          branch: parsedAI.customerName || "AI",
+          source: "AI_PARSER",
+          confidence: parsedAI.confidence,
+        }
+      : null;
+
+  // 3. Extract PO number — parser-first, fallback to regex over subject/body
+  const poNo = parsed?.poNo ?? extractPONumber(subject, pdfText || text);
+
+  // 4. Ticket resolution priority:
+  //    a. Q-number from the PDF (our quote reference — strongest signal)
+  //    b. Existing context match (site/customer/keywords)
+  const qRef = parsed?.quoteRefCandidate
+    ?? (pdfText || text).match(/Q-(\d{10,})/)?.[0]
+    ?? subject.match(/Q-(\d{10,})/)?.[0]
+    ?? null;
+  let ticketId: string | null = null;
+  let linkSource: "QUOTE" | "CONTEXT" | "NONE" = "NONE";
+  if (qRef) {
+    const quote = await prisma.quote.findFirst({
+      where: { quoteNo: qRef },
+      orderBy: { versionNo: "desc" },
+      select: { ticketId: true },
+    });
+    if (quote) { ticketId = quote.ticketId; linkSource = "QUOTE"; }
+  }
+  if (!ticketId) {
+    ticketId = await findTicketByContext(subject, pdfText || text, fromEmail);
+    if (ticketId) linkSource = "CONTEXT";
+  }
+
+  // 5. Customer resolution — sender domain, then name fallback. No auto-create:
+  //    unknown senders park in ReviewQueue (UNRESOLVED_CUSTOMER) for triage.
   const domain = fromEmail.split("@")[1]?.replace(/\.(co\.uk|com|org)$/, "") || "";
-  let customer = await prisma.customer.findFirst({
+  const customer = await prisma.customer.findFirst({
     where: { OR: [
       { name: { contains: domain, mode: "insensitive" } },
       { name: { contains: fromName.split(" ")[0], mode: "insensitive" } },
     ] },
   });
-
-  // If no customer found, try matching by contact email
   if (!customer) {
-    const contact = await prisma.contact.findFirst({
-      where: { email: { contains: domain, mode: "insensitive" } },
-      select: { id: true },
+    const rawValue = fromEmail;
+    await enqueueUnresolvedParty({
+      party: "CUSTOMER",
+      rawValue,
+      description: `PO email from "${fromName}" <${fromEmail}> (subject: "${subject}") — match to existing customer or create.`,
+      entityType: "IngestionEvent",
+      entityId: eventId,
     });
-    // If still no customer, create one from the sender domain
-    if (!customer) {
-      const companyName = domain.charAt(0).toUpperCase() + domain.slice(1);
-      customer = await prisma.customer.create({
-        data: { name: `${companyName} (auto-created from ${fromEmail})` },
+    await prisma.ingestionEvent.update({
+      where: { id: eventId },
+      data: { status: "NEEDS_TRIAGE" },
+    });
+    return { eventId, action: "PO_DOCUMENT", success: false, details: `Unresolved customer (${fromEmail}) — parked in ReviewQueue` };
+  }
+
+  if (!poNo) {
+    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
+    return { eventId, action: "PO_DOCUMENT", success: true, details: "No PO number extractable" };
+  }
+
+  // 6. Check if PO already exists (idempotent)
+  const existing = await prisma.customerPO.findFirst({
+    where: { poNo },
+    include: { lines: true },
+  });
+
+  // Resolve site — from ticket first, then customer's single billable site
+  let resolvedSiteId: string | null = null;
+  if (ticketId) {
+    const t = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { siteId: true } });
+    resolvedSiteId = t?.siteId ?? null;
+  }
+  if (!resolvedSiteId && customer) {
+    const links = await prisma.siteCommercialLink.findMany({
+      where: { customerId: customer.id, isActive: true, billingAllowed: true },
+      orderBy: [{ defaultBillingCustomer: "desc" }],
+      select: { siteId: true },
+    });
+    if (links.length === 1) resolvedSiteId = links[0].siteId;
+  }
+
+  if (!resolvedSiteId) {
+    // Can't proceed without a site — park a review task
+    const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
+    if (anyTicket) {
+      await prisma.task.create({
+        data: {
+          ticketId: anyTicket.id,
+          taskType: "LINK_PO",
+          priority: "HIGH",
+          status: "OPEN",
+          generatedReason: `Customer PO ${poNo} from ${fromName} (${fromEmail}) — site could not be resolved automatically.`,
+        },
       });
     }
+    await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
+    return { eventId, action: "PO_DOCUMENT", success: true, details: `PO ${poNo} — site unresolved, review task raised` };
   }
 
-  if (poNo) {
-    // Check if PO already exists
-    const existing = await prisma.customerPO.findFirst({ where: { poNo } });
-    if (!existing) {
-      // CustomerPO requires a site (transactional activity). Try to resolve one
-      // via the linked ticket, or via the customer's single billable site link.
-      let resolvedSiteId: string | null = null;
-      if (ticketId) {
-        const t = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { siteId: true } });
-        resolvedSiteId = t?.siteId ?? null;
-      }
-      if (!resolvedSiteId && customer) {
-        const links = await prisma.siteCommercialLink.findMany({
-          where: { customerId: customer.id, isActive: true, billingAllowed: true },
-          orderBy: [{ defaultBillingCustomer: "desc" }],
-          select: { siteId: true },
-        });
-        if (links.length === 1) resolvedSiteId = links[0].siteId;
-      }
+  // 7. Create or enrich CustomerPO
+  let po = existing;
+  if (!po) {
+    po = await prisma.customerPO.create({
+      data: {
+        poNo,
+        poType: "STANDARD_FIXED",
+        customerId: customer.id,
+        siteId: resolvedSiteId,
+        ticketId: ticketId || undefined,
+        status: "RECEIVED",
+        poDate: parsed?.poDate ? new Date(parsed.poDate) : null,
+        poLimitValue: parsed?.totalExVat ?? null,
+        issuedBy: parsed?.issuer || fromName,
+        notes: parsed
+          ? `Auto-parsed from ${parsed.branch} PO PDF. Issued by ${parsed.issuer} on ${parsed.poDate}.`
+          : `Auto-created from email: ${subject} (${fromName} <${fromEmail}>)`,
+      },
+      include: { lines: true },
+    });
+  } else if (parsed && !existing!.poLimitValue) {
+    // Shell exists (from an earlier run before parsing was enabled) — backfill
+    po = await prisma.customerPO.update({
+      where: { id: existing!.id },
+      data: {
+        poDate: parsed.poDate ? new Date(parsed.poDate) : existing!.poDate,
+        poLimitValue: parsed.totalExVat,
+        issuedBy: parsed.issuer || existing!.issuedBy,
+        ticketId: ticketId || existing!.ticketId,
+      },
+      include: { lines: true },
+    });
+  }
 
-      if (resolvedSiteId) {
-        await prisma.customerPO.create({
-          data: {
-            poNo,
-            poType: "STANDARD_FIXED",
-            customerId: customer!.id,
-            siteId: resolvedSiteId,
-            ticketId: ticketId || undefined,
-            status: "RECEIVED",
-            notes: `Auto-created from email: ${subject} (${fromName} <${fromEmail}>)`,
-          },
-        });
-
-        // If no ticket linked, create a work queue task to link it
-        if (!ticketId) {
-          const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
-          if (anyTicket) {
-            await prisma.task.create({
-              data: {
-                ticketId: anyTicket.id,
-                taskType: "LINK_PO",
-                priority: "MEDIUM",
-                status: "OPEN",
-                generatedReason: `Customer PO ${poNo} received from ${fromName} — needs linking to correct ticket`,
-              },
-            });
-          }
-        }
-      } else {
-        // Cannot resolve a site — park as a review task instead of creating an
-        // orphan PO. A human must assign customer + site before the PO is created.
-        const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
-        if (anyTicket) {
-          await prisma.task.create({
-            data: {
-              ticketId: anyTicket.id,
-              taskType: "LINK_PO",
-              priority: "HIGH",
-              status: "OPEN",
-              generatedReason: `Customer PO ${poNo} from ${fromName} (${fromEmail}) — site could not be resolved automatically. ` +
-                `Assign customer + site, then create the PO manually.`,
-            },
-          });
-        }
-      }
+  // 8. If we have parsed lines and the PO has none, create TicketLines +
+  //    CustomerPOLines in one pass. LOW-confidence AI parses skip auto-
+  //    creation — they land as a shell with a review task attached so the
+  //    user can verify before money-side effects fire.
+  let linesCreated = 0;
+  const autoCreateAllowed = parsed && parsed.confidence !== "LOW";
+  if (parsed && parsed.confidence === "LOW" && ticketId) {
+    await prisma.task.create({
+      data: {
+        ticketId,
+        taskType: "REVIEW_AUTO_PO",
+        priority: "HIGH",
+        status: "OPEN",
+        generatedReason: `PO ${poNo} parsed by AI with LOW confidence — lines not auto-created. Review the PDF and populate manually.`,
+      },
+    });
+  }
+  if (parsed && autoCreateAllowed && po!.lines.length === 0 && ticketId) {
+    for (const pl of parsed.lines) {
+      const tl = await prisma.ticketLine.create({
+        data: {
+          ticketId,
+          lineType: "MATERIAL",
+          description: pl.description,
+          productCode: pl.productCode || null,
+          qty: pl.qty,
+          unit: "EA",
+          siteId: resolvedSiteId,
+          payingCustomerId: customer.id,
+          status: "ORDERED",
+          actualSaleUnit: pl.unitPrice,
+          actualSaleTotal: Math.round(pl.unitPrice * pl.qty * 100) / 100,
+        },
+      });
+      await prisma.customerPOLine.create({
+        data: {
+          customerPOId: po!.id,
+          ticketLineId: tl.id,
+          description: pl.productCode ? `${pl.productCode} — ${pl.description}` : pl.description,
+          qty: pl.qty,
+          agreedUnitPrice: pl.unitPrice,
+          agreedTotal: Math.round(pl.unitPrice * pl.qty * 100) / 100,
+          remainingQty: pl.qty,
+          remainingValue: Math.round(pl.unitPrice * pl.qty * 100) / 100,
+        },
+      });
+      linesCreated++;
     }
   }
 
-  // Log event on ticket if linked
+  // 9. Transition ticket QUOTED → ORDERED (only on quote-linked POs, to avoid
+  //    forcing stub tickets out of PRICING prematurely)
+  let draftCount = 0;
+  if (ticketId && linkSource === "QUOTE") {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { status: "ORDERED", orderedAt: new Date() },
+    }).catch(() => { /* ignore if the status enum value isn't ORDERED for this ticket mode */ });
+
+    // 9b. Auto-generate DRAFT supplier POs for every line with a winning price
+    try {
+      const drafts = await generateSupplierPODrafts(ticketId);
+      draftCount = drafts.drafts.length;
+    } catch (err) {
+      console.warn(`[auto-action] generateSupplierPODrafts failed for ${ticketId}:`, err);
+    }
+  }
+
+  // 10. Timeline event on the ticket
   if (ticketId) {
     await prisma.event.create({
       data: {
         ticketId,
         eventType: "PO_RECEIVED",
         timestamp: new Date(),
-        notes: `Customer PO received — ${poNo || "ref pending"} from ${fromName} (${fromEmail})`,
+        notes: `Customer PO ${poNo} received from ${fromName}${linkSource === "QUOTE" ? ` against ${qRef}` : ""}. ${linesCreated} lines auto-created.`,
       },
     });
   }
 
-  // ALWAYS action — the PO is created, it's in the register
+  // If no ticket linked, raise a review task so user can assign
+  if (!ticketId) {
+    const anyTicket = await prisma.ticket.findFirst({ orderBy: { createdAt: "desc" } });
+    if (anyTicket) {
+      await prisma.task.create({
+        data: {
+          ticketId: anyTicket.id,
+          taskType: "LINK_PO",
+          priority: "MEDIUM",
+          status: "OPEN",
+          generatedReason: `Customer PO ${poNo} received from ${fromName} — needs linking to correct ticket`,
+        },
+      });
+    }
+  }
+
   await prisma.ingestionEvent.update({ where: { id: eventId }, data: { status: "ACTIONED" } });
 
-  return {
-    eventId,
-    action: "PO_DOCUMENT",
-    success: true,
-    details: `PO: ${poNo || "unknown"} CREATED, ticket: ${ticketId ? "linked" : "task created"}, customer: ${customer?.name || "auto-created"}`,
-  };
+  const summary = parsed
+    ? `PO ${poNo} — ${parsed.source} · ${parsed.branch} · ${parsed.lines.length} lines £${parsed.totalExVat.toFixed(2)} · confidence=${parsed.confidence} · ticket ${ticketId ? (linkSource === "QUOTE" ? `linked via ${qRef}` : "context-linked") : "review task"} · ${linesCreated} lines created · ${draftCount} supplier PO draft(s)`
+    : `PO ${poNo} — shell only (PDF not parseable) · ticket ${ticketId ? "linked" : "review task"}`;
+  return { eventId, action: "PO_DOCUMENT", success: true, details: summary };
+}
+
+/**
+ * Load all PDF text for an ingestion event: first from the extractedText
+ * (embedded attachment markers), then from on-disk email-attachments keyed
+ * by the event id prefix.
+ *
+ * Returns empty string if nothing found.
+ */
+async function loadEventPdfText(eventId: string, extractedText: string): Promise<string> {
+  // Option A — embedded after "--- filename ---" marker from the parsed message
+  let out = "";
+  const attachmentMarker = extractedText.indexOf("--- ");
+  if (attachmentMarker >= 0) out += extractedText.substring(attachmentMarker);
+
+  // Option B — on-disk PDFs keyed by the event id prefix
+  const attachDir = path.join(process.cwd(), "public", "email-attachments");
+  if (fs.existsSync(attachDir)) {
+    const eventPrefix = eventId.slice(0, 8);
+    const pdfs = fs.readdirSync(attachDir).filter(
+      (f) => f.startsWith(eventPrefix) && f.toLowerCase().endsWith(".pdf"),
+    );
+    for (const pdfFile of pdfs) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require("pdf-parse/lib/pdf-parse");
+        const buffer = fs.readFileSync(path.join(attachDir, pdfFile));
+        const { text: pdfTxt } = await pdfParse(buffer);
+        out += `\n--- ${pdfFile} ---\n${pdfTxt || ""}`;
+      } catch {
+        // skip unreadable PDFs
+      }
+    }
+  }
+  return out;
 }
 
 async function handleOrderAck(eventId: string, subject: string, text: string, fromEmail: string, fromName: string): Promise<ActionResult> {

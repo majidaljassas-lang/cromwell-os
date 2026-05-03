@@ -71,10 +71,18 @@ export async function processBillThread(threadId: string): Promise<PipelineResul
       participants: thread.participants,
     });
 
+    if (!supplierId) {
+      result.errors.push(
+        `Supplier could not be resolved (extracted name: "${extracted.supplierName ?? "—"}"). ` +
+          `Parked in ReviewQueue (UNRESOLVED_SUPPLIER). Bill not created until matched.`,
+      );
+      return result;
+    }
+
     const invoiceDate = extracted.invoiceDate ? new Date(extracted.invoiceDate) : new Date();
     const dueDate = extracted.dueDate
       ? new Date(extracted.dueDate)
-      : inferDueDate(invoiceDate, rawText, supplierId ? undefined : null);
+      : inferDueDate(invoiceDate, rawText);
 
     const billNo = extracted.invoiceNo || `THREAD-${threadId.slice(0, 8)}`;
 

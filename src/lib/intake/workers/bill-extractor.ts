@@ -12,8 +12,9 @@ import { prisma } from "@/lib/prisma";
 import { parseBillText } from "@/lib/ingestion/bill-parser";
 import { markStatus, bumpRetry } from "../queue";
 import { logAudit } from "@/lib/ingestion/audit";
+import { enqueueUnresolvedParty } from "@/lib/parties/review-queue";
 
-export async function runBillExtractor(docId: string): Promise<"PARSED" | "OCR_REQUIRED" | "ERROR"> {
+export async function runBillExtractor(docId: string): Promise<"PARSED" | "OCR_REQUIRED" | "ERROR" | "REVIEW_REQUIRED"> {
   const doc = await prisma.intakeDocument.findUnique({ where: { id: docId } });
   if (!doc) return "ERROR";
 
@@ -43,18 +44,19 @@ export async function runBillExtractor(docId: string): Promise<"PARSED" | "OCR_R
     }
 
     if (!supplierId) {
-      // Create a placeholder supplier stub so the bill can still enter the pipeline.
-      const stub = await prisma.supplier.create({
-        data: { name: parsed.supplierName || `Unknown (${doc.sourceType})` },
+      // No silent stub creation. Park the IntakeDocument and enqueue a review.
+      const rawValue = parsed.supplierName || `Unknown (${doc.sourceType})`;
+      await enqueueUnresolvedParty({
+        party: "SUPPLIER",
+        rawValue,
+        description: `Bill extractor could not resolve supplier "${rawValue}" (IntakeDocument ${doc.id})`,
+        entityType: "IntakeDocument",
+        entityId: doc.id,
       });
-      supplierId = stub.id;
-      await logAudit({
-        objectType: "Supplier",
-        objectId:   stub.id,
-        actionType: "STUB_CREATED",
-        actor:      "SYSTEM",
-        newValue:   { source: "bill-extractor", sourceRef: doc.sourceRef ?? null },
+      await markStatus(docId, "REVIEW_REQUIRED", {
+        errorMessage: `Supplier unresolved: "${rawValue}". Match in ReviewQueue (UNRESOLVED_SUPPLIER) to continue.`,
       });
+      return "REVIEW_REQUIRED";
     }
 
     const billNo = parsed.billNo || `DOC-${doc.id.slice(0, 8)}`;

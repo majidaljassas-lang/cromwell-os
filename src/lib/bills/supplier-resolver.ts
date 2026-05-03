@@ -1,20 +1,22 @@
 /**
  * Supplier resolution for bill ingestion.
  *
- * Tries name → SupplierAlias → email-domain match. If nothing sticks, creates
- * a stub so the bill can still enter the pipeline — a human triage step can
- * merge stubs later.
+ * Tries name → SupplierAlias → email-domain match. Returns null if nothing
+ * sticks — the caller is expected to park the upstream artefact (Bill,
+ * IntakeDocument, etc.) and let the human triage via ReviewQueueItem.
+ *
+ * No more silent stub creation (2026-05-02).
  */
 
 import { prisma } from "@/lib/prisma";
-import { logAudit } from "@/lib/ingestion/audit";
+import { enqueueUnresolvedParty } from "@/lib/parties/review-queue";
 
 export interface ResolveArgs {
   name: string | null;
   participants?: string[];
 }
 
-export async function resolveSupplier(args: ResolveArgs): Promise<string> {
+export async function resolveSupplier(args: ResolveArgs): Promise<string | null> {
   const { name, participants = [] } = args;
 
   if (name) {
@@ -42,18 +44,14 @@ export async function resolveSupplier(args: ResolveArgs): Promise<string> {
     if (hit) return hit.supplierId;
   }
 
-  const stubName = name || (domains[0] ? `Supplier @ ${domains[0]}` : "Unknown Supplier");
-  const stub = await prisma.supplier.create({ data: { name: stubName } });
-
-  await logAudit({
-    objectType: "Supplier",
-    objectId:   stub.id,
-    actionType: "STUB_CREATED",
-    actor:      "SYSTEM",
-    newValue:   { source: "bill-pipeline", extractedName: name, domains },
+  const rawValue = name || domains[0] || "(unknown)";
+  await enqueueUnresolvedParty({
+    party: "SUPPLIER",
+    rawValue,
+    description: `Bill pipeline could not resolve supplier "${rawValue}"${domains.length ? ` (domains: ${domains.join(", ")})` : ""}`,
   });
 
-  return stub.id;
+  return null;
 }
 
 const GENERIC_DOMAINS = new Set([

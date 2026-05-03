@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { ExtractedDocument, ExtractedLineItem } from "./document-extractor";
+import { enqueueUnresolvedParty } from "@/lib/parties/review-queue";
 
 export interface ProcessResult {
   documentType: string;
@@ -75,18 +76,23 @@ export async function processExtractedDocument(
       result.linesProcessed++;
     }
   } else if (doc.documentType === "BILL") {
-    // Create SupplierBill + lines
-    // Find or create supplier
-    let supplierId: string | null = null;
+    // Create SupplierBill + lines. No silent supplier auto-create — unknown
+    // names park in ReviewQueue (UNRESOLVED_SUPPLIER) for human triage.
     const existingSupplier = await prisma.supplier.findFirst({
       where: { name: { contains: supplier, mode: "insensitive" } },
     });
-    if (existingSupplier) {
-      supplierId = existingSupplier.id;
-    } else {
-      const newSupplier = await prisma.supplier.create({ data: { name: supplier } });
-      supplierId = newSupplier.id;
+    if (!existingSupplier) {
+      await enqueueUnresolvedParty({
+        party: "SUPPLIER",
+        rawValue: supplier,
+        description: `Document processor (BILL) could not match supplier "${supplier}" for ticket ${ticketId}.`,
+        entityType: "Ticket",
+        entityId: ticketId,
+      });
+      result.errors.push(`Supplier "${supplier}" unresolved — bill not created. Match in ReviewQueue.`);
+      return result;
     }
+    const supplierId: string = existingSupplier.id;
 
     // Check for duplicate bill
     if (doc.documentRef) {
@@ -181,6 +187,13 @@ async function recalcWinnerSimple(ticketLineId: string) {
     where: { id: winner.id },
     data: { isWinner: true },
   });
+
+  const line = await prisma.ticketLine.findUnique({
+    where: { id: ticketLineId },
+    select: { priceOverride: true },
+  });
+  if (line?.priceOverride) return;
+
   await prisma.ticketLine.update({
     where: { id: ticketLineId },
     data: {

@@ -94,6 +94,9 @@ type Invoice = {
   issuedAt: string | null;
   paidAt: string | null;
   totalSell: Decimal;
+  totalNet: Decimal;
+  totalVat: Decimal;
+  totalGross: Decimal;
   notes: string | null;
   createdAt: string;
   ticket: {
@@ -101,10 +104,18 @@ type Invoice = {
     title: string;
     site: { id: string; siteName: string } | null;
   };
-  customer: { id: string; name: string };
+  customer: { id: string; name: string; poRequiredDefault?: boolean; podRequired?: boolean };
   site: { id: string; siteName: string } | null;
   lines: InvoiceLine[];
   poAllocations: { id: string; allocatedValue: Decimal; status: string }[];
+  payments: {
+    id: string;
+    amount: Decimal;
+    paymentDate: string;
+    paymentMethod: string | null;
+    reference: string | null;
+    notes: string | null;
+  }[];
 };
 
 type CustomerOption = { id: string; name: string };
@@ -233,16 +244,26 @@ export function InvoicesView({
   const [poNoInput, setPoNoInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [payOpen, setPayOpen] = useState(false);
+  const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payMethod, setPayMethod] = useState("");
+  const [payReference, setPayReference] = useState("");
+  const [payNotes, setPayNotes] = useState("");
+  const [payError, setPayError] = useState<string | null>(null);
+
   // Summary counts
   const drafts = invoices.filter((i) => i.status === "DRAFT");
   const sent = invoices.filter((i) => i.status === "SENT");
   const paid = invoices.filter((i) => i.status === "PAID");
   const outstanding = invoices.filter((i) => i.status !== "PAID" && i.status !== "DRAFT" && i.status !== "CREDITED");
 
-  const draftTotal = drafts.reduce((s, i) => s + num(i.totalSell), 0);
-  const sentTotal = sent.reduce((s, i) => s + num(i.totalSell), 0);
-  const paidTotal = paid.reduce((s, i) => s + num(i.totalSell), 0);
-  const outstandingTotal = outstanding.reduce((s, i) => s + num(i.totalSell), 0);
+  const grossOf = (i: Invoice) => num(i.totalGross) || num(i.totalSell);
+  const draftTotal = drafts.reduce((s, i) => s + grossOf(i), 0);
+  const sentTotal = sent.reduce((s, i) => s + grossOf(i), 0);
+  const paidTotal = paid.reduce((s, i) => s + grossOf(i), 0);
+  const outstandingTotal = outstanding.reduce((s, i) => s + grossOf(i), 0);
 
   // Overdue invoices: SENT or OVERDUE status, with days > 0
   const overdueInvoices = useMemo(() => {
@@ -266,8 +287,48 @@ export function InvoicesView({
   async function handleSend(id: string) {
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/sales-invoices/${id}/send`, { method: "POST" });
+      let res = await fetch(`/api/sales-invoices/${id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      // 412 = gate blocked. Show what's missing and offer override.
+      if (res.status === 412) {
+        const j = await res.json();
+        const missingMsg = Array.isArray(j.missing) ? j.missing.join("\n• ") : (j.message ?? "missing evidence");
+        const reason = window.prompt(
+          `Cannot send — missing required evidence:\n\n• ${missingMsg}\n\n` +
+          `Type a reason to OVERRIDE and send anyway, or Cancel to fix the evidence first.`,
+        );
+        if (!reason || !reason.trim()) return;
+        res = await fetch(`/api/sales-invoices/${id}/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ overrideGate: true, overrideReason: reason.trim() }),
+        });
+      }
+
       if (res.ok) router.refresh();
+      else {
+        const j = await res.json().catch(() => ({}));
+        alert(`Send failed: ${j.message ?? j.error ?? `HTTP ${res.status}`}`);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleBundle(id: string) {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/sales-invoices/${id}/bundled-pdf`, { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Bundle failed: ${j.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      if (j.path) window.open(j.path, "_blank");
     } finally {
       setSubmitting(false);
     }
@@ -282,6 +343,58 @@ export function InvoicesView({
         body: JSON.stringify({ status: "PAID", paidAt: new Date().toISOString() }),
       });
       if (res.ok) router.refresh();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function openRecordPayment(inv: Invoice) {
+    const paid = (inv.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
+    const gross = num(inv.totalGross) || num(inv.totalSell);
+    const outstanding = gross - paid;
+    setPayInvoice(inv);
+    setPayAmount(outstanding > 0 ? outstanding.toFixed(2) : "");
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayMethod("");
+    setPayReference("");
+    setPayNotes("");
+    setPayError(null);
+    setPayOpen(true);
+  }
+
+  async function handleRecordPayment() {
+    if (!payInvoice) return;
+    const amt = Number(payAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setPayError("Enter a positive amount");
+      return;
+    }
+    if (!payDate) {
+      setPayError("Enter a payment date");
+      return;
+    }
+    setSubmitting(true);
+    setPayError(null);
+    try {
+      const res = await fetch(`/api/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salesInvoiceId: payInvoice.id,
+          amount: amt,
+          paymentDate: new Date(payDate).toISOString(),
+          paymentMethod: payMethod.trim() || null,
+          reference: payReference.trim() || null,
+          notes: payNotes.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        setPayOpen(false);
+        router.refresh();
+      } else {
+        const err = await res.json().catch(() => null);
+        setPayError(err?.error || "Failed to record payment");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -415,7 +528,7 @@ export function InvoicesView({
               <TableHead>Status</TableHead>
               {activeTab === "OVERDUE_CHASE" && <TableHead>Days Out</TableHead>}
               <TableHead>PO No</TableHead>
-              <TableHead className="text-right">Total Sell</TableHead>
+              <TableHead className="text-right">Gross Total</TableHead>
               <TableHead>PO Match</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -466,7 +579,17 @@ export function InvoicesView({
                           {ticketShortRef(inv.ticket)}
                         </Link>
                       </TableCell>
-                      <TableCell>{inv.customer.name}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{inv.customer.name}</span>
+                          {inv.customer.poRequiredDefault && (
+                            <Badge className="text-[8px] px-1 py-0 text-[#FF9900] bg-[#FF9900]/10" title="Customer requires a PO number on the invoice">PO</Badge>
+                          )}
+                          {inv.customer.podRequired && (
+                            <Badge className="text-[8px] px-1 py-0 text-[#3399FF] bg-[#3399FF]/10" title="Customer requires Proof of Delivery before send">POD</Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{resolveSiteName(inv)}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{inv.invoiceType.replace(/_/g, " ")}</Badge>
@@ -489,7 +612,7 @@ export function InvoicesView({
                         </TableCell>
                       )}
                       <TableCell>{inv.poNo || "\u2014"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{dec(inv.totalSell)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{dec(grossOf(inv))}</TableCell>
                       <TableCell>
                         {allMatched ? (
                           <Check className="size-4 text-[#00CC66]" />
@@ -525,6 +648,12 @@ export function InvoicesView({
                       <TableRow>
                         <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 12 : 11} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
+                            {/* Billing entity swap (group sister entities only) */}
+                            <ChangeEntityControl
+                              invoiceId={inv.id}
+                              currentName={inv.customer.name}
+                              status={inv.status}
+                            />
                             {/* Overdue chase info */}
                             {days !== null && days > 0 && (
                               <div
@@ -625,18 +754,25 @@ export function InvoicesView({
                                               </TableCell>
                                               <TableCell className="text-xs">
                                                 {(() => {
-                                                  const allocs = (line.ticketLine as unknown as { costAllocations?: Array<{ totalCost: unknown; supplierBillLine: { supplierBill: { id: string; billNo: string; supplier: { name: string } } } }> })?.costAllocations ?? [];
+                                                  const allocs = (line.ticketLine as unknown as { costAllocations?: Array<{ totalCost: unknown; supplierBillLine?: { supplierBill: { id: string; billNo: string; supplier: { name: string } } } | null }> })?.costAllocations ?? [];
                                                   if (allocs.length === 0) return <span className="text-muted-foreground">—</span>;
                                                   return (
                                                     <div className="space-y-0.5">
-                                                      {allocs.map((a, i) => (
-                                                        <div key={i}>
-                                                          <a href={`/procurement?bill=${a.supplierBillLine.supplierBill.id}`} className="text-primary hover:underline">
-                                                            {a.supplierBillLine.supplierBill.supplier.name} {a.supplierBillLine.supplierBill.billNo}
-                                                          </a>
-                                                          <span className="text-muted-foreground"> £{num(a.totalCost).toFixed(2)}</span>
-                                                        </div>
-                                                      ))}
+                                                      {allocs.map((a, i) => {
+                                                        const bill = a.supplierBillLine?.supplierBill;
+                                                        return (
+                                                          <div key={i}>
+                                                            {bill ? (
+                                                              <a href={`/procurement?bill=${bill.id}`} className="text-primary hover:underline">
+                                                                {bill.supplier.name} {bill.billNo}
+                                                              </a>
+                                                            ) : (
+                                                              <span className="text-muted-foreground">PO (no bill yet)</span>
+                                                            )}
+                                                            <span className="text-muted-foreground"> £{num(a.totalCost).toFixed(2)}</span>
+                                                          </div>
+                                                        );
+                                                      })}
                                                     </div>
                                                   );
                                                 })()}
@@ -675,6 +811,104 @@ export function InvoicesView({
                                 </Table>
                               </div>
                             </div>
+
+                            {/* Invoice totals (net / VAT / gross) */}
+                            {(() => {
+                              const net = num(inv.totalNet);
+                              const vat = num(inv.totalVat);
+                              const gross = num(inv.totalGross) || num(inv.totalSell);
+                              const VAT_FIXABLE = new Set(["DRAFT", "SENT", "OVERDUE", "PARTIALLY_PAID"]);
+                              const canApplyVat = VAT_FIXABLE.has(inv.status) && vat === 0 && (net > 0 || num(inv.totalSell) > 0);
+                              return (
+                                <div className="flex items-center gap-6 text-sm bg-[#0F0F0F] border border-[#333333] rounded p-3">
+                                  <div>
+                                    <span className="text-[#888888]">Net</span>{" "}
+                                    <span className="tabular-nums">{dec(net)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[#888888]">VAT</span>{" "}
+                                    <span className="tabular-nums">{dec(vat)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[#888888]">Gross</span>{" "}
+                                    <span className="tabular-nums font-medium text-[#CCCCCC]">
+                                      {dec(gross)}
+                                    </span>
+                                  </div>
+                                  {canApplyVat && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="ml-auto"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const sentMsg = inv.status === "DRAFT"
+                                          ? "Apply standard 20% VAT to every line on this draft?"
+                                          : "This invoice has been sent. Applying VAT will reverse the existing GL entry and post a new one with VAT. Continue?";
+                                        if (!confirm(sentMsg)) return;
+                                        const res = await fetch(`/api/sales-invoices/${inv.id}/apply-vat`, { method: "POST" });
+                                        if (res.ok) router.refresh();
+                                        else {
+                                          const err = await res.json().catch(() => null);
+                                          alert(err?.error || "Failed to apply VAT");
+                                        }
+                                      }}
+                                    >
+                                      Apply 20% VAT
+                                    </Button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
+                            {/* Payments */}
+                            {(inv.payments ?? []).length > 0 && (() => {
+                              const paid = (inv.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
+                              const gross = num(inv.totalGross) || num(inv.totalSell);
+                              const outstanding = gross - paid;
+                              return (
+                                <div>
+                                  <h4 className="text-sm font-medium mb-2">Payments</h4>
+                                  <div className="border border-[#333333] bg-[#1A1A1A]">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Date</TableHead>
+                                          <TableHead>Method</TableHead>
+                                          <TableHead>Reference</TableHead>
+                                          <TableHead>Notes</TableHead>
+                                          <TableHead className="text-right">Amount</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {(inv.payments ?? []).map((p) => (
+                                          <TableRow key={p.id}>
+                                            <TableCell>{new Date(p.paymentDate).toLocaleDateString("en-GB")}</TableCell>
+                                            <TableCell>{p.paymentMethod || "—"}</TableCell>
+                                            <TableCell>{p.reference || "—"}</TableCell>
+                                            <TableCell className="text-[#888888]">{p.notes || "—"}</TableCell>
+                                            <TableCell className="text-right tabular-nums">{dec(p.amount)}</TableCell>
+                                          </TableRow>
+                                        ))}
+                                        <TableRow className="border-t-2 border-[#333333] font-bold">
+                                          <TableCell colSpan={4}>Paid to date</TableCell>
+                                          <TableCell className="text-right tabular-nums">{dec(paid)}</TableCell>
+                                        </TableRow>
+                                        <TableRow className="font-bold">
+                                          <TableCell colSpan={4}>Outstanding</TableCell>
+                                          <TableCell
+                                            className="text-right tabular-nums"
+                                            style={{ color: outstanding > 0 ? "#FF9900" : "#00CC66" }}
+                                          >
+                                            {dec(outstanding)}
+                                          </TableCell>
+                                        </TableRow>
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </div>
+                              );
+                            })()}
 
                             {/* Readiness warnings */}
                             {blockers.length > 0 && (
@@ -716,6 +950,16 @@ export function InvoicesView({
                               <Button
                                 size="sm"
                                 variant="outline"
+                                onClick={(e) => { e.stopPropagation(); handleBundle(inv.id); }}
+                                disabled={submitting}
+                                title="Generate one PDF combining customer PO + invoice + all PODs"
+                              >
+                                <FileText className="size-4 mr-1" />
+                                Bundle
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setLinkPoId(inv.id);
@@ -727,15 +971,26 @@ export function InvoicesView({
                                 Link PO
                               </Button>
                               {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => { e.stopPropagation(); handleMarkPaid(inv.id); }}
-                                  disabled={submitting}
-                                >
-                                  <CreditCard className="size-4 mr-1" />
-                                  Mark Paid
-                                </Button>
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); openRecordPayment(inv); }}
+                                    disabled={submitting}
+                                  >
+                                    <CreditCard className="size-4 mr-1" />
+                                    Record Payment
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); handleMarkPaid(inv.id); }}
+                                    disabled={submitting}
+                                  >
+                                    <Check className="size-4 mr-1" />
+                                    Mark Paid
+                                  </Button>
+                                </>
                               )}
 
                               {/* PDF buttons */}
@@ -768,6 +1023,98 @@ export function InvoicesView({
           </TableBody>
         </Table>
       </div>
+
+      {/* Record Payment Dialog */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Record Payment {payInvoice?.invoiceNo ? `· ${payInvoice.invoiceNo}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {payInvoice && (() => {
+            const paid = (payInvoice.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
+            const net = num(payInvoice.totalNet);
+            const vat = num(payInvoice.totalVat);
+            const gross = num(payInvoice.totalGross) || num(payInvoice.totalSell);
+            const outstanding = gross - paid;
+            return (
+              <div className="text-xs text-[#888888] -mt-2 mb-2 space-y-0.5">
+                <div>
+                  Net {dec(net)} · VAT {dec(vat)} · Gross{" "}
+                  <span className="text-[#CCCCCC] font-medium">{dec(gross)}</span>
+                </div>
+                <div>
+                  Paid {dec(paid)} · Outstanding{" "}
+                  <span style={{ color: outstanding > 0 ? "#FF9900" : "#00CC66" }}>
+                    {dec(outstanding)}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="pay-amount">Amount</Label>
+              <Input
+                id="pay-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label htmlFor="pay-date">Payment Date</Label>
+              <Input
+                id="pay-date"
+                type="date"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="pay-method">Method</Label>
+              <Input
+                id="pay-method"
+                value={payMethod}
+                onChange={(e) => setPayMethod(e.target.value)}
+                placeholder="Bank transfer, card, cash..."
+              />
+            </div>
+            <div>
+              <Label htmlFor="pay-ref">Reference</Label>
+              <Input
+                id="pay-ref"
+                value={payReference}
+                onChange={(e) => setPayReference(e.target.value)}
+                placeholder="Bank ref / cheque no."
+              />
+            </div>
+            <div>
+              <Label htmlFor="pay-notes">Notes</Label>
+              <Input
+                id="pay-notes"
+                value={payNotes}
+                onChange={(e) => setPayNotes(e.target.value)}
+              />
+            </div>
+            {payError && (
+              <p className="text-sm text-[#FF4444]">{payError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayOpen(false)} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleRecordPayment} disabled={submitting || !payAmount}>
+              {submitting ? "Recording..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Link PO Dialog */}
       <Dialog open={linkPoOpen} onOpenChange={setLinkPoOpen}>
@@ -815,5 +1162,128 @@ function StatusBadge({ status }: { status: string }) {
     >
       {label}
     </Badge>
+  );
+}
+
+// ─── Change billing entity (within a corporate group) ────────────────────
+function ChangeEntityControl({
+  invoiceId,
+  currentName,
+  status,
+}: {
+  invoiceId: string;
+  currentName: string;
+  status: string;
+}) {
+  type Member = { id: string; name: string; isCurrent: boolean; isRoot: boolean };
+  const router = useRouter();
+  const [members, setMembers] = useState<Member[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState<string>("");
+  const [reason, setReason] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const isPaid = status === "PAID";
+
+  async function loadMembers() {
+    if (members || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sales-invoices/${invoiceId}/group-members`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setMembers(json.members);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submit() {
+    if (!target) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sales-invoices/${invoiceId}/change-entity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: target, reason: reason || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const swappable = members?.filter((m) => !m.isCurrent) ?? [];
+
+  return (
+    <div className="rounded border border-[#333333] bg-[#1F1F1F] p-3 space-y-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-xs">
+          <span className="text-[#888888]">Billing entity: </span>
+          <span className="font-medium text-[#E0E0E0]">{currentName}</span>
+        </div>
+        {isPaid ? (
+          <span className="text-[10px] text-[#888888]">
+            Locked — invoice is PAID. Issue a credit note to change.
+          </span>
+        ) : !members ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-[10px] h-6"
+            onClick={loadMembers}
+            disabled={loading}
+          >
+            {loading ? "Loading…" : "Change Entity"}
+          </Button>
+        ) : swappable.length === 0 ? (
+          <span className="text-[10px] text-[#888888]">
+            No sister entities in this group.
+          </span>
+        ) : (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={target} onValueChange={(v) => setTarget(v ?? "")}>
+              <SelectTrigger className="h-7 text-xs min-w-[200px]">
+                <SelectValue placeholder="— pick entity —" />
+              </SelectTrigger>
+              <SelectContent>
+                {swappable.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                    {m.isRoot ? " (parent)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (optional)"
+              className="h-7 text-xs min-w-[200px]"
+            />
+            <Button
+              size="sm"
+              className="h-7 text-[10px] bg-[#FF6600] text-black hover:bg-[#FF6600]/90"
+              disabled={!target || busy}
+              onClick={submit}
+            >
+              {busy ? "Switching…" : "Switch"}
+            </Button>
+          </div>
+        )}
+      </div>
+      {error && (
+        <div className="text-[11px] text-[#FF6666]">{error}</div>
+      )}
+    </div>
   );
 }
