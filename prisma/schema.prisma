@@ -113,6 +113,7 @@ model Site {
   billLineAllocations BillLineAllocation[]  @relation("BillLineAllocationSite")
   journalLines        JournalLine[]
   zohoSiteLinks       ZohoSiteLink[]
+  deliveryRunStops    DeliveryRunStop[]
 
   @@index([siteName])
   @@index([siteCode])
@@ -124,10 +125,14 @@ model Customer {
   legalName              String?
   companyNumber          String?
   billingAddress         String?
+  billingEmail           String?
   vatNumber              String?
   paymentTerms           String?
+  creditLimit            Decimal?             @db.Decimal(14, 2)
+  currency               String?
   defaultCustomerMode    String?
   poRequiredDefault      Boolean              @default(false)
+  podRequired            Boolean              @default(false)
   isCashCustomer         Boolean              @default(false)
   commercialGroupId      String?
   parentCustomerEntityId String?
@@ -457,6 +462,10 @@ model Ticket {
   // Phase 3: set true when any LogisticsEvent on this ticket reports
   // BYPASSED or NOT_ARRIVED. Cleared when a later DELIVERED event lands.
   deliveryFailed            Boolean                  @default(false)
+  // Driver-cost billing mode: ABSORBED = cost cascades into product lines and
+  // eats into goods margin; CHARGEABLE = cost lands on a TicketLineType.DELIVERY
+  // line on this ticket and is invoiced to the customer.
+  deliveryBillingMode       DeliveryBillingMode      @default(ABSORBED)
   // ── Phase 12: AI autonomous intake ──
   autoCreatedByAi           Boolean                  @default(false) // Flagged in UI as "AI" badge; user can promote or delete
   manualMode                Boolean                  @default(false) // When true, automation never touches this ticket
@@ -495,6 +504,8 @@ model Ticket {
   inboxThreads              InboxThread[]            @relation("InboxThreadTicket")
   reconciliations           Reconciliation[]
   journalLines              JournalLine[]
+  podDocuments              PODDocument[]
+  deliveryRunStops          DeliveryRunStop[]
 
   @@index([status])
   @@index([payingCustomerId])
@@ -562,6 +573,10 @@ model TicketLine {
   toOrder               Int?
   isLocked              Boolean                  @default(false)
   priceOverride         Boolean                  @default(false)
+  // Driver-cost share landed on this line by the cost allocator when a
+  // CF SupplierBill is matched to a DeliveryRun. Cascade: bill → run → stop
+  // → ticket → line, weighted by sales value (per ticket.deliveryBillingMode).
+  deliveryCostShare     Decimal?                 @db.Decimal(14, 2)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   sectionLabel          String?
@@ -606,6 +621,7 @@ model TicketLine {
   billLineAllocations BillLineAllocation[] @relation("BillLineAllocationTicketLine")
   prices              TicketLinePrice[]
   journalLines        JournalLine[]
+  podDocuments        PODDocument[]
 
   @@index([ticketId])
   @@index([ticketId, displayOrder])
@@ -820,6 +836,8 @@ model Supplier {
   aliases           SupplierAlias[]
   productMappings   SupplierProductMapping[]
   journalLines      JournalLine[]
+  deliveryRunsAsCarrier      DeliveryRun[]     @relation("CfDeliveryRunCarrier")
+  deliveryRunStopsCollection DeliveryRunStop[] @relation("RunStopCollectionSupplier")
 
   @@index([name])
 }
@@ -901,6 +919,9 @@ model SupplierBill {
   matchedAt           DateTime?
   matchVarianceAmt    Decimal?                @db.Decimal(14, 2)
   matchNotes          String?
+  // Set when this is a Cromwell Freight driver bill matched to a DeliveryRun.
+  // Triggers the cost allocator (cascades cost → stops → tickets → lines).
+  deliveryRunId       String?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
   ingestionLinks      IngestionLink[]
@@ -911,6 +932,7 @@ model SupplierBill {
   duplicateOf         SupplierBill?           @relation("BillDuplicates", fields: [duplicateOfBillId], references: [id])
   duplicates          SupplierBill[]          @relation("BillDuplicates")
   tasks               Task[]
+  deliveryRun         DeliveryRun?            @relation("DeliveryRunBills", fields: [deliveryRunId], references: [id])
 
   @@index([billNo])
   @@index([checksum])
@@ -919,6 +941,7 @@ model SupplierBill {
   @@index([paymentStatus])
   @@index([sourceThreadId])
   @@index([matchStatus])
+  @@index([deliveryRunId])
 }
 
 model SupplierBillLine {
@@ -1287,6 +1310,44 @@ model EvidenceFragment {
   ingestionLinks    IngestionLink[]
 }
 
+/// Proof of Delivery — files / images / tracking notes attached to a ticket
+/// (or specific line) that prove a delivery happened. Required for invoice
+/// send when Customer.podRequired = true. Bundled into the final invoice PDF.
+model PODDocument {
+  id             String       @id @default(uuid())
+  ticketId       String
+  ticketLineId   String?
+  podType        PODType
+  fileRef        String?
+  fileName       String?
+  mimeType       String?
+  fileSize       Int?
+  trackingNumber String?
+  carrier        String?
+  supplierName   String?
+  signedBy       String?
+  signedAt       DateTime?
+  notes          String?
+  uploadedBy     String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  ticket         Ticket       @relation(fields: [ticketId], references: [id])
+  ticketLine     TicketLine?  @relation(fields: [ticketLineId], references: [id])
+  runStops       DeliveryRunStop[]
+
+  @@index([ticketId])
+  @@index([ticketLineId])
+  @@index([podType])
+}
+
+enum PODType {
+  DELIVERY_NOTE
+  IMAGE
+  TRACKING_NOTE
+  SIGNED_RECEIPT
+  OTHER
+}
+
 model Event {
   id                String             @id @default(uuid())
   ticketId          String
@@ -1314,6 +1375,10 @@ model Task {
   draftBody       String?
   dueAt           DateTime?
   assignedTo      String?
+  // Universal ingestion: signal that auto-closes this task when matched (Phase A, 2026-05-01)
+  // Shape: { docType: "BILL"|"ACK"|..., matcher: { supplierPoId?, billId?, siteId?, ... } }
+  closesOnSignal  Json?
+  closedBySignal  String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   ticket          Ticket        @relation(fields: [ticketId], references: [id])
@@ -1395,14 +1460,19 @@ model LogisticsEvent {
   deliveryAddress String?
   deliveredAt     DateTime?
   processedAt     DateTime?
+  // Set when this LogisticsEvent was emitted by completing a DeliveryRunStop.
+  // Closes the stopStatus writer gap flagged in AGENTS.md.
+  runStopId       String?
   contact         Contact?             @relation(fields: [contactId], references: [id])
   site            Site?                @relation(fields: [siteId], references: [id])
   ticket          Ticket               @relation(fields: [ticketId], references: [id])
+  runStop         DeliveryRunStop?     @relation(fields: [runStopId], references: [id])
 
   @@index([ticketId, timestamp])
   @@index([stopStatus])
   @@index([processedAt])
   @@index([cpRef])
+  @@index([runStopId])
 }
 
 model Return {
@@ -2750,6 +2820,8 @@ enum ReviewQueueType {
   SUBSTITUTION_NO_EVIDENCE
   NEGATIVE_MARGIN_REVIEW
   MEDIA_PENDING
+  UNRESOLVED_SUPPLIER
+  UNRESOLVED_CUSTOMER
 }
 
 enum ReviewQueueStatus {
@@ -2986,13 +3058,14 @@ model BankAccount {
 model BankConnection {
   id                   String        @id @default(uuid())
   provider             BankProvider  @default(TRUELAYER)
-  providerName         String        // TrueLayer provider id, e.g. "ob-barclays", "ob-barclaycard"
+  providerName         String        // TrueLayer provider id (e.g. "ob-barclays") or Plaid institution_id (e.g. "ins_117181")
   displayName          String        // human label, e.g. "Barclays Business"
-  providerConnectionId String?       // TrueLayer credentials_id
+  providerConnectionId String?       // TrueLayer credentials_id, or Plaid item_id
   accessToken          String?
   refreshToken         String?
   tokenExpiresAt       DateTime?
   consentExpiresAt     DateTime?     // FCA-mandated 90-day SCA expiry
+  cursor               String?       // Plaid /transactions/sync cursor (null on TrueLayer)
   status               String        @default("PENDING") // PENDING, ACTIVE, EXPIRED, REVOKED, ERROR
   lastSyncedAt         DateTime?
   lastSyncError        String?
@@ -3006,6 +3079,7 @@ model BankConnection {
 
 enum BankProvider {
   TRUELAYER
+  PLAID
   CSV
 }
 
@@ -3027,6 +3101,7 @@ model BankTransaction {
   reconciledAt         DateTime?
   createdAt            DateTime    @default(now())
   bankAccount          BankAccount @relation(fields: [bankAccountId], references: [id])
+  matches              BankTransactionMatch[]
 
   @@unique([bankAccountId, fitId])
   @@index([transactionDate])
@@ -3035,10 +3110,11 @@ model BankTransaction {
 }
 
 // Auto-reconciliation suggestions raised by the open-banking sync.
+// Multiple candidates allowed per transaction (Best + Possible matches).
 // DO NOT auto-post — only surface for human review.
 model BankTransactionMatch {
   id                  String   @id @default(uuid())
-  bankTransactionId   String   @unique
+  bankTransactionId   String
   matchType           String   // INVOICE | BILL
   matchedRecordId     String   // SalesInvoice.id or SupplierBill.id
   matchedRecordRef    String?  // human-readable ref (invoiceNo / billNo)
@@ -3046,7 +3122,9 @@ model BankTransactionMatch {
   confirmedAt         DateTime?
   dismissedAt         DateTime?
   createdAt           DateTime @default(now())
+  bankTransaction     BankTransaction @relation(fields: [bankTransactionId], references: [id])
 
+  @@unique([bankTransactionId, matchType, matchedRecordId])
   @@index([bankTransactionId])
   @@index([matchType, matchedRecordId])
 }
@@ -3537,6 +3615,14 @@ model IntakeDocument {
   supplierBillId    String?
   nextAttemptAt     DateTime?
   lastAttemptAt     DateTime?
+  // Universal ingestion fields (Phase A, 2026-05-01)
+  docType           String?
+  intent            String?
+  intentConfidence  Decimal?            @db.Decimal(5, 2)
+  extracted         Json?
+  linkedTicketId    String?
+  linkedTaskId      String?
+  triggerStatus     String?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   supplierBills     SupplierBill[]
@@ -3546,6 +3632,10 @@ model IntakeDocument {
   @@index([sourceType])
   @@index([checksum])
   @@index([nextAttemptAt])
+  @@index([docType])
+  @@index([intent])
+  @@index([triggerStatus])
+  @@index([linkedTicketId])
 }
 
 model SupplierAlias {
@@ -3935,4 +4025,112 @@ model WhatsAppGroupLink {
 
   @@index([customerId])
   @@index([siteId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Driver schedule / Proof-of-Delivery feed
+// A DeliveryRun is a driver's day: an ordered list of stops (collect from
+// suppliers, deliver to sites). Each stop is tied to a Ticket so completion
+// emits a LogisticsEvent + PODDocument, closing the stopStatus writer gap
+// flagged in AGENTS.md and feeding the POD data centre.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DriverSource {
+  IN_HOUSE
+  CROMWELL_FREIGHT
+}
+
+enum RunStatus {
+  DRAFT
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum RunStopType {
+  COLLECT
+  DELIVER
+}
+
+enum RunStopStatus {
+  PENDING
+  ARRIVED
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum SplitMethod {
+  EQUAL
+  TICKET_VALUE
+  MANUAL
+}
+
+enum DeliveryBillingMode {
+  ABSORBED
+  CHARGEABLE
+}
+
+model DeliveryRun {
+  id              String              @id @default(uuid())
+  runNo           Int                 @unique @default(autoincrement())
+  runDate         DateTime
+  driverSource    DriverSource
+  driverName      String?
+  cfSupplierId    String?
+  cfJobRef        String?
+  vehicleReg      String?
+  status          RunStatus           @default(DRAFT)
+  splitMethod     SplitMethod         @default(EQUAL)
+  notes           String?
+  dispatchedAt    DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  cfSupplier      Supplier?           @relation("CfDeliveryRunCarrier", fields: [cfSupplierId], references: [id])
+  stops           DeliveryRunStop[]
+  bills           SupplierBill[]      @relation("DeliveryRunBills")
+
+  @@index([runDate])
+  @@index([status])
+  @@index([driverSource])
+  @@index([cfSupplierId])
+}
+
+model DeliveryRunStop {
+  id                   String          @id @default(uuid())
+  runId                String
+  sequence             Int
+  type                 RunStopType
+  ticketId             String
+  siteId               String?
+  supplierId           String?
+  addressSnapshot      String?
+  timeWindowStart      DateTime?
+  timeWindowEnd        DateTime?
+  status               RunStopStatus   @default(PENDING)
+  arrivedAt            DateTime?
+  completedAt          DateTime?
+  signedByName         String?
+  notes                String?
+  costShare            Decimal?        @db.Decimal(14, 2)
+  costShareOverridden  Boolean         @default(false)
+  podDocumentId        String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  run                  DeliveryRun     @relation(fields: [runId], references: [id])
+  ticket               Ticket          @relation(fields: [ticketId], references: [id])
+  site                 Site?           @relation(fields: [siteId], references: [id])
+  supplier             Supplier?       @relation("RunStopCollectionSupplier", fields: [supplierId], references: [id])
+  podDocument          PODDocument?    @relation(fields: [podDocumentId], references: [id])
+  logisticsEvents      LogisticsEvent[]
+
+  @@unique([runId, sequence])
+  @@index([runId, sequence])
+  @@index([ticketId])
+  @@index([siteId])
+  @@index([supplierId])
+  @@index([status])
 }
