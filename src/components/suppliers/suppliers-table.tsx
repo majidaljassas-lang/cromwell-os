@@ -153,6 +153,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [editSupplier, setEditSupplier] = useState<SupplierData | null>(null);
   const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Add form state for payment terms select
   const [addPaymentTerms, setAddPaymentTerms] = useState<string>("");
@@ -201,6 +202,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
 
   function openEditSheet(supplier: SupplierData) {
     setEditSupplier({ ...supplier });
+    setEditError(null);
     setEditOpen(true);
   }
 
@@ -217,6 +219,7 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
 
     const notes = encodeNotesWithMeta(paymentTerms, accountRef, cleanNotes);
 
+    setEditError(null);
     try {
       const res = await fetch(`/api/suppliers/${editSupplier.id}`, {
         method: "PATCH",
@@ -237,7 +240,16 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
         setEditOpen(false);
         setEditSupplier(null);
         router.refresh();
+      } else {
+        let msg = `Save failed (HTTP ${res.status})`;
+        try {
+          const data = await res.json();
+          if (data?.error) msg = data.error;
+        } catch {}
+        setEditError(msg);
       }
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
@@ -658,6 +670,11 @@ export function SuppliersTable({ suppliers }: SuppliersTableProps) {
                   placeholder="Additional notes"
                 />
               </div>
+              {editError && (
+                <div className="rounded border border-[#4A1A1A] bg-[#1A0A0A] px-3 py-2 text-xs text-[#FF7F7F]">
+                  {editError}
+                </div>
+              )}
               <SheetFooter>
                 <Button
                   type="submit"
