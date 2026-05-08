@@ -1,0 +1,314 @@
+0:03 - Unidentified Speaker
+Backlog.
+
+0:03 - Majid Al Jassas
+All right, so I even tried to build this backlog, right? So, Dello Center belongs to a customer, yeah? Called Shutterworth, yeah? Sorry, what are you sharing?
+
+0:15 - Rupom Shah
+Because I can only see...
+
+0:17 - Majid Al Jassas
+Can you not see the backlog? Can you not see the OS screen? I can, but it says Chrome.
+
+0:22 - Rupom Shah
+Oh, there, okay, yeah, yeah, there you go. Yeah, yeah.
+
+0:24 - Majid Al Jassas
+Sorry, sorry, I went to the wrong... Okay, so backlog. Oh, there you go. Now it's better, yeah. This whole center for it, yeah? Guys, this is like, the accounting part here is going to be a nightmare, so forgive me. Basically, boys, what it is is, yeah? Delo Center belongs to a customer called Shuttleworth. This is just one of the many pitfalls why I've got to the situation I've got to, yeah? Delo Center belongs to a customer called Shuttleworth. Shuttleworth is the client, yeah? On there, you've got a guy who's a subcontractor. He's also my customer. But he's a subcontractor for them but he's operating on day rates for them so he's not i've got nothing to do with their agreement he's just the one so adrian so I'll write it down you've got adrian who was like the main one of the main project guys you've got katalin who works for shuttleworth directly you've got ahmed who was a project manager for can I answer this for a second sorry I can't hear you.
+
+1:43 - Unidentified Speaker
+I can't hear you.
+
+1:47 - Rupom Shah
+I think, let me mute Anonymous. I think as soon as he got the phone call, something happened. Can you hear me now?
+
+1:56 - Majid Al Jassas
+Yeah, perfect.
+
+1:56 - Rupom Shah
+Yeah, we can hear you. Yeah, we can hear you.
+
+2:00 - Majid Al Jassas
+Yeah, so you've got different parties. So I've got like two, three people from Shuttleworth, the client, then I've got the subcontractor, then I've got SMS. We've got, so I was used as a principal buyer for shuttle work, right? In the beginning, I was keeping a handle of it, on it, in the sense that Udo would come, get it, send out the invoice. So I've got invoices, I've invoiced some places, I've made invoices for some places, but they're sitting in drafts, and I haven't invoiced a lot of things. Does that make sense? So we've got three situations, yeah? Second thing is, everything went through a group, and then on top of the group we've got the individuals, sorry messaging me from from all angles as well you get it so the information is fragmented so what I did was I imported I imported the whole chats I imported the five chats that were involved with this there's a lot of noise what you need to realize is there's a lot of noise here where there's orders that have been placed there's orders that are being followed up there are deliveries that have been placed there are orders that are being duplicated there is a mess there's a complete and utter mess So then what happened was, so I pulled this in. What I asked for it to do was, I asked this to basically start pulling in, so say here's Ahmed, Ahmed sent a message here, yeah, on the 25th of November, because what I need to do is basically to get to the invoice, I was explaining this to everyone yesterday, I need to show the original source of the order, that's my commercial proof to them that, there you go, I did and just make this up, here's the proof. Then I need to do the invoice. But there's a layer in between that doesn't happen to the customer, it happens just to me, where I need to rationalize the expenditure, the actual thing that came up, so the actual material that was bought. So I need to do a lot of filtration to get to the point of what's left.
+
+3:58 - Rupom Shah
+Okay, my question to you is these, obviously, are they all on chats or the email, WhatsApp mixed?
+
+4:05 - Majid Al Jassas
+With this one, With Dello Center, it's chat. With others, it's email, chat, mix, the whole works. Okay. All right.
+
+4:16 - Rupom Shah
+I think we have an understanding of where everything is in terms of like, obviously it's all around everywhere and we're going to cleanse that data for you. That's not a problem. So in terms of, so let's say you're ideally, when would you want this backlog to be cleared? Because we're talking about four years of backlog, right? So if you want to be realistic about it, when would you want us, let's just say we start working on it. Let's just say whenever, how, how long, because we can do bit by bit, right? Maybe we take what, six months at a time, or maybe- No, no, no, look, I'll be honest.
+
+4:51 - Majid Al Jassas
+Six months at a time is not going to do it for me. I need to, look, I'll give you an example. This site alone is probably about 80,000 in there. Okay.
+
+4:57 - Rupom Shah
+I need to, I need to get that money.
+
+5:00 - Majid Al Jassas
+Basically, basically Rupom, you see, you see this, this whole exercise, The main struggle for me, you see this whole exercise of trying to, of finding the source message and then digging through it.
+
+5:15 - Rupom Shah
+So we can do it by site. That's okay. That's not a problem. I think in terms of the cleansing of the data, as long as we have everything there recorded somewhere, we'll be able to do that for you. Brain will be able to, you know, cleanse that, use whatever he needs to do, cleanse the data, tell you how much they owe you the material. So you want basically what?
+
+5:37 - Majid Al Jassas
+I don't want him to do that. I want everyone to make the system be able to read the data properly. This is what I want. In terms of the accounting and whatever is owed, I don't want any of that. I need to do that. No one can do that apart from me. What I need is I need this. So you see here, just to bring you back here, you see this source message here, yeah? It's extracted the lines. It's made it line by line. I see line item.
+
+6:00 - Rupom Shah
+So you want line item. It's done it by line item.
+
+6:04 - Majid Al Jassas
+Then what is done is, I've already initiated the cleaning process because look, it's already taken, I've dumped invoices that I've sent from against this site and it's doing the matching. Hold on, have we invoiced here, have we invoiced there? Do you get it? It's already doing it. The thing is, it goes haywire somewhere.
+
+6:23 - Rupom Shah
+Where is the database? Where are you, where is all this information being stored? Is it locally? It's all locally, I see. Okay, that might be one of the reasons. The database is not probably created properly. That's one of the main reasons. It's probably doing some wrong stuff.
+
+6:42 - Admin HiredKit
+Well, technically speaking, Madge, I can see why you'd have issues, because what you've done is, if you scroll up to your message, you can see that there's a certain structure to that message, right? And there's no guarantee that the structure is going to be like that next time. That's the issue that you're having here. Right. So, so, so like we have the expertise, like we can fix that. We've dealt with all this stuff before. It's just like data cleanup stuff. So like, this is, this is, this is like no problem. I fully understand what the issue is here and the things to do. Okay. Yeah. So what I just wanted to ask just one thing before we move on, you spoke about sites. You gave an example. You said that this site has like 80 K in it, right? Yes. How many sites would you say that over this period this backlog if you had to like you don't have to give it an exact number but I could just arrest mr. Moore parking a ballpark 15 15 so so splitting up my sites is very doable right because it's 15 of them you we could even do one site at a time and you can make your money step by step right correct but here's the thing this is the problem I have I need to yeah so I need explain it to you.
+
+7:51 - Majid Al Jassas
+I need, basically for me, it's good. We need to do it site by site anyway, because when I, because the site's shut down, the Delo Center's shut down. I can't invoice Delo Center one invoice by one invoice. I have to invoice Delo Center and say, here you go, here's Delo Center. That's it. And then I've got to go through the whole commercial process of getting it back and forth. The thing I have is though, is what I want to explain to you. I need to have the peace of mind because look, this is from a sales I've got the information from my sales side, yeah? We've got that. What I'm gonna dump in at some point is the information from the purchaser's side. Because remember, I don't stock. Everything I buy has to have an out. So what we need to do is, the way I've got it accounting-wise in my head, first, we extract all the information, all the orders are extracted, yeah? Then we clean it up against the invoices that have already been invoiced. Does that make sense? And the invoices have already been invoiced are matched to purchases that have been made. You with me? Yeah. Yeah. Then whatever's left on the order side needs to be then matched against any orders because there's going to be, so there's three lists. There's an order, there's an invoice, there's a purchase. All three is like a triangle, right? It needs to all be connected. I have to basically put in all the bills, all the line items that come through that I've paid for need to be put in here and then we start cleaning up. That purchase line becomes the sales line. It's not one on top of the other. It's one in, out. Sorry, I can't explain it any other way. No, that's fine.
+
+9:30 - Rupom Shah
+I think what you explained is good enough and I think we, like Ibrahim said, this is something we've done before and we can do it exactly that way you're saying because obviously, look, we can, the steps you kind of mentioned, we can have different tables and match them, that's not a big deal.
+
+9:46 - Admin HiredKit
+The thing is, just adding in, businesses frequently have these issues where they have data coming in, looking different all over the place, and data cleanup and taking everything and putting it all together is things that we do as data scientists all the time. So for you, you might be thinking, hey, this is such a big mess, but this is the stuff that we deal with on a day-to-day basis.
+
+10:09 - Rupom Shah
+And also obviously calculation, because we need to do some sort of calculation, purchase order, and then invoices, and then see what's left, what's been, yeah, all of this, we'll be able to do that after we basically extract the information by sites. Look, I think in terms of the capability and doing it, I think we understand and we'll be able to deliver this, not a problem. My question to you, Magis, when do you want to start? I'll be completely honest, that's the main Look, I need to get the money out quickly.
+
+10:38 - Majid Al Jassas
+The longer I leave it, the lesser it is.
+
+10:43 - Majid Al Jassas
+Look, I want to know how much it's going to cost me, and if it's realistic for me. Two, how long is it going to take just to get me the account? Like I said, the accounting side of it and all of that, I don't want. I just want the capability to be able to do the work. That's what I want. You get it? I don't want much at the minute. I just want that. Because there's a whole lot of stuff that I need to start doing. It will be done. But that part, just to get into work, because I've got people chasing me, give a thing, but I'm scared to because I don't know, I don't want to leave any money on the table. Got it.
+
+11:21 - Rupom Shah
+Oh, I think, look, if you want the timeline, I guess from us, first of all, me and Ibrahim can go back and see that. But at the same time just to be realistic we need to see the data you know you see I'm saying we need to have access to the data and then we can give you a ballpark but it won't you'll be an estimate we'll give you an estimate and then obviously from there we can move forward because obviously we won't be able to say exactly hey to the t this is going to take x amount of hours we can give you a ballpark of like an estimate of okay you'll be around this much this many hours to get this whole backlog in exactly how you want exactly the perfect invoice to send to the the site or wherever it may be to a contractor, we can do that. But you'll be a ballpark, you'll be an estimate right now without going into the details, basically.
+
+12:09 - Majid Al Jassas
+I understand. Obviously, I'm not an IT guy or anything, but I understand you have to make your money and rightly so and all of that, yeah? But I built this backlog. You see, this is the first section I built for this whole thing. This was the whole thing that I built. In the first, I did this in eight hours. Me, that has no coding experience. Not to say I'm right, not to say anything. I did this in eight hours. I put all the data in, I dumped it in, because I've got all the data on tables. Like, I can give you that. It's just dumps.
+
+12:39 - Rupom Shah
+The thing is, Madge, I completely, look, you've done... I need to do what I need to do.
+
+12:45 - Majid Al Jassas
+That's all I want. Yeah, yeah, yeah.
+
+12:47 - Rupom Shah
+In terms of what you've accomplished in eight hours, first of all, yes, you've done this. But at the same time, you need to understand one thing is that we need to make sure and take into account every single, like Ibrahim said, when your order comes through, it's coming differently, different times from different people. So for example, that you haven't taken into consideration in your code, for example, right? Now, is that going to take another four hours? I'm not sure. You see where I'm coming from So there are things, obviously this thing, if it was working, you wouldn't have called us, right? So yeah, yeah. So in terms of the eight hours, what you achieved is more like a view. It's not a work. Yeah, it's more like a view. Okay, I've got a view of kind of what's going on, but at the same time, it's not done. So to do this properly, we need to make sure that the database that we create, the table that we create, the relationship between the tables are correct. Because remember, there's going to be calculation that needs to happen once we dump this data in and once we cleanse it. So in order to do that, I mean, yes, eight hours, but then if we spend eight it might not work as well. You see what I'm saying?
+
+13:53 - Majid Al Jassas
+So- No, I get you. I get you. But what I'm trying to say is, you're asking me how long I want it to take. I want it with your capability. I just need something. Look, at the end of the day, right? I get it. We need to do the backend properly and everything. I completely get that. What I want though, I want basically, say we say, let's go today. I want within a week. I want, because let's be honest. If I basically put in a week or two weeks of solid nine to five, just going through the chats, I will do this, right? I don't want to do that. It's just, it's long for me. So I would rather get this thing. Visually to be, allow me to feel comfortable in what's going on and boom. So I can just produce, do you get it?
+
+14:38 - Admin HiredKit
+But on top of that, imagine what we spoke about before is that the creation of the system doesn't only allow you to get to the backlog, but it helps you to propagate things forward moving on, right? Yes. Yes. So it's not just giving you the role of, okay, we have the backlog and you could have just done it yourself, but that doesn't create a process that you need for the future. Whereas if we solve this, we effectively solve how we move forward as well. Right.
+
+15:02 - Majid Al Jassas
+Right. But you're right. You're a hundred percent right. And that's right. But I'm stuck. So I'll give you an example. I am six weeks in here, just crude code in my life when I can, and I wish I went down this career path because it's cool. Yeah. But what would you call it? I'm six weeks worse off. So this six weeks that I am, I've been doing this. Yeah. Trying to build the system, whatever, whatever, whatever. And integrating. I've only managed, the thing is, I get you guys have the skill and everything to make it work, but there's so many things that I'm, while I'm, while I've been working here, that on this, that I've really, okay, I did this, okay, I did this, I did this, I did this. At this, it's never going to be perfect. And I'm sure even with what you guys do, there's always changes that need to be made. So my priority is now, I've got two things. The main thing is, to be honest, the main, main, main thing for me is I need to recruit this money quickly.
+
+16:04 - Rupom Shah
+I think we'll do it. And I think we'll do it properly. And I think our job here is also like Ibrahim said, to make sure that this doesn't happen again. Right. You don't want to be in a situation in six months down the line where you have another six months of backlog. Let's just say we give this to you, but then you want a system where the new invoices, the new orders are coming through and that's going, we have to take that into consideration. That's why I'm saying when we're building the system here. So look, what I want from you then is if you can give us access to all the chats or all the data that you have that you want us to work with in terms of the backlog, so that way we can take that and at least we have an understanding of what we're dealing with. And we can have a roadmap, create a roadmap of that from that.
+
+16:48 - Majid Al Jassas
+So, so, so I'll give you an example. Let's start with because that was one of the most complex ones. Yeah. It's complex in the sense that it's got so many people in it. Abraham, you've seen the get files. Yes. Do you, is the database there for you to read? So, you know, when you, can you open, are you able to open this backlog there, because all the data you need is there.
+
+17:11 - Unidentified Speaker
+Okay.
+
+17:13 - Admin HiredKit
+Have you downloaded the data into GitHub, though? Into the GitHub folder, or did you have it locally in your system? And then what's happening is that you're pointing it to your file system. You see what I mean? Somewhere in your files.
+
+17:26 - Majid Al Jassas
+I don't know. No, no, I haven't got any. I think it's gone to a database. I'm not sure, to be honest.
+
+17:33 - Admin HiredKit
+The database exists on computer. Do you see what I mean? When I run it on my computer, I don't necessarily migrate your database over to me. It's fine.
+
+17:41 - Rupom Shah
+Look, I think in terms of that, we can get, yeah.
+
+17:49 - Unidentified Speaker
+Yeah.
+
+17:49 - Rupom Shah
+But at the same time, what everyone's saying is they saved on your computer, but what we on GitLab, it doesn't get uploaded.
+
+17:54 - Admin HiredKit
+It doesn't like necessarily upload it all to GitLab.
+
+17:57 - Rupom Shah
+It will be huge. It can, you know, but that's fine. Look, Majid, I think that's fine. You're done. Road anyway so we can come to you and then get your computer and just maybe just, you know, put it on a SharePoint or something. I mean, that's not a big deal. So, okay, cool.
+
+18:13 - Majid Al Jassas
+And I know I can just upload the data to the database on another one, on MongoDB.
+
+18:21 - Admin HiredKit
+The thing is, we'll deal with the data. We can get it easily. It's not a bottleneck or something. You can see what I mean. It's not a bottleneck or something. We can look at the data, we can have a look, and we can create map like Raikkonen said. So that's, it's not, it's not, it's a non-issue, you know what I mean? It's not like a big deal.
+
+18:37 - Majid Al Jassas
+Well, what I'm trying to say is, look, the chats are there, the chats are there, the invoices in relation to Delo Center already are there. They're in there. And another one, I'm just trying to show you.
+
+18:54 - Majid Al Jassas
+The bills, where's the bills, bills, bills.
+
+19:01 - Majid Al Jassas
+Actually, even the invoices, all invoices are in it. Yeah, of course, absolute utter mess. Okay, so do you see, do you see here, yeah?
+
+19:14 - Unidentified Speaker
+Yeah.
+
+19:15 - Majid Al Jassas
+This is every line I up to a certain point.
+
+19:24 - Majid Al Jassas
+From where I bought it from, the amount, the quantities, the amount, the everything. Now, main thing is chat, bill line, invoice line.
+
+19:36 - Unidentified Speaker
+Yeah.
+
+19:39 - Majid Al Jassas
+I get it. I get it.
+
+19:40 - Rupom Shah
+Look, we can, we can do all of that. I think in terms of when we start going through it, we will have to repeat, we have to go through again with you so it's not a big deal uh We'll get the data. And I think in terms of start date, then you said as soon as possible, do you mean should we start from Monday? Is that is that what you want to do? So we agree. Yeah, I'm just saying we give you the call. We say this is this is what we'll do. Let's get the ball rolling. We can start on Monday. Me and Ibrahim will go back today. Uh you know obviously what you said and and what you want because look yeah anyway oh we'll come back to you then in terms of the pricing and everything and um and then we can go from there I think I think that's the best um next step uh for now and then obviously from there we can build on but mad I do want you to I I do want to reiterate this that look yes you created this in eight hours but that it's not a functioning application, okay? So, bear that in mind when we come and say, okay, this is what's going to be. So, obviously, we're going to come from our angle and how we're going to do things properly, okay? Obviously, from your perspective, you may think, okay, why is he saying this or that, but we will have our reasons because we want to do things properly. If you want us to not do a half-assed job with it, that's a different story, but we don't want to do that because we want to make sure that this is a future proof and you can use a system that we can build on top of Because remember, you have all these other things, bills, accounts, payable invoices, cash sales, banking, reconciliation, all these things that you've already thought about that needs to be built on top. If we don't create the database from the beginning in a structured way, we have to redo the whole thing. Just like what you've done now, we can't take anything from here except for maybe the UI, maybe even not the UI. The UI is quite busy. Do you see what I'm saying? Go in and have to start from scratch anyway, because I'm not, okay, I don't want to say it's a mess because that's not what I'm saying. But in terms of what you did, in terms of the code, yes, you have things how you want it, like in some sort of structure way, the UI structure, yes, but the backend is not connecting, is not doing what you want it to do. So I want you to also think about that.
+
+21:59 - Majid Al Jassas
+But like I said, I think we can work on this you know if we can if we can agree yeah me like I said me I'll explain this to abraham and obviously I don't expect nothing for free and I'll pay what if you're happy I'm happy with making but my main thing is my main thing is yeah at the minute I'm not selling I'm not selling I'm nowhere near the revenue running that I was running nowhere near i've taken a step back because I'm about to Basically, I'm about to go bankrupt any day, as is always. Okay. Normal. Yeah. So I need to get the money in now. And this is the first part, because this is the start of a very long road, because now I'm going to go fight with everyone to pay me. Got it. That's okay.
+
+22:45 - Rupom Shah
+It's a better place than where you are now. So it's okay if you get the invoices. It's okay. So as long as we have the invoices, I think you're good to go. Look, I think...
+
+22:51 - Majid Al Jassas
+I'm going to get this backlog engine working, because instead of spending months on it...
+
+22:57 - Rupom Shah
+Yeah, yeah, yeah.
+
+22:59 - Majid Al Jassas
+Okay.
+
+23:00 - Rupom Shah
+Okay. So what I'll say is let me and Abraham go back tonight and we will, because obviously the urgency and look, I respect your urgency and we, we will be available for that and try to make this work for you as well. So what we will do is go back tonight and come back to you. You're, I mean, you're working seven days anyway, right? You're available.
+
+23:22 - Majid Al Jassas
+Okay.
+
+23:23 - Rupom Shah
+But you know, we can reach to reach out to you and then we can come back to you. Yeah that's fine yeah so let's do that so by tomorrow Sunday we'll have something and then we can tell you and then we can hopefully agree and then we can start the thing on Monday and then you can hopefully you know buy in a couple let's say in a couple of weeks you should be ready with some invoices to go back to them you know I'm trying to say that's yeah yeah like I said Delo is one of the most Delo is a good starting point because Delo's got so many moving parts to it that's no problem we'll that, we'll do that. So yeah, okay, that's fine. Let's, let's. Okay, so me and everyone will go back and then we'll come back to you. But look, I want to ask you one more thing, obviously, in terms of how would you, because I want to be transparent here as well. And I want to like, because we're friends as well, and everything at the same time business. So I want to, I want to know how, what would be easy for you, so that we can work together. Because we want to work with you, because we spoke to you last and then we're here again. So, you know, we are giving your, uh, giving our time to you. So we definitely want to work with you. So what is it? How, what would be good for you? Like in terms of, um, the structure of this project, how would you want to work with us? Is it like a monthly basis or like an hourly basis? How would you want to do it? I don't know. Basically I need it to be affordable.
+
+24:46 - Unidentified Speaker
+That's one, two, I need it.
+
+24:55 - Majid Al Jassas
+Basically, if we get one backlog out of the way, it frees up a bit more to get it.
+
+25:02 - Majid Al Jassas
+You'll come to realize not every site is the same. So you see Delo Center, I'll give you an example. Delo Center is all on chats. I've got another customer called Criterion.
+
+25:13 - Majid Al Jassas
+Criterion are huge. When I mean huge, they're huge. Criterion Capital is the main company.
+
+25:21 - Majid Al Jassas
+Criterion Capital is the main company. And under Criterion Capital, it's got sub-companies. Yeah, they've got subsidiaries. And under the subsidiaries, they feed sites. Sometimes you've got one site that's got like 10 subsidiaries. The thing with Criterion is, it's not like Shuttleworth. I have to get purchase orders. There has to be approvals. You get it? I see. Okay. So say, for example, I've got Backlog now with Criterion. We're probably talking Okay.
+
+25:52 - Rupom Shah
+Yeah.
+
+25:52 - Majid Al Jassas
+This is, this is stuff. Look, this is stuff. So this, so Criterion, for example, it goes like this, but Criterion started So it's much less, but the thing is Criterion is split between more people. Some of them have left WhatsApp emails and with Criterion, the process is supposed to be request for quotation, send the quotation, get a PO, send the materials, get a proof of delivery, send invoice. Do you have proof of delivery, by the way, on your account? Yes, I do, because I know the bastards, they won't pay me without it. So, but watch this. With Criterion, I've sent quotes. Yeah, we'll send the PO later. Lost in translation. That's one. Send the materials. And send a quote later. I haven't had time to do that. Loftin Translation too.
+
+26:51 - Majid Al Jassas
+So with Criterion, it's an absolute, sorry for lack of a better term, shit show. So that's one. So not every, not every.
+
+27:04 - Rupom Shah
+We'll do, we'll do by side by side. I think that'll be the easiest way, you know?
+
+27:07 - Majid Al Jassas
+Go do side by side. But the only way to do side by side is by consolidating the finance Because remember, some things might not be written down. And the only way I can tell that is by filtering out. We have to clean. There's just so much cleaning to do.
+
+27:22 - Rupom Shah
+That's fine. Let's just say we look at a site, right? And there are some stuff that are missing. But you know it. So remember, we're going to be working with you. You're going to be alongside. I appreciate it.
+
+27:34 - Majid Al Jassas
+But I won't know this until all of that's in my face in one place. That's fine.
+
+27:38 - Rupom Shah
+That's not a problem. So let's do the cleansing. Cleaning of the data, then we show you and then you get to review it. And then you'll be able to say, Hey, you know what, this makes sense. This doesn't make sense. There's some errors here. We're going to work with you on that. So look, I think you need to, I want you to relax and I want you to be okay. Once we start working out, I, you know, we will take that on board. And then what are you going to do is basically just approve, approve, approve. You know, that's what we want you to do.
+
+28:02 - Majid Al Jassas
+You know, just that's what we're going to do.
+
+28:04 - Rupom Shah
+So, okay, cool. With what's in there, do you get it?
+
+28:07 - Majid Al Jassas
+I need to feel comfortable of what I need to make sure the data I'm not missing a penny. Yeah. Look, I'm going to send you a link.
+
+28:16 - Rupom Shah
+Okay. Um, and obviously you have the data there. Some, you know, one of the sites, I just want you to upload that, uh, what you uploaded here on that link. Okay. If that's okay. That way we don't have to go through your code again and stuff like that. So it's just easier that way. Just bear with me one second. So we might as well do this right now. Uh, instead of is it not quicker for me to just get the to get it out from where where it's there because I've got to get okay no no okay you don't want to let's just let's just do it to centralize it and I can upload it there it's fine don't worry uh uh Ibrahim will do that on on when we start work don't worry leave it yeah it's all good like no I just had a look I had a look while we were talking anyway and um I I can see exactly how to easily get access to it so don't worry about it okay nice one Ibrahim okay All right, cool. Look, Majid, leave it with us and let me get back to you by tomorrow, OK? Me and Ibrahim, we'll do a fast quick turnaround and hopefully we can get this sorted as soon as possible. So it doesn't... No, we want to do this as soon as possible. Let's do it. If we want to do it properly. Yeah, might as well, you know, instead of chatting all this, might as well just get the ball rolling, innit? Obviously. So let us just go back and see you at...
+
+29:26 - Majid Al Jassas
+Oh, I've got another suggestion, if it's of interest to you. Come for a day, Come for a day. I'll pay you for the day. Have a look at, have a look at it. See that they are, I'm happy to go today. I'm happy to do however you want. If I can afford it.
+
+29:41 - Rupom Shah
+Ibrahim already has access to it. So I don't think that's necessary. We will be able to do everything without, because you have the GitHub.
+
+29:47 - Admin HiredKit
+So Ibrahim already kind of, um, um, so, so I'll show you what we've got here and then you can just confirm whether or not this is correct. Yeah. Yeah.
+
+29:57 - Majid Al Jassas
+Okay. Cool.
+
+29:58 - Rupom Shah
+I think, look, Ibrahim, let's, uh, let's, let's just do some brainstorming after this and then get back to Madge and hopefully that we can get him his money back.
+
+30:08 - Admin HiredKit
+Yeah, no, I definitely have some ideas for this and how we can make this work. I know what you want, Madge, you want this. Basically, this is the money you want, this money now. So it's much better to have a system where we can get it in parts and get it quickly instead of building a whole system just so you can get one in one go. Because the sooner you have the money, the sooner you get bankrupt, you know what I'm trying to say.
+
+30:31 - Majid Al Jassas
+I swear, I swear.
+
+30:34 - Rupom Shah
+Don't worry. I think we'll fix it. We'll fix then we'll get all of the backlog at least sorted out and then you can go and chase them now.
+
+30:41 - Majid Al Jassas
+So this is the thing. We haven't even hit the surface to start getting the money. That's the problem.
+
+30:47 - Unidentified Speaker
+Yeah.
+
+30:48 - Rupom Shah
+Yeah. Okay. Cool. All right. Let us do that. And then I think we already have all the data and everything then. So let's let, let me and everyone go back and see what we can do on it. Okay.
+
+30:57 - Majid Al Jassas
+Perfect.
+
+30:58 - Rupom Shah
+We'll go back to you by tomorrow. Inshallah. So it shouldn't be a too long anyway. Quick turnaround.
+
+31:03 - Admin HiredKit
+Thanks so much. Thanks for that for that rundown. Yeah.
+
+31:06 - Unidentified Speaker
+Yeah.
+
+31:07 - Rupom Shah
+Any other questions you may have?
+
+31:09 - Majid Al Jassas
+No.
+
+31:10 - Unidentified Speaker
+Yeah.
+
+31:10 - Rupom Shah
+Yeah. All right. Just speed. Just speed. Bam, bam, bam.
+
+31:13 - Unidentified Speaker
+All right.
+
+31:14 - Rupom Shah
+Cool. All right, man. I'll speak to you soon. Take care.
