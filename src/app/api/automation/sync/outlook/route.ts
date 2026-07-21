@@ -27,6 +27,25 @@ function isEmailBlocked(senderEmail: string): boolean {
   });
 }
 
+/**
+ * Check if email sender domain matches a known supplier.
+ * Supplier invoices originate from the supplier's own domain.
+ * Built from actual successful bills, so it's highly accurate.
+ */
+function isKnownSupplierDomain(senderEmail: string, supplierDomains: Set<string>): boolean {
+  const email = senderEmail.toLowerCase();
+  const domain = email.split("@")[1] ?? "";
+
+  // Exact domain match (e.g., "appeng.co.uk")
+  if (supplierDomains.has(domain)) return true;
+
+  // Partial match on first part (e.g., "appeng" from "appeng.co.uk")
+  const firstPart = domain.split(".")[0];
+  if (firstPart && supplierDomains.has(firstPart)) return true;
+
+  return false;
+}
+
 const BILL_FILENAME_KEYWORDS = ["invoice", "bill", "statement", "inv", "credit", "ord-", "remittance"] as const;
 
 /**
@@ -77,6 +96,30 @@ export async function POST(request: Request) {
 
     if (sources.length === 0) {
       return Response.json({ error: "No Outlook accounts connected. Visit /api/auth/outlook/connect" }, { status: 404 });
+    }
+
+    // Load known supplier email domains from successful bills
+    // Query IngestionEvent records linked to SupplierBill to extract real domains
+    const supplierEmailDomains = await prisma.$queryRaw<Array<{ email: string }>>`
+      SELECT DISTINCT
+        (ie."rawPayload"->'from'->>'address')::text as email
+      FROM "IngestionEvent" ie
+      JOIN "IntakeDocument" id ON id."ingestionEventId" = ie.id
+      JOIN "SupplierBill" sb ON sb."intakeDocumentId" = id.id
+      WHERE (ie."rawPayload"->'from'->>'address') IS NOT NULL
+    `;
+    const supplierDomains = new Set<string>();
+    for (const record of supplierEmailDomains) {
+      const email = (record.email || "").toLowerCase();
+      const domain = email.split("@")[1];
+      if (domain) {
+        supplierDomains.add(domain);
+        // Also add the first part (company name) for partial matching
+        const parts = domain.split(".");
+        if (parts.length > 0 && parts[0].length > 2) {
+          supplierDomains.add(parts[0]);
+        }
+      }
     }
 
     const results = [];
@@ -227,6 +270,8 @@ export async function POST(request: Request) {
               for (const att of attachData.value || []) {
                 if (att.isInline) continue;
                 if (!looksLikeBill(att, email.subject ?? "")) continue;
+                // Only enqueue if sender is from a known supplier domain
+                if (!isKnownSupplierDomain(senderEmail, supplierDomains)) continue;
 
                 // enqueueDocument is idempotent on (ingestionEventId, fileRef)
                 await enqueueDocument({
@@ -246,7 +291,7 @@ export async function POST(request: Request) {
 
           // Body-bill path: no PDF attachments, but the email body itself looks like a bill.
           // Status is set to PARSED immediately — rawText is already available; skip the parser.
-          if (!email.hasAttachments && looksLikeBillBody(bodyText, senderEmail)) {
+          if (!email.hasAttachments && looksLikeBillBody(bodyText, senderEmail) && isKnownSupplierDomain(senderEmail, supplierDomains)) {
             try {
               // Idempotency: one body-bill doc per ingestion event (fileRef is null for this path).
               const existingBodyDoc = await prisma.intakeDocument.findFirst({
@@ -294,9 +339,12 @@ export async function POST(request: Request) {
             },
           });
 
-          // Classify the message
+          // Classify the message — pass subject separately so the bill-rule
+          // (subjectLooksLikeBill) wins over body-keyword DISPUTE / DELIVERY
+          // matches. Without this, "Sales Invoice 2434457" gets mis-tagged
+          // as DISPUTE if the body mentions "credit" or "return".
           const classText = `${email.subject || ""} ${fullText.substring(0, 1000)}`;
-          const classification = classifyMessage(classText);
+          const classification = classifyMessage(classText, { subject: email.subject });
 
           // NOTE: Auto-linking DISABLED — everything lands in inbox for manual triage
           try {
