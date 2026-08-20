@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { postCashSale } from "@/lib/finance/gl-posting";
 
 export async function GET(request: Request) {
   try {
@@ -41,22 +42,28 @@ export async function POST(request: Request) {
       status = "RECEIVED",
     } = body;
 
-    const cashSale = await prisma.cashSale.create({
-      data: {
-        ticketId,
-        receivedAmount,
-        receivedAt: new Date(receivedAt),
-        paymentMethod,
-        receiptRef,
-        status,
-      },
-      include: {
-        ticket: {
-          include: {
-            payingCustomer: true,
-          },
+    // Wrap in transaction so a locked period can't strand a CashSale with no JE.
+    const cashSale = await prisma.$transaction(async (tx) => {
+      const created = await tx.cashSale.create({
+        data: {
+          ticketId,
+          receivedAmount,
+          receivedAt: new Date(receivedAt),
+          paymentMethod,
+          receiptRef,
+          status,
         },
-      },
+        include: {
+          ticket: { include: { payingCustomer: true } },
+        },
+      });
+
+      // Petty cash sales pass "1500"; default 1000 covers card / bank takings.
+      if (status === "RECEIVED" || status === "CLEARED") {
+        const bankCode = paymentMethod === "CASH" ? "1500" : "1000";
+        await postCashSale(created.id, bankCode, tx);
+      }
+      return created;
     });
 
     return Response.json(cashSale, { status: 201 });

@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { parseAcknowledgementText } from "@/lib/procurement/parse-acknowledgement";
+import { parseAckWithAI } from "@/lib/procurement/ai-ack-parser";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse/lib/pdf-parse");
 
@@ -52,7 +53,29 @@ export async function POST(
       return Response.json({ error: "No text extracted from file", file: files[files.length - 1] }, { status: 400 });
     }
 
-    const parsed = parseAcknowledgementText(text);
+    // Try deterministic template parsers first; fall back to AI for unknown layouts.
+    let parsedLines: Array<{ description: string; qty: number; unitCost: number; lineTotal: number }> = [];
+    let source: "TEMPLATE" | "AI" = "TEMPLATE";
+    const templateParsed = parseAcknowledgementText(text);
+    if (templateParsed.lines.length > 0) {
+      parsedLines = templateParsed.lines.map((l) => ({
+        description: l.description,
+        qty: l.qty,
+        unitCost: l.unitCost,
+        lineTotal: l.lineTotal,
+      }));
+    } else {
+      const aiParsed = await parseAckWithAI(text);
+      if (aiParsed && aiParsed.lines.length > 0) {
+        parsedLines = aiParsed.lines.map((l) => ({
+          description: [l.productCode, l.description].filter(Boolean).join(" ").trim(),
+          qty: l.qty,
+          unitCost: l.unitPrice,
+          lineTotal: l.lineTotal,
+        }));
+        source = "AI";
+      }
+    }
 
     // Delete existing lines and recreate
     await prisma.procurementOrderLine.deleteMany({ where: { procurementOrderId: id } });
@@ -60,7 +83,7 @@ export async function POST(
     const ticketLines = po.ticket?.lines || [];
     let matched = 0;
 
-    for (const pl of parsed.lines) {
+    for (const pl of parsedLines) {
       const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
       const plNorm = normalize(pl.description);
       let matchedId: string | null = null;
@@ -93,8 +116,9 @@ export async function POST(
       poNo: po.poNo,
       file: files[files.length - 1],
       textLength: text.length,
-      linesExtracted: parsed.lines.length,
+      linesExtracted: parsedLines.length,
       linesMatched: matched,
+      source,
     });
   } catch (error) {
     console.error("Reparse failed:", error);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, FileText, User } from "lucide-react";
+import { Plus, Trash2, FileText, User, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -114,6 +114,44 @@ export function LabourDrawdownTable({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Multi-select for "Create Invoice from selected days"
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  async function createInvoiceFromSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Create one invoice from ${selectedIds.size} logged day(s)?`)) return;
+    setCreatingInvoice(true);
+    try {
+      const res = await fetch(
+        `/api/customer-pos/${poId}/labour-drawdowns/build-invoice`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entryIds: Array.from(selectedIds) }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setSelectedIds(new Set());
+      router.refresh();
+      alert(
+        `Invoice ${json.invoiceNo} created — £${Number(json.totalSell).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${json.lineCount} line(s).`
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to create invoice");
+    } finally {
+      setCreatingInvoice(false);
+    }
+  }
 
   const [entryMode, setEntryMode] = useState<"days" | "balance">("days");
   const [dayType, setDayType] = useState("WEEKDAY");
@@ -327,8 +365,8 @@ export function LabourDrawdownTable({
 
   const totalBillable = entries.reduce((s, e) => s + n(e.billableValue), 0);
   const totalCost = entries.reduce((s, e) => s + n(e.internalCostValue), 0);
-  const totalOverhead = entries.reduce((s, e) => s + n(e.overheadValue), 0);
-  const totalProfit = entries.reduce((s, e) => s + n(e.grossProfitValue), 0);
+  const totalOverhead = (Number(poLimitValue) || 0) * (Number(overheadPct) || 0) / 100;
+  const totalProfit = entries.reduce((s, e) => s + n(e.grossProfitValue), 0) - totalOverhead;
   const actualEntries = entries.filter((e) => e.status !== "ADVANCE_BILLED" && e.status !== "DELIVERED_AGAINST_ADVANCE");
   const advanceEntries = entries.filter((e) => e.status === "ADVANCE_BILLED");
   const deliveredAgainstEntries = entries.filter((e) => e.status === "DELIVERED_AGAINST_ADVANCE");
@@ -488,6 +526,22 @@ export function LabourDrawdownTable({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">Labour Drawdown Entries</h3>
         <div className="flex gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              size="sm"
+              onClick={createInvoiceFromSelected}
+              disabled={creatingInvoice}
+              className="h-7 text-[10px] bg-[#FF6600] hover:bg-[#FF6600]/90 text-black"
+            >
+              <Receipt className="size-3 mr-1" />
+              {creatingInvoice
+                ? "Creating…"
+                : `Create Invoice from ${selectedIds.size} day${selectedIds.size === 1 ? "" : "s"} · £${entries
+                    .filter((e) => selectedIds.has(e.id))
+                    .reduce((s, e) => s + n(e.billableValue), 0)
+                    .toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </Button>
+          )}
           {entries.length > 0 && (
             <>
               <Button size="sm" variant="outline" onClick={printCustomerPDF} className="h-7 text-[10px]">
@@ -824,6 +878,29 @@ export function LabourDrawdownTable({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all logged"
+                  className="cursor-pointer"
+                  checked={
+                    entries.filter((e) => e.status === "LOGGED").length > 0 &&
+                    entries
+                      .filter((e) => e.status === "LOGGED")
+                      .every((e) => selectedIds.has(e.id))
+                  }
+                  onChange={(e) => {
+                    const loggedIds = entries
+                      .filter((x) => x.status === "LOGGED")
+                      .map((x) => x.id);
+                    if (e.target.checked) {
+                      setSelectedIds(new Set(loggedIds));
+                    } else {
+                      setSelectedIds(new Set());
+                    }
+                  }}
+                />
+              </TableHead>
               <TableHead>Work Date</TableHead>
               <TableHead>Plumber</TableHead>
               <TableHead>Day Type</TableHead>
@@ -842,7 +919,7 @@ export function LabourDrawdownTable({
             {entries.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={13}
                   className="text-center py-6 text-[#888888]"
                 >
                   No labour entries logged yet.
@@ -852,6 +929,17 @@ export function LabourDrawdownTable({
               <>
                 {entries.map((entry) => (
                   <TableRow key={entry.id}>
+                    <TableCell>
+                      {entry.status === "LOGGED" ? (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${new Date(entry.workDate).toLocaleDateString("en-GB")}`}
+                          className="cursor-pointer"
+                          checked={selectedIds.has(entry.id)}
+                          onChange={() => toggleSelected(entry.id)}
+                        />
+                      ) : null}
+                    </TableCell>
                     <TableCell className="tabular-nums">
                       {new Date(entry.workDate).toLocaleDateString("en-GB")}
                     </TableCell>
@@ -919,7 +1007,7 @@ export function LabourDrawdownTable({
                 ))}
                 {/* Summary row */}
                 <TableRow className="bg-[#222222] font-medium">
-                  <TableCell colSpan={6} className="text-right">Totals</TableCell>
+                  <TableCell colSpan={7} className="text-right">Totals</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {fmt(totalBillable)}
                   </TableCell>
@@ -1018,6 +1106,30 @@ export function LabourDrawdownTable({
           <div className="border border-[#333333] bg-[#1A1A1A] p-2">
             <p className="text-[10px] text-[#888888] uppercase">Overhead Owing</p>
             <p className={`text-lg font-semibold tabular-nums ${overheadOwed > 0 ? "text-[#FF9900]" : "text-[#00CC66]"}`}>{fmt(overheadOwed)}</p>
+            {overheadOwed > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[10px] mt-1"
+                onClick={async () => {
+                  if (!confirm(`Mark overhead of £${fmt(overheadOwed)} as paid?`)) return;
+                  await fetch(`/api/customer-pos/${poId}/cash-payments`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      payee: "Overhead",
+                      payeeType: "OVERHEAD",
+                      amount: overheadOwed,
+                      paymentDate: new Date().toISOString().slice(0, 10),
+                      paymentMethod: "BANK_TRANSFER",
+                    }),
+                  });
+                  router.refresh();
+                }}
+              >
+                Mark Paid
+              </Button>
+            )}
           </div>
           <div className="border border-[#333333] bg-[#1A1A1A] p-2">
             <p className="text-[10px] text-[#888888] uppercase">Total Paid</p>

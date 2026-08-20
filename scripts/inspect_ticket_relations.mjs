@@ -1,0 +1,18 @@
+import "dotenv/config";
+import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
+const TID = "e7a810df-31e3-4116-bea2-f6de5511162a";
+const tasks = await prisma.task.findMany({ where: { ticketId: TID } });
+console.log("Tasks:", tasks.length);
+for (const t of tasks) console.log("  ", t.id.slice(0,8), t.type, "title:", t.title?.slice(0,60), "status:", t.status, "customerPOId:", t.customerPOId?.slice(0,8));
+const events = await prisma.event.findMany({ where: { ticketId: TID } });
+console.log("\nEvents:", events.length);
+for (const e of events) console.log("  ", e.id.slice(0,8), e.eventType, "title:", e.title?.slice(0,60), "customerPOId:", e.customerPOId?.slice(0,8));
+const evs = await prisma.evidenceFragment.findMany({ where: { ticketId: TID } });
+console.log("\nEvidence:", evs.length);
+for (const e of evs) console.log("  ", e.id.slice(0,8), e.fragmentType, "text:", e.fragmentText?.slice(0,60), "ticketLineId:", e.ticketLineId?.slice(0,8));
+await prisma.$disconnect(); await pool.end();

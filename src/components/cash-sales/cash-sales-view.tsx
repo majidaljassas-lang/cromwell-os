@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, AlertTriangle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,6 +83,27 @@ type Ticket = {
   title: string;
 };
 
+type Customer = {
+  id: string;
+  name: string;
+  isCashCustomer?: boolean | null;
+  isBillingEntity?: boolean | null;
+};
+
+type DraftLine = {
+  description: string;
+  qty: string;
+  unit: string;
+  saleUnit: string;
+  costUnit: string;
+};
+
+const UNITS = ["EA", "M", "LM", "LENGTH", "PACK", "LOT", "SET", "PAIR", "BOX", "ROLL", "TONNE"];
+
+function emptyLine(): DraftLine {
+  return { description: "", qty: "1", unit: "EA", saleUnit: "", costUnit: "" };
+}
+
 function statusBadge(status: string) {
   switch (status) {
     case "RECEIVED":
@@ -117,23 +138,64 @@ function profitColor(profit: number): string {
 export function CashSalesView({
   cashSales,
   tickets,
+  customers,
 }: {
   cashSales: CashSale[];
   tickets: Ticket[];
+  customers: Customer[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [expandedSale, setExpandedSale] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<"NEW_TICKET" | "EXISTING">("NEW_TICKET");
   const [ticketId, setTicketId] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [title, setTitle] = useState("");
+  const [draftLines, setDraftLines] = useState<DraftLine[]>([emptyLine()]);
   const [receivedAmount, setReceivedAmount] = useState("");
+  const [receivedAmountTouched, setReceivedAmountTouched] = useState(false);
   const [receivedAt, setReceivedAt] = useState(
     new Date().toISOString().slice(0, 10)
   );
   const [paymentMethod, setPaymentMethod] = useState("BANK_TRANSFER");
   const [receiptRef, setReceiptRef] = useState("");
   const [status, setStatus] = useState("RECEIVED");
+
+  const linesSaleTotal = useMemo(() => {
+    return draftLines.reduce((s, l) => {
+      const qty = parseFloat(l.qty) || 0;
+      const unit = parseFloat(l.saleUnit) || 0;
+      return s + qty * unit;
+    }, 0);
+  }, [draftLines]);
+
+  const effectiveReceived = receivedAmountTouched
+    ? receivedAmount
+    : linesSaleTotal > 0
+    ? linesSaleTotal.toFixed(2)
+    : receivedAmount;
+
+  function updateLine(idx: number, patch: Partial<DraftLine>) {
+    setDraftLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+  function addLine() {
+    setDraftLines((prev) => [...prev, emptyLine()]);
+  }
+  function removeLine(idx: number) {
+    setDraftLines((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== idx)));
+  }
+
+  function resetForm() {
+    setTicketId("");
+    setCustomerId("");
+    setTitle("");
+    setDraftLines([emptyLine()]);
+    setReceivedAmount("");
+    setReceivedAmountTouched(false);
+    setReceiptRef("");
+  }
 
   const totalAll = cashSales.reduce((s, cs) => s + num(cs.receivedAmount), 0);
   const now = new Date();
@@ -153,27 +215,59 @@ export function CashSalesView({
   const totalProfit = totalAll - totalCost;
 
   async function handleSubmit() {
-    if (!ticketId || !receivedAmount) return;
+    const amount = parseFloat(effectiveReceived);
+    if (!amount && amount !== 0) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/cash-sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticketId,
-          receivedAmount: parseFloat(receivedAmount),
-          receivedAt: new Date(receivedAt).toISOString(),
-          paymentMethod,
-          receiptRef: receiptRef || null,
-          status,
-        }),
-      });
+      let res: Response;
+      if (mode === "EXISTING") {
+        if (!ticketId) return;
+        res = await fetch("/api/cash-sales", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticketId,
+            receivedAmount: amount,
+            receivedAt: new Date(receivedAt).toISOString(),
+            paymentMethod,
+            receiptRef: receiptRef || null,
+            status,
+          }),
+        });
+      } else {
+        if (!customerId) return;
+        const validLines = draftLines.filter(
+          (l) => l.description.trim() && parseFloat(l.qty) > 0
+        );
+        if (validLines.length === 0) return;
+        res = await fetch("/api/cash-sales/with-ticket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payingCustomerId: customerId,
+            title: title.trim() || undefined,
+            lines: validLines.map((l) => ({
+              description: l.description.trim(),
+              qty: parseFloat(l.qty),
+              unit: l.unit,
+              saleUnit: l.saleUnit ? parseFloat(l.saleUnit) : undefined,
+              costUnit: l.costUnit ? parseFloat(l.costUnit) : undefined,
+            })),
+            receivedAmount: amount,
+            receivedAt: new Date(receivedAt).toISOString(),
+            paymentMethod,
+            receiptRef: receiptRef || null,
+            status,
+          }),
+        });
+      }
       if (res.ok) {
         setOpen(false);
-        setTicketId("");
-        setReceivedAmount("");
-        setReceiptRef("");
+        resetForm();
         router.refresh();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to save cash sale");
       }
     } finally {
       setSubmitting(false);
@@ -237,33 +331,223 @@ export function CashSalesView({
               </SheetDescription>
             </SheetHeader>
             <div className="p-4 space-y-4">
-              <div className="space-y-2">
-                <Label>Ticket</Label>
-                <Select
-                  value={ticketId}
-                  onValueChange={(v) => setTicketId(v ?? "")}
+              <div className="flex gap-2 border border-[#333333] p-1 rounded">
+                <button
+                  type="button"
+                  className={`flex-1 px-3 py-1.5 text-xs font-medium tracking-wider transition-colors ${
+                    mode === "NEW_TICKET"
+                      ? "bg-[#FF6600] text-black"
+                      : "text-[#888888] hover:text-[#FF6600]"
+                  }`}
+                  onClick={() => setMode("NEW_TICKET")}
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select ticket" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tickets.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  NEW TICKET
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 px-3 py-1.5 text-xs font-medium tracking-wider transition-colors ${
+                    mode === "EXISTING"
+                      ? "bg-[#FF6600] text-black"
+                      : "text-[#888888] hover:text-[#FF6600]"
+                  }`}
+                  onClick={() => setMode("EXISTING")}
+                >
+                  EXISTING TICKET
+                </button>
               </div>
+
+              {mode === "EXISTING" ? (
+                <div className="space-y-2">
+                  <Label>Ticket</Label>
+                  <Select
+                    value={ticketId}
+                    onValueChange={(v) => setTicketId(v ?? "")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select ticket" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tickets.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>Customer</Label>
+                    <Select
+                      value={customerId}
+                      onValueChange={(v) => setCustomerId(v ?? "")}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select customer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customers.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                            {c.isCashCustomer ? " (cash)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Title (optional)</Label>
+                    <Input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Auto: Cash sale [date]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Lines</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={addLine}
+                      >
+                        <Plus className="size-3 mr-1" />
+                        Add line
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {draftLines.map((line, idx) => (
+                        <div
+                          key={idx}
+                          className="grid grid-cols-12 gap-1 items-end"
+                        >
+                          <div className="col-span-5">
+                            {idx === 0 && (
+                              <span className="text-[10px] text-[#888888] uppercase tracking-wider">
+                                Description
+                              </span>
+                            )}
+                            <Input
+                              value={line.description}
+                              onChange={(e) =>
+                                updateLine(idx, { description: e.target.value })
+                              }
+                              placeholder="Item"
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            {idx === 0 && (
+                              <span className="text-[10px] text-[#888888] uppercase tracking-wider">
+                                Qty
+                              </span>
+                            )}
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.qty}
+                              onChange={(e) =>
+                                updateLine(idx, { qty: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            {idx === 0 && (
+                              <span className="text-[10px] text-[#888888] uppercase tracking-wider">
+                                Unit
+                              </span>
+                            )}
+                            <Select
+                              value={line.unit}
+                              onValueChange={(v) =>
+                                updateLine(idx, { unit: v ?? "EA" })
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {UNITS.map((u) => (
+                                  <SelectItem key={u} value={u}>
+                                    {u}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="col-span-2">
+                            {idx === 0 && (
+                              <span className="text-[10px] text-[#888888] uppercase tracking-wider">
+                                Sale £
+                              </span>
+                            )}
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.saleUnit}
+                              onChange={(e) =>
+                                updateLine(idx, { saleUnit: e.target.value })
+                              }
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            {idx === 0 && (
+                              <span className="text-[10px] text-[#888888] uppercase tracking-wider">
+                                Cost £
+                              </span>
+                            )}
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.costUnit}
+                              onChange={(e) =>
+                                updateLine(idx, { costUnit: e.target.value })
+                              }
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => removeLine(idx)}
+                              disabled={draftLines.length === 1}
+                              className="text-[#888888] hover:text-[#FF3333] disabled:opacity-30"
+                              title="Remove"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {linesSaleTotal > 0 && (
+                      <p className="text-xs text-[#888888] text-right">
+                        Lines total: {money(linesSaleTotal)}
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+
               <div className="space-y-2">
                 <Label>Received Amount</Label>
                 <Input
                   type="number"
                   step="0.01"
-                  value={receivedAmount}
-                  onChange={(e) => setReceivedAmount(e.target.value)}
+                  value={effectiveReceived}
+                  onChange={(e) => {
+                    setReceivedAmount(e.target.value);
+                    setReceivedAmountTouched(true);
+                  }}
                   placeholder="0.00"
                 />
+                {!receivedAmountTouched && mode === "NEW_TICKET" && linesSaleTotal > 0 && (
+                  <p className="text-[10px] text-[#888888]">
+                    Auto-filled from lines. Edit to override.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Received At</Label>
@@ -319,7 +603,16 @@ export function CashSalesView({
               <Button
                 className="w-full"
                 onClick={handleSubmit}
-                disabled={submitting || !ticketId || !receivedAmount}
+                disabled={
+                  submitting ||
+                  !effectiveReceived ||
+                  (mode === "EXISTING"
+                    ? !ticketId
+                    : !customerId ||
+                      draftLines.every(
+                        (l) => !l.description.trim() || !(parseFloat(l.qty) > 0)
+                      ))
+                }
               >
                 {submitting ? "Saving..." : "Save Cash Sale"}
               </Button>

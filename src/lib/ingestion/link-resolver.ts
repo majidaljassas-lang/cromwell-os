@@ -113,6 +113,9 @@ export async function scoreOpenTicketsForText(
       payingCustomer: true,
       requestedByContact: true,
       lines: { take: 20, select: { normalizedItemName: true, productCode: true } },
+      customerPOs: { select: { poNo: true } },
+      quotes: { select: { quoteNo: true } },
+      invoices: { select: { invoiceNo: true } },
     },
     take: 100,
   });
@@ -370,11 +373,18 @@ export function scoreAgainstTicket(
     }
   }
 
-  // Reference number match
+  // Reference number match — must CORRELATE to THIS ticket. extractReferences
+  // tags every capture with its type ("invoice:…", "po:…", "quote:…",
+  // "ticket:…"), and we only check that ref against the matching family of
+  // identifiers on the ticket. Substring match further requires ≥6 chars so a
+  // short ticketNo like "84" can't accidentally match a 16-digit invoice ref.
   const refs = extractReferences(text);
   if (refs.length > 0) {
-    score += WEIGHTS.REFERENCE_NUMBER;
-    reasons.push(`Reference found: ${refs.join(", ")}`);
+    const correlated = refs.filter((r) => correlateRefToTicket(r, ticket));
+    if (correlated.length > 0) {
+      score += WEIGHTS.REFERENCE_NUMBER;
+      reasons.push(`Reference correlated to ticket: ${correlated.join(", ")}`);
+    }
   }
 
   // Product overlap
@@ -391,14 +401,81 @@ export function scoreAgainstTicket(
     }
   }
 
-  // Timeline proximity (within 72h of ticket creation or last update)
-  const hoursSinceTicket = (input.receivedAt.getTime() - new Date(ticket.updatedAt).getTime()) / (1000 * 60 * 60);
-  if (Math.abs(hoursSinceTicket) <= 72) {
-    score += WEIGHTS.TIMELINE_PROXIMITY;
-    reasons.push("Within 72h of ticket activity");
+  // Timeline proximity — only adds weight when ANOTHER signal has already
+  // fired. On its own, "active ticket" is true for every active ticket and
+  // shouldn't pull unrelated comms toward arbitrary recently-updated jobs.
+  if (score > 0) {
+    const hoursSinceTicket = (input.receivedAt.getTime() - new Date(ticket.updatedAt).getTime()) / (1000 * 60 * 60);
+    if (Math.abs(hoursSinceTicket) <= 72) {
+      score += WEIGHTS.TIMELINE_PROXIMITY;
+      reasons.push("Within 72h of ticket activity");
+    }
   }
 
   return { score, reasons };
+}
+
+/**
+ * Type-aware ref correlation. extractReferences emits "type:value" strings
+ * — we only correlate against the matching family on the ticket so a generic
+ * INV reference can't accidentally match a ticketNo that happens to appear as
+ * a substring inside a 16-digit invoice number.
+ *
+ * Substring fallback further requires ≥6 chars on the shorter side to weed
+ * out spurious "84" / "103" matches against long digit runs.
+ */
+function correlateRefToTicket(ref: string, ticket: any): boolean {
+  const colon = ref.indexOf(":");
+  if (colon < 0) return false;
+  const type = ref.slice(0, colon);
+  const value = ref.slice(colon + 1).trim();
+  if (!value) return false;
+
+  const invoiceNos = (ticket.invoices ?? [])
+    .map((i: { invoiceNo?: string | null }) => i?.invoiceNo)
+    .filter((x: unknown): x is string => typeof x === "string" && x.length > 0);
+  const poNos = (ticket.customerPOs ?? [])
+    .map((p: { poNo?: string | null }) => p?.poNo)
+    .filter((x: unknown): x is string => typeof x === "string" && x.length > 0);
+  const quoteNos = (ticket.quotes ?? [])
+    .map((q: { quoteNo?: string | null }) => q?.quoteNo)
+    .filter((x: unknown): x is string => typeof x === "string" && x.length > 0);
+
+  switch (type) {
+    case "ticket": {
+      if (ticket.ticketNo == null) return false;
+      const n = String(ticket.ticketNo);
+      const variants = [n, `t-${n}`, `tk-${n}`, `t${n}`];
+      return matchesAnyOf(value, variants);
+    }
+    case "invoice":
+      return matchesAnyOf(value, invoiceNos);
+    case "po":
+      return matchesAnyOf(value, poNos);
+    case "quote":
+      return matchesAnyOf(value, quoteNos);
+    case "selco_order":
+    case "enquiry":
+    default:
+      // Generic refs check across all identifier families.
+      return matchesAnyOf(value, [...invoiceNos, ...poNos, ...quoteNos]);
+  }
+}
+
+/**
+ * Case-insensitive equality OR substring match where the shorter side is at
+ * least 6 chars (avoids short numeric ticketNos giving spurious matches inside
+ * long digit runs).
+ */
+function matchesAnyOf(value: string, candidates: string[]): boolean {
+  const v = value.toLowerCase();
+  for (const c of candidates) {
+    const t = c.toLowerCase();
+    if (v === t) return true;
+    if (v.length >= 6 && t.includes(v)) return true;
+    if (t.length >= 6 && v.includes(t)) return true;
+  }
+  return false;
 }
 
 function scoreAgainstEnquiry(

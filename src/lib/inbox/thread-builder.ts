@@ -108,7 +108,14 @@ function deriveMeta(event: IngestionEventLike) {
 function classify(subject: string | null, snippet: string | null): string | null {
   const text = `${subject ?? ""} ${snippet ?? ""}`.toLowerCase();
   if (!text.trim()) return null;
-  if (/\b(invoice|bill|statement|remittance|credit note|pro ?forma)\b/.test(text)) return "BILL";
+  // Statement first (more specific) — must beat the generic bill/invoice match.
+  // A "statement of account" lists multiple invoices; routing it to BILL would
+  // mis-trigger the bill pipeline. Per outlook_accounts_payable_rule.md +
+  // feedback_zoho_phaseout.md: statements reconcile against AP, not post.
+  if (/\b(statement of account|account statement|monthly statement|ar statement|ap statement)\b/.test(text)) return "STATEMENT";
+  if (/\bstatement\b/.test(text) && !/\b(bank statement)\b/.test(text)) return "STATEMENT";
+  if (/\b(remittance advice|payment advice)\b/.test(text)) return "REMITTANCE";
+  if (/\b(invoice|bill|credit note|pro ?forma)\b/.test(text)) return "BILL";
   if (/\b(ord(-|er)|po |purchase order|please supply|please order)\b/.test(text)) return "ORDER";
   if (/\b(quote|quotation|price|cost|estimate|rfq)\b/.test(text)) return "QUOTE_REQUEST";
   if (/\b(delivery|dispatch|shipment|dispatched|tracking)\b/.test(text)) return "DELIVERY";
@@ -536,6 +543,18 @@ export async function autoLinkThread(
     await prisma.inboxThread.update({
       where: { id: threadId },
       data: { linkConfidence: "LOW", linkSource: "AUTO" },
+    });
+  } else if (current.linkConfidence === "MEDIUM" && current.linkSource === "AUTO") {
+    // Downgrade path. A prior AUTO-suggested link is allowed to evaporate
+    // when re-scoring no longer supports it (e.g. the scorer was tightened,
+    // or new ticket data made the prior signal correlate to nothing). HIGH
+    // links (status=LINKED) and MANUAL links are never cleared here.
+    await prisma.inboxThread.update({
+      where: { id: threadId },
+      data: {
+        linkedTicketId: null,
+        linkConfidence: "LOW",
+      },
     });
   }
   // Record the top reasons on console for debugging during backfill runs.

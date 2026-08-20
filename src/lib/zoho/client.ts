@@ -39,12 +39,71 @@ async function call<T>(path: string, query: Record<string, string | number | und
 
 // Public ----------------------------------------------------------------
 
+type PageCtx = { has_more_page?: boolean; page?: number; per_page?: number; total?: number };
+
 export async function listBills(query: Record<string, string | number | undefined> = {}) {
-  const r = await call<{ bills: Array<Record<string, unknown>>; page_context: Record<string, unknown> }>("/bills", query);
+  const r = await call<{ bills: Array<Record<string, unknown>>; page_context: PageCtx }>("/bills", query);
   return r;
 }
 
 export async function getBill(billId: string) {
   const r = await call<{ bill: Record<string, unknown> }>(`/bills/${billId}`);
   return r.bill;
+}
+
+export async function listInvoices(query: Record<string, string | number | undefined> = {}) {
+  const r = await call<{ invoices: Array<Record<string, unknown>>; page_context: PageCtx }>("/invoices", query);
+  return r;
+}
+
+export async function getInvoice(invoiceId: string) {
+  const r = await call<{ invoice: Record<string, unknown> }>(`/invoices/${invoiceId}`);
+  return r.invoice;
+}
+
+export async function listContacts(query: Record<string, string | number | undefined> = {}) {
+  const r = await call<{ contacts: Array<Record<string, unknown>>; page_context: PageCtx }>("/contacts", query);
+  return r;
+}
+
+export async function getContact(contactId: string) {
+  const r = await call<{ contact: Record<string, unknown> }>(`/contacts/${contactId}`);
+  return r.contact;
+}
+
+/**
+ * Customer payments — money received from customers, applied to invoices.
+ */
+export async function listCustomerPayments(query: Record<string, string | number | undefined> = {}) {
+  const r = await call<{ customerpayments: Array<Record<string, unknown>>; page_context: PageCtx }>("/customerpayments", query);
+  return r;
+}
+
+/**
+ * Vendor payments — money paid to suppliers, applied to bills.
+ */
+export async function listVendorPayments(query: Record<string, string | number | undefined> = {}) {
+  const r = await call<{ vendorpayments: Array<Record<string, unknown>>; page_context: PageCtx }>("/vendorpayments", query);
+  return r;
+}
+
+export async function listChartOfAccounts(query: Record<string, string | number | undefined> = {}) {
+  const r = await call<{ chartofaccounts: Array<Record<string, unknown>>; page_context: PageCtx }>("/chartofaccounts", query);
+  return r;
+}
+
+/**
+ * Generic paginated puller — yields every page until has_more_page is false.
+ * Use for one-shot historical imports.
+ */
+export async function* paginate<T>(
+  fetcher: (page: number) => Promise<{ items: T[]; ctx: PageCtx }>
+): AsyncGenerator<T[], void, unknown> {
+  let page = 1;
+  while (true) {
+    const { items, ctx } = await fetcher(page);
+    if (items.length > 0) yield items;
+    if (!ctx.has_more_page) break;
+    page++;
+  }
 }

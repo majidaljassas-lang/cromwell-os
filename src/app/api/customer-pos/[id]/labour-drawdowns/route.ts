@@ -89,8 +89,8 @@ export async function POST(
         ? 0
         : internalDayCost * Number(daysWorked) * Number(plumberCount);
       const overheadPct = Number(po.overheadPct) || 10;
-      const overheadValue = (isAdvanceBilling || isDeliveryAgainstAdvance) ? 0 : billableValue * overheadPct / 100;
-      const grossProfitValue = billableValue - internalCostValue - overheadValue;
+      const overheadValue = 0;
+      const grossProfitValue = billableValue - internalCostValue;
 
       const entry = await tx.labourDrawdownEntry.create({
         data: {

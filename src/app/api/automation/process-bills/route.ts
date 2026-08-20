@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { parseBillText } from "@/lib/ingestion/bill-parser";
+import { extractBillFromText } from "@/lib/bills/ai-extractor";
 import { processBill } from "@/lib/finance/bill-processor";
+import { allocateBillLine } from "@/lib/intake/allocation-engine";
 import { runThreeWayMatch } from "@/lib/finance/three-way-match";
 import { checkSchedulerSecret } from "@/lib/scheduler/secret";
 import { createBillNeedsReviewTask } from "@/lib/ingestion/auto-action";
@@ -149,25 +150,53 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // Parse the bill
-        const parsed = parseBillText(billText);
+        // Parse the bill — AI-first (handles arbitrary layouts), regex fallback inside extractor.
+        const extracted = await extractBillFromText(billText);
+        const parsed = {
+          supplierName: extracted.supplierName,
+          billNo:       extracted.invoiceNo,
+          billDate:     extracted.invoiceDate,
+          customerRef:  extracted.customerRef,
+          siteRef:      extracted.siteRef,
+          grandTotal:   extracted.totalIncVat,
+          lines: extracted.lines.map((l) => ({
+            description: l.description,
+            productCode: null as string | null,
+            qty:         l.qty,
+            unitCost:    l.unitCost,
+            lineTotal:   l.lineTotal,
+            vatAmount:   l.vatRate != null ? Math.round(l.lineTotal * l.vatRate) / 100 : null,
+          })),
+        };
 
-        if (parsed.lines.length === 0 && !parsed.billNo) {
+        // Reject hallucinated parses: AI sometimes pulls random PDF text as a "billNo"
+        // (e.g. "for", "Gross", "GS8", "2Reference") with zero lines. A real supplier
+        // bill ALWAYS has at least one line item. If we have no lines, it's not
+        // a parsable bill regardless of what billNo was extracted.
+        const billNoLooksReal =
+          !!parsed.billNo &&
+          parsed.billNo.length >= 4 &&
+          /\d/.test(parsed.billNo); // must contain at least one digit
+
+        if (parsed.lines.length === 0 || !billNoLooksReal) {
+          const reason = parsed.lines.length === 0
+            ? `parser returned 0 line items`
+            : `billNo "${parsed.billNo}" doesn't look like a real supplier bill number`;
           await prisma.ingestionEvent.update({
             where: { id: event.id },
-            data: { status: "NEEDS_REVIEW", errorMessage: "Bill text parsed but no lines or bill number found" },
+            data: { status: "NEEDS_REVIEW", errorMessage: `Bill parser (${extracted.source}, conf ${extracted.confidence}): ${reason}` },
           });
           await createBillNeedsReviewTask(
             event.id, data.subject || "", fromEmail, fromName,
-            "bill parser returned no line items and no bill number",
+            `bill parser (${extracted.source}, confidence ${extracted.confidence}): ${reason}`,
           );
           failed++;
           results.push({
             eventId: event.id,
-            billNo: null,
+            billNo: parsed.billNo,
             supplier: null,
             success: false,
-            details: "Parser returned no lines and no bill number",
+            details: `Parser (${extracted.source}) rejected: ${reason}`,
           });
           continue;
         }
@@ -256,7 +285,7 @@ export async function POST(request: Request) {
           return created;
         });
 
-        // Process bill (AP journal + line matching)
+        // Process bill (AP journal + legacy CostAllocation matching)
         let processingDetails = "";
         try {
           const result = await processBill(bill.id);
@@ -264,6 +293,27 @@ export async function POST(request: Request) {
         } catch (procErr) {
           processingDetails = `processBill error: ${procErr instanceof Error ? procErr.message : "unknown"}`;
         }
+
+        // Run the 5-bucket allocation engine on every line so BillLineAllocation
+        // rows are created automatically (TICKET_LINE / STOCK / RETURNS_CANDIDATE
+        // / OVERHEAD / UNRESOLVED). Without this the /bills UI shows lines as
+        // UNALLOCATED and the user has to click AUTO per line.
+        const billLineIds = (await prisma.supplierBillLine.findMany({
+          where: { supplierBillId: bill.id },
+          select: { id: true },
+        })).map((l) => l.id);
+        let allocAttempted = 0;
+        let allocUnresolved = 0;
+        for (const blId of billLineIds) {
+          try {
+            const r = await allocateBillLine(blId);
+            allocAttempted++;
+            if (r.hasUnresolved) allocUnresolved++;
+          } catch (allocErr) {
+            console.error(`[process-bills] allocateBillLine failed for ${blId}:`, allocErr);
+          }
+        }
+        processingDetails += `, allocated: ${allocAttempted - allocUnresolved}/${allocAttempted}`;
 
         // Mark as actioned
         await prisma.ingestionEvent.update({

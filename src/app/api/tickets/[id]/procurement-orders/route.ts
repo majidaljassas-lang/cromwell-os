@@ -44,6 +44,7 @@ export async function POST(
       issuedAt,
       status = "DRAFT",
       siteRef,
+      siteContact,
       deliveryDateExpected,
       totalCostExpected,
       lines,
@@ -66,6 +67,7 @@ export async function POST(
           issuedAt: issuedAt ? new Date(issuedAt) : undefined,
           status,
           siteRef,
+          siteContact,
           deliveryDateExpected: deliveryDateExpected
             ? new Date(deliveryDateExpected)
             : undefined,

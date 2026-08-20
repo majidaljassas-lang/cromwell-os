@@ -28,6 +28,7 @@
  */
 
 import { checkSchedulerSecret, schedulerSecretHeaders } from "@/lib/scheduler/secret";
+import { runHeartbeatMonitor } from "@/lib/scheduler/heartbeat-monitor";
 
 const BASE =
   process.env.RUN_ALL_BASE ||
@@ -158,6 +159,23 @@ export async function POST(request: Request) {
   const processBills             = await runStep("processBills",             "/api/automation/process-bills");
   const trickleDown              = await runStep("trickleDown",              "/api/automation/trickle-down");
 
+  // Final step: run intake heartbeat monitor inline (no HTTP hop). Failures
+  // are isolated — heartbeat must never break the orchestrator.
+  let heartbeat: { ok: boolean; durationMs: number; result?: unknown; error?: string };
+  {
+    const t0 = Date.now();
+    try {
+      const result = await runHeartbeatMonitor();
+      heartbeat = { ok: true, durationMs: Date.now() - t0, result };
+    } catch (err) {
+      heartbeat = {
+        ok: false,
+        durationMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   const steps = [
     outlookSync, backfillAttachments,
     bankDetailCheck, threeWayMatch,
@@ -197,6 +215,7 @@ export async function POST(request: Request) {
         autoAction: autoAction.result,
         processBills: processBills.result,
         trickleDown: trickleDown.ok ? "done" : trickleDown.error,
+        heartbeat: heartbeat.ok ? heartbeat.result : heartbeat.error,
       },
     },
     { status: allOk ? 200 : 207 }

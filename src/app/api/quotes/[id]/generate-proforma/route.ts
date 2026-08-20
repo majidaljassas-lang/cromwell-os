@@ -52,6 +52,7 @@ type ProformaQuote = {
     billingAddress: string | null;
     companyNumber: string | null;
     vatNumber: string | null;
+    outsideUkVatScope: boolean;
   };
   site: { siteName: string } | null;
   ticket: { title: string };
@@ -60,6 +61,7 @@ type ProformaQuote = {
     qty: unknown;
     unitPrice: unknown;
     lineTotal: unknown;
+    sortOrder: number;
     ticketLine: { unit: string; sectionLabel: string | null } | null;
   }>;
 };
@@ -105,8 +107,9 @@ function buildHtml(
     </tr>`;
   }).join("");
 
-  const vatAmount = totalSale * 0.2;
-  const grandTotal = totalSale * 1.2;
+  const noVat = quote.customer.outsideUkVatScope;
+  const vatAmount = noVat ? 0 : totalSale * 0.2;
+  const grandTotal = noVat ? totalSale : totalSale * 1.2;
 
   return `<!DOCTYPE html>
 <html><head>
@@ -183,8 +186,8 @@ function buildHtml(
       <span style="font-size:11px;font-variant-numeric:tabular-nums">${fmt(totalSale)}</span>
     </div>
     <div style="display:flex;justify-content:space-between;padding:6px 0">
-      <span style="font-size:11px;color:#555">VAT (20%)</span>
-      <span style="font-size:11px;font-variant-numeric:tabular-nums">${fmt(vatAmount)}</span>
+      <span style="font-size:11px;color:#555">VAT${noVat ? "" : " (20%)"}</span>
+      <span style="font-size:11px;font-variant-numeric:tabular-nums">${noVat ? "Outside the scope of UK VAT" : fmt(vatAmount)}</span>
     </div>
     <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #ddd;margin-top:2px">
       <span style="font-weight:700;font-size:13px">Total</span>
@@ -230,6 +233,7 @@ async function loadQuote(id: string) {
           billingAddress: true,
           companyNumber: true,
           vatNumber: true,
+          outsideUkVatScope: true,
         },
       },
       site: { select: { siteName: true } },
@@ -263,12 +267,9 @@ export async function POST(
       select: { poNo: true, customerId: true, customer: { select: { name: true, billingAddress: true } } },
     });
 
-    // Sort lines to match ticket order (matches the invoice generator's behaviour).
-    quote.lines.sort((a, b) => {
-      const ta = a.ticketLine?.createdAt ? new Date(a.ticketLine.createdAt).getTime() : 0;
-      const tb = b.ticketLine?.createdAt ? new Date(b.ticketLine.createdAt).getTime() : 0;
-      return ta - tb;
-    });
+    // Sort lines by the QuoteLine's explicit sortOrder. Line order is immutable —
+    // never sort by createdAt alone.
+    quote.lines.sort((a, b) => a.sortOrder - b.sortOrder);
 
     const proformaNumber = quote.proformaNumber || (await allocateProformaNumber());
     const proformaIssuedAt = quote.proformaIssuedAt || new Date();

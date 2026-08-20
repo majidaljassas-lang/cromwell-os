@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { STANDARD_VAT_RATE, lineVat, recomputeInvoiceTotals } from "@/lib/finance/invoice-totals";
 
 /**
  * POST /api/customer-pos/[id]/build-invoice
@@ -83,8 +84,10 @@ export async function POST(
       });
 
       // Priority: custom lines from request body > PO lines > generic line
+      let lineSeq = 0;
       if (customLines.length > 0) {
         for (const cl of customLines) {
+          lineSeq++;
           const qty = Number(cl.qty || 1);
           const unitPrice = Number(cl.unitPrice || 0);
           const lineTotal = qty * unitPrice;
@@ -114,20 +117,18 @@ export async function POST(
               qty,
               unitPrice,
               lineTotal,
+              vatRate: STANDARD_VAT_RATE,
+              vatAmount: lineVat(lineTotal),
               displayMode: "LINE",
+              displayOrder: lineSeq,
               poMatched: true,
               poMatchStatus: "MATCHED",
             },
           });
         }
-        // Update invoice total
-        const computedTotal = customLines.reduce((s, cl) => s + (Number(cl.qty || 1) * Number(cl.unitPrice || 0)), 0);
-        await tx.salesInvoice.update({
-          where: { id: created.id },
-          data: { totalSell: computedTotal },
-        });
       } else if (po.lines.length > 0) {
         for (const poLine of po.lines) {
+          lineSeq++;
           const qty = Number(poLine.qty || 1);
           const unitPrice = Number(poLine.agreedUnitPrice || 0);
           const lineTotal = Number(poLine.agreedTotal || (qty * unitPrice));
@@ -162,13 +163,17 @@ export async function POST(
               qty,
               unitPrice,
               lineTotal,
+              vatRate: STANDARD_VAT_RATE,
+              vatAmount: lineVat(lineTotal),
               displayMode: "LINE",
+              displayOrder: lineSeq,
               poMatched: true,
               poMatchStatus: "MATCHED",
             },
           });
         }
       } else {
+        lineSeq++;
         // PO has no lines — create a single line from PO total
         const ticketLine = await tx.ticketLine.create({
           data: {
@@ -194,7 +199,10 @@ export async function POST(
             qty: 1,
             unitPrice: totalSell,
             lineTotal: totalSell,
+            vatRate: STANDARD_VAT_RATE,
+            vatAmount: lineVat(totalSell),
             displayMode: "LINE",
+            displayOrder: lineSeq,
             poMatched: true,
             poMatchStatus: "MATCHED",
           },
@@ -206,6 +214,9 @@ export async function POST(
         where: { id },
         data: { invoiceNo },
       });
+
+      // Recompute net/vat/gross from finalised line set.
+      await recomputeInvoiceTotals(tx, created.id);
 
       return created;
     });

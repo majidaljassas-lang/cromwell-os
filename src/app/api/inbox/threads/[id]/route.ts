@@ -1,15 +1,19 @@
 /**
  * GET    /api/inbox/threads/:id           — full thread with all messages
- * PATCH  /api/inbox/threads/:id           — { action: "ACCEPT" | "NOISE" | "LINK" | "UNDO"; ticketId?: string }
+ * PATCH  /api/inbox/threads/:id           — { action: ...; ticketId?: string; reactionId?: string }
  *
  * ACCEPT  → create a new Ticket from the thread (or link to ticketId if provided), status=LINKED
  * NOISE   → status=NOISE, hidden from default inbox view
  * LINK    → status=LINKED, linkedTicketId=ticketId (caller supplies existing ticket)
  * UNDO    → status=NEW, clear linkedTicketId
+ * REACT   → execute a Reaction (creates Task, advances thread, returns destinationRoute)
  */
 import { prisma } from "@/lib/prisma";
 import { extractDocument } from "@/lib/ingestion/document-extractor";
 import { processExtractedDocument } from "@/lib/ingestion/document-processor";
+import { executeReaction, undoReaction } from "@/lib/inbox/reaction-runner";
+import type { ReactionId } from "@/lib/inbox/reactions";
+import { REACTIONS } from "@/lib/inbox/reactions";
 
 type CustomerResolution =
   | { ok: true; customerId: string }
@@ -164,12 +168,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
   const { id } = await params;
-  const body = await request.json() as { action?: string; ticketId?: string; title?: string };
+  const body = await request.json() as { action?: string; ticketId?: string; title?: string; reactionId?: string };
   const thread = await prisma.inboxThread.findUnique({
     where: { id },
     include: { messages: { take: 1, orderBy: { occurredAt: "asc" } } },
   });
   if (!thread) return Response.json({ error: "thread not found" }, { status: 404 });
+
+  if (body.action === "REACT") {
+    const reactionId = body.reactionId as ReactionId | undefined;
+    if (!reactionId || !(reactionId in REACTIONS)) {
+      return Response.json({ error: "valid reactionId required" }, { status: 400 });
+    }
+    const result = await executeReaction(id, reactionId, "USER");
+    return Response.json(result, { status: result.ok ? 200 : 400 });
+  }
 
   if (body.action === "NOISE") {
     await prisma.inboxThread.update({
@@ -180,6 +193,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   if (body.action === "UNDO") {
+    // If the thread has a reaction Task, fully undo via reaction-runner.
+    // Otherwise fall back to the legacy reset (used by older actions).
+    const t = await prisma.inboxThread.findUnique({
+      where: { id },
+      select: { reactionTaskId: true },
+    });
+    if (t?.reactionTaskId) {
+      const result = await undoReaction(id, "USER");
+      return Response.json({ ok: result.ok, status: "NEW" });
+    }
     await prisma.inboxThread.update({
       where: { id },
       data: { status: "NEW", noisedAt: null, triagedAt: null, linkedTicketId: null, triageAction: null, triageDueAt: null, triageNote: null },

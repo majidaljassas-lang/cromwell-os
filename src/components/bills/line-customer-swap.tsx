@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Member = { id: string; name: string; isCurrent: boolean; isRoot: boolean };
@@ -10,20 +10,29 @@ export function LineCustomerSwap({
   lineId,
   currentCustomer,
   disabled,
+  alwaysOpen,
+  onClose,
 }: {
   billId: string;
   lineId: string;
   currentCustomer: { id: string; name: string } | null;
   disabled?: boolean;
+  alwaysOpen?: boolean;
+  onClose?: () => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!alwaysOpen);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [scoped, setScoped] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (alwaysOpen && !members && !loading) void loadMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alwaysOpen]);
 
   async function loadMembers() {
     setLoading(true);
@@ -56,6 +65,7 @@ export function LineCustomerSwap({
       setOpen(false);
       setMembers(null);
       setTarget("");
+      onClose?.();
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "save failed");
@@ -70,6 +80,7 @@ export function LineCustomerSwap({
       setMembers(null);
       setTarget("");
       setError(null);
+      onClose?.();
     } else {
       setOpen(true);
       if (!members) void loadMembers();

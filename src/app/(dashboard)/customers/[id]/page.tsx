@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { CustomerDetail } from "@/components/customers/customer-detail";
+import { DebtAccountPanel } from "@/components/customers/debt-account-panel";
 import { getEffectiveBillingDetails } from "@/lib/customers/effective-billing";
 
 export const dynamic = "force-dynamic";
@@ -155,6 +156,28 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     invoices: invoicesTagged,
   };
 
+  // Debt-account trackers (assumed third-party balances paid down over time).
+  const debtTrackers = await prisma.customerDebtTracker.findMany({
+    where: { customerId: { in: familyIds } },
+    include: {
+      repayments: { orderBy: { paidAt: "asc" } },
+      sourceInvoices: { orderBy: { invoiceDate: "asc" } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const debtInvoiceIds = debtTrackers
+    .flatMap((t) => t.repayments.map((r) => r.salesInvoiceId))
+    .filter((v): v is string => !!v);
+  const debtInvoices = debtInvoiceIds.length
+    ? await prisma.salesInvoice.findMany({
+        where: { id: { in: debtInvoiceIds } },
+        select: { id: true, invoiceNo: true, status: true },
+      })
+    : [];
+  const debtInvoiceMap = Object.fromEntries(
+    debtInvoices.map((i) => [i.id, { invoiceNo: i.invoiceNo, status: i.status }])
+  );
+
   const allSites = await prisma.site.findMany({
     select: { id: true, siteName: true },
     orderBy: { siteName: "asc" },
@@ -178,6 +201,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         isBucket={isBucket}
         effective={s(effective)}
         inheritSourceNames={inheritSourceNames}
+      />
+      <DebtAccountPanel
+        customerId={customer.id}
+        trackers={s(debtTrackers)}
+        invoiceMap={debtInvoiceMap}
+        invoiceOptions={invoices.map((i) => ({ id: i.id, invoiceNo: i.invoiceNo }))}
       />
     </div>
   );

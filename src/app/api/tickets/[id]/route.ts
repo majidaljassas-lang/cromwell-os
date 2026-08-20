@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { STANDARD_VAT_RATE, lineVat } from "@/lib/finance/invoice-totals";
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 const PRE_TRANSACTIONAL_STATUSES = new Set(["CAPTURED", "PRICING", "QUOTED"]);
 const TRANSACTIONAL_STATUSES = new Set([
@@ -15,7 +18,7 @@ export async function GET(
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: {
-        lines: true,
+        lines: { orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         payingCustomer: true,
         site: true,
         siteCommercialLink: true,
@@ -45,6 +48,31 @@ export async function PATCH(
   const { id } = await params;
   try {
     const body = await request.json();
+
+    // Reassign flow: when caller changes customer/site, resolve the matching
+    // active SiteCommercialLink server-side so the client doesn't have to.
+    if (
+      Object.prototype.hasOwnProperty.call(body, "payingCustomerId") ||
+      Object.prototype.hasOwnProperty.call(body, "siteId")
+    ) {
+      const current = await prisma.ticket.findUnique({
+        where: { id },
+        select: { payingCustomerId: true, siteId: true },
+      });
+      const nextCustomerId =
+        body.payingCustomerId !== undefined ? body.payingCustomerId : current?.payingCustomerId ?? null;
+      const nextSiteId =
+        body.siteId !== undefined ? body.siteId : current?.siteId ?? null;
+      if (nextCustomerId && nextSiteId) {
+        const link = await prisma.siteCommercialLink.findFirst({
+          where: { customerId: nextCustomerId, siteId: nextSiteId, isActive: true },
+          select: { id: true },
+        });
+        body.siteCommercialLinkId = link?.id ?? null;
+      } else {
+        body.siteCommercialLinkId = null;
+      }
+    }
 
     if (typeof body.status === "string" && TRANSACTIONAL_STATUSES.has(body.status)) {
       const current = await prisma.ticket.findUnique({
@@ -92,7 +120,9 @@ export async function PATCH(
           const pricedLines = fullTicket.lines.filter(
             (line) => line.actualSaleUnit !== null || line.actualSaleTotal !== null
           );
-          const totalSell = pricedLines.reduce((sum, line) => sum + Number(line.actualSaleTotal || 0), 0);
+          const totalNet = r2(pricedLines.reduce((sum, line) => sum + Number(line.actualSaleTotal || 0), 0));
+          const totalVat = r2(totalNet * (STANDARD_VAT_RATE / 100));
+          const totalGross = r2(totalNet + totalVat);
           const invoiceNo = `INV-AUTO-${Date.now()}`;
           const poRef = fullTicket.customerPOs[0]?.poNo || null;
 
@@ -113,22 +143,31 @@ export async function PATCH(
               status: "DRAFT",
               issuedAt,
               dueDate,
-              totalSell,
+              totalSell: totalGross,
+              totalNet,
+              totalVat,
+              totalGross,
               notes: `Auto-drafted when ticket reached ${body.status}`,
             },
           });
 
           if (pricedLines.length > 0) {
             await prisma.salesInvoiceLine.createMany({
-              data: pricedLines.map((line) => ({
-                salesInvoiceId: invoice.id,
-                ticketLineId: line.id,
-                description: line.description,
-                qty: line.qty,
-                unitPrice: line.actualSaleUnit || 0,
-                lineTotal: line.actualSaleTotal || 0,
-                displayMode: "LINE",
-              })),
+              data: pricedLines.map((line, i) => {
+                const lineNet = Number(line.actualSaleTotal || 0);
+                return {
+                  salesInvoiceId: invoice.id,
+                  ticketLineId: line.id,
+                  description: line.description,
+                  qty: line.qty,
+                  unitPrice: line.actualSaleUnit || 0,
+                  lineTotal: line.actualSaleTotal || 0,
+                  vatRate: STANDARD_VAT_RATE,
+                  vatAmount: lineVat(lineNet),
+                  displayMode: "LINE",
+                  displayOrder: i + 1,
+                };
+              }),
             });
           }
 
@@ -137,9 +176,16 @@ export async function PATCH(
               ticketId: id,
               eventType: "AUTO_INVOICE_DRAFTED",
               timestamp: new Date(),
-              notes: `Draft invoice ${invoice.invoiceNo} auto-created (${pricedLines.length} lines, £${totalSell.toFixed(2)})${poRef ? ` — PO ref: ${poRef}` : ""}`,
+              notes: `Draft invoice ${invoice.invoiceNo} auto-created (${pricedLines.length} lines, £${totalGross.toFixed(2)} gross)${poRef ? ` — PO ref: ${poRef}` : ""}`,
             },
           });
+
+          if (poRef) {
+            try {
+              const matchUrl = new URL(`/api/sales-invoices/${invoice.id}/match-po`, request.url);
+              await fetch(matchUrl.toString(), { method: "POST" }).catch(() => {});
+            } catch {}
+          }
         }
       }
     }
@@ -201,11 +247,42 @@ export async function DELETE(
     await prisma.quote.deleteMany({ where: { ticketId: id } });
 
     if (custPoIds.length) {
-      await prisma.labourDrawdown.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
-      await prisma.materialsDrawdown.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
-      await prisma.customerPOLine.deleteMany({ where: { customerPOId: { in: custPoIds } } }).catch(() => {});
+      await prisma.labourDrawdownEntry.deleteMany({ where: { customerPOId: { in: custPoIds } } });
+      await prisma.materialsDrawdownEntry.deleteMany({ where: { customerPOId: { in: custPoIds } } });
+      await prisma.customerPOLine.deleteMany({ where: { customerPOId: { in: custPoIds } } });
     }
     await prisma.customerPO.deleteMany({ where: { ticketId: id } });
+
+    // Drawdowns logged against a *standing* PO (e.g. a materials drawdown PO)
+    // reference this ticket but sit under a PO the ticket doesn't own, so the
+    // by-customerPOId cleanup above misses them. Remove them by ticketId — the
+    // required MaterialsDrawdownEntry.ticketId FK would otherwise block the
+    // ticket delete — then restore each surviving PO's consumed/remaining from
+    // its remaining entries (deleteMany doesn't decrement the counters).
+    const standingDrawdowns = await prisma.materialsDrawdownEntry.findMany({
+      where: { ticketId: id },
+      select: { customerPOId: true },
+    });
+    const affectedPoIds = [...new Set(standingDrawdowns.map((d) => d.customerPOId))];
+    await prisma.materialsDrawdownEntry.deleteMany({ where: { ticketId: id } });
+    await prisma.labourDrawdownEntry.deleteMany({ where: { ticketId: id } });
+    for (const poId of affectedPoIds) {
+      const po = await prisma.customerPO.findUnique({
+        where: { id: poId },
+        select: { poLimitValue: true },
+      });
+      if (!po) continue; // PO itself was deleted with the ticket
+      const agg = await prisma.materialsDrawdownEntry.aggregate({
+        where: { customerPOId: poId },
+        _sum: { sellValue: true },
+      });
+      const consumed = r2(Number(agg._sum.sellValue ?? 0));
+      const limit = Number(po.poLimitValue ?? 0);
+      await prisma.customerPO.update({
+        where: { id: poId },
+        data: { poConsumedValue: consumed, poRemainingValue: r2(limit - consumed) },
+      });
+    }
 
     if (packIds.length) {
       await prisma.evidencePackItem.deleteMany({ where: { evidencePackId: { in: packIds } } });

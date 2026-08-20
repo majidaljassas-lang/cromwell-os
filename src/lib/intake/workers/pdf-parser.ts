@@ -89,9 +89,16 @@ export async function runPdfParser(docId: string): Promise<"PARSED" | "OCR_REQUI
   if (!doc) return "ERROR";
 
   try {
-    let text = doc.rawText ?? "";
+    const seededText = doc.rawText ?? "";
+    let text = seededText;
 
-    if ((!text || text.trim().length < MIN_TEXT_CHARS) && doc.fileRef) {
+    // Gate: if there is a fetchable PDF (fileRef present), ALWAYS fetch + parse it.
+    // Previously this gate skipped the fetch when seededText was already long enough,
+    // but outlook-sync seeds rawText with the email body — which never contains the
+    // PDF's actual contents. Treat seededText as a fallback only.
+    const hasFetchableRef = !!doc.fileRef;
+
+    if (hasFetchableRef && doc.fileRef) {
       let buf: Buffer | null = null;
 
       if (doc.sourceType === "EMAIL" && isOutlookAttachmentId(doc.fileRef)) {
@@ -136,9 +143,13 @@ export async function runPdfParser(docId: string): Promise<"PARSED" | "OCR_REQUI
 
       if (buf) {
         try {
-          // pdf-parse has no official types; treat as any to avoid declaration-file noise
+          // pdf-parse has no official types; treat as any to avoid declaration-file noise.
+          // NB: import the inner lib path directly. The package's index.js contains a
+          // debug block that runs at import-time when `module.parent` is falsy (which it
+          // is under ESM dynamic import) and tries to read ./test/data/05-versions-space.pdf,
+          // crashing every parse with ENOENT. Importing the inner file bypasses the debug.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const mod: any = await import("pdf-parse" as string);
+          const mod: any = await import("pdf-parse/lib/pdf-parse.js" as string);
           const fn = (mod && (mod.default ?? mod)) as (b: Buffer) => Promise<{ text: string }>;
           const parsed = await fn(buf);
           text = parsed.text || "";

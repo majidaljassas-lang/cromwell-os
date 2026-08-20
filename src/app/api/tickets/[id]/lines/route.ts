@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { resequenceLines } from "@/lib/tickets/resequence-lines";
 
-const VALID_UOMS = ["EA", "M", "LENGTH", "PACK", "LOT", "SET"] as const;
+const VALID_UOMS = ["EA", "M", "LENGTH", "PACK", "LOT", "SET", "TONNE"] as const;
 const DEFAULT_UOM_BY_TYPE: Record<string, string> = {
   MATERIAL: "EA",
   LABOUR: "EA",
@@ -69,13 +70,36 @@ export async function POST(
       if (rest[key] !== undefined) safeRest[key] = rest[key];
     }
 
+    // displayOrder: new line goes at the end of its section (or end of ticket if no section).
+    // Bump every line at-or-after that slot so we don't collide with existing orders.
+    const cleanSection = sectionLabel ? String(sectionLabel).trim() : null;
+    const targetForOrder = cleanSection
+      ? await prisma.ticketLine.findFirst({
+          where: { ticketId, sectionLabel: cleanSection },
+          orderBy: { displayOrder: "desc" },
+          select: { displayOrder: true },
+        })
+      : await prisma.ticketLine.findFirst({
+          where: { ticketId },
+          orderBy: { displayOrder: "desc" },
+          select: { displayOrder: true },
+        });
+    const newOrder = (targetForOrder?.displayOrder ?? 0) + 1;
+    if (cleanSection) {
+      // Push later lines down by 1 to make room at the end of this section
+      await prisma.ticketLine.updateMany({
+        where: { ticketId, displayOrder: { gte: newOrder } },
+        data: { displayOrder: { increment: 1 } },
+      });
+    }
+
     const line = await prisma.ticketLine.create({
       data: {
         ticketId,
         lineType: lineType as "MATERIAL" | "LABOUR" | "PLANT" | "SERVICE" | "DELIVERY" | "CASH_SALE" | "RETURN_ADJUSTMENT",
         description,
         qty: numQty,
-        unit: resolvedUnit as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET",
+        unit: resolvedUnit as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET" | "TONNE",
         payingCustomerId,
         internalNotes,
         status,
@@ -86,10 +110,14 @@ export async function POST(
         actualSaleTotal,
         expectedMarginTotal,
         actualMarginTotal,
-        sectionLabel: sectionLabel || undefined,
+        sectionLabel: cleanSection || undefined,
+        displayOrder: newOrder,
         ...safeRest,
       },
     });
+
+    // Keep every section a single contiguous block — guards against future fragmentation
+    await resequenceLines(ticketId);
 
     // If this line has a section label, create an event linked to the line
     if (sectionLabel) {

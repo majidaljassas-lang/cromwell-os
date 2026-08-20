@@ -54,9 +54,13 @@ export default async function InvoicesPage() {
             },
           },
         },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
       },
       poAllocations: true,
+      payments: { orderBy: { paymentDate: "desc" } },
+      salesCreditNotes: {
+        select: { id: true, creditNoteNo: true, total: true, status: true },
+      },
     },
     orderBy: { createdAt: "desc" },
   });

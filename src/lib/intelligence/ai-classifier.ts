@@ -48,23 +48,43 @@ export interface AiAnalyseResult {
 
 const SYSTEM_PROMPT = `You are analysing business communications for a UK construction materials supplier called Cromwell Plumbing Ltd. Analyse the message and return JSON.
 
-Classification options:
-ORDER — confirmed order for materials
-QUOTE_REQUEST — request for pricing/quotation
-COMPETITIVE_BID — competitive tender/bid request
-SPEC_DRIVEN — specification or product selection
-APPROVAL — approval of quote or order
-DELIVERY_UPDATE — delivery notification or update
-BILL_DOCUMENT — supplier invoice or bill
-DISPUTE — complaint, error, or dispute
-SCHEDULE — programme or timeline information
-NOISE — automated, irrelevant, or non-commercial
+First infer the SENDER DIRECTION — is the message from a CUSTOMER (someone buying from us) or a SUPPLIER (someone we buy from)? Cromwell Plumbing is the recipient. Embed direction in the classification by choosing the appropriate label below.
+
+Classification options (pick exactly one):
+
+— Customer-side (sender is a customer / contractor / end-user)
+ORDER                  confirmed order for materials
+QUOTE_REQUEST          request for pricing or a formal quote
+AVAILABILITY_REQUEST   asking what's in stock / lead time, no pricing required
+RFI                    request for product info, specs, certs, drawings
+APPROVAL               accepting / approving a previously-sent quote or order
+CHANGE_ORDER           amending / cancelling a previously-placed order
+STATEMENT_REQUEST      asking for their AR statement or list of open invoices
+INVOICE_QUERY          questioning a sales-invoice we've raised
+PAYMENT_REMITTANCE     payment notification / remittance advice from the customer
+COMPLAINT              complaint, escalation, or dispute about delivery/quality/service
+DELIVERY_QUERY         asking when their order arrives, tracking, ETA
+
+— Supplier-side (sender is a supplier / vendor / merchant)
+SUPPLIER_QUOTE         supplier quoting us prices for our requested items
+ORDER_ACK              supplier confirming receipt of our purchase order
+DISPATCH_NOTE          supplier confirming goods have been despatched / delivered
+BILL_DOCUMENT          a single supplier invoice / bill for one transaction (one invoice number, one due date, line items belong to one delivery)
+CREDIT_NOTE            supplier credit note (refund / return / mistake)
+STATEMENT_RECEIVED     a periodic statement of account listing MULTIPLE outstanding invoices owed to this supplier — typically a list with invoice refs, dates and balances. NOT a single bill. If the document lists more than one invoice/reference number or has the word "Statement" in the subject, it is STATEMENT_RECEIVED, not BILL_DOCUMENT.
+BANK_DETAIL_CHANGE     supplier announcing a change to their bank account
+BACKORDER_NOTICE       supplier saying an item is delayed / on backorder
+
+— System / non-commercial
+NOISE                  automated, marketing, irrelevant, or non-commercial
+OUT_OF_OFFICE          auto-reply / OOO bounce / vacation responder
+INTERNAL               sender is Cromwell staff (forward to self, internal note)
 
 Return ONLY valid JSON with no markdown fences:
 {
-  "classification": "string",
+  "classification": "string (one of the labels above)",
   "confidence": 0-100,
-  "summary": "string (max 20 words, what they need)",
+  "summary": "string (max 20 words, what the sender needs us to do)",
   "entities": {
     "siteName": "string or null",
     "customerName": "string or null",
@@ -152,8 +172,8 @@ export async function classifyThreadWithAi(
   // types that trigger ticket creation (ORDER, APPROVAL, QUOTE_REQUEST, etc.)
   // ALWAYS call Claude for proper summary + entity extraction, even if
   // keywords match — keyword matches produce garbage titles and no entities.
-  const keywordResult = classifyMessage(fullText);
-  const KEYWORD_ONLY_TYPES = new Set(["BILL_DOCUMENT", "PO_DOCUMENT", "DELIVERY_UPDATE"]);
+  const keywordResult = classifyMessage(fullText, { subject: thread.subject });
+  const KEYWORD_ONLY_TYPES = new Set(["BILL_DOCUMENT", "PO_DOCUMENT", "DELIVERY_UPDATE", "STATEMENT"]);
   if (keywordResult.confidence >= 80 && KEYWORD_ONLY_TYPES.has(keywordResult.classification)) {
     return {
       classification: keywordResult.classification,

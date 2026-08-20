@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File | null;
     const customerId = formData.get("customerId") as string | null;
     const ticketId = formData.get("ticketId") as string | null;
+    const ticketIds = formData.get("ticketIds") as string | null;
     const siteId = formData.get("siteId") as string | null;
     const issuedByContactId = formData.get("issuedByContactId") as string | null;
 
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
     }
 
     // No customer — return parsed data for review
+    const resolvedTicketIds = ticketIds ? JSON.parse(ticketIds) : (ticketId ? [ticketId] : []);
     return Response.json({
       status: "REVIEW",
       parsed,
@@ -125,6 +127,7 @@ export async function POST(request: Request) {
       fileRef: `/po-uploads/${diskFilename}`,
       fileName: file.name,
       rawTextPreview: rawText.substring(0, 1000),
+      ticketIds: resolvedTicketIds,
     });
   } catch (error) {
     console.error("Failed to upload PO:", error);

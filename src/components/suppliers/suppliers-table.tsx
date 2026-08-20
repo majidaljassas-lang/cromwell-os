@@ -39,6 +39,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { SupplierReconciliation } from "./supplier-reconciliation";
 
 const PAYMENT_TERMS_OPTIONS = [
   "Net 7",
@@ -747,6 +749,12 @@ function SupplierDetail({
         </Button>
       </div>
 
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="bg-[#0F0F0F] border border-[#222]">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="mt-3">
       {/* Three-column grid: Orders / Bills / Returns */}
       <div className="grid grid-cols-3 gap-4">
         {/* Recent Orders */}
@@ -853,6 +861,11 @@ function SupplierDetail({
           )}
         </div>
       </div>
+        </TabsContent>
+        <TabsContent value="reconciliation" className="mt-3">
+          <SupplierReconciliation supplierId={supplier.id} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -74,7 +74,7 @@ export async function PATCH(
       "supplierStrategyType", "siteId", "siteCommercialLinkId",
       "supplierId", "supplierName", "supplierReference",
       "fromStock", "toOrder", "status", "canonicalProductId",
-      "priceOverride", "sectionLabel",
+      "priceOverride", "sectionLabel", "isLocked",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) allowed[f] = body[f];

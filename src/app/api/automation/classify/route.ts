@@ -23,7 +23,8 @@ export async function POST(request: Request) {
     const counts: Record<string, number> = {};
     for (const event of events) {
       const text = event.parsedMessages?.[0]?.extractedText || "";
-      const result = classifyMessage(text);
+      const subject = (event.rawPayload as Record<string, unknown> | null)?.subject as string | undefined;
+      const result = classifyMessage(text, { subject: subject ?? null });
       const kind = event.eventKind === "OUTLOOK_SENT" ? "OUTLOOK_SENT" : result.classification;
 
       counts[kind] = (counts[kind] || 0) + 1;

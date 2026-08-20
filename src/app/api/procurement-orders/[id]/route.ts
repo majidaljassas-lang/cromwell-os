@@ -57,33 +57,77 @@ export async function PATCH(
       );
     }
 
-    const { poNo, status, supplierId, supplierRef, deliveryDateExpected, siteRef, totalCostExpected } = body;
+    const {
+      poNo,
+      status,
+      supplierId,
+      supplierRef,
+      deliveryDateExpected,
+      siteRef,
+      siteContact,
+      totalCostExpected,
+      lines,
+    } = body;
 
-    const updated = await prisma.procurementOrder.update({
-      where: { id },
-      data: {
-        ...(poNo !== undefined && { poNo }),
-        ...(status !== undefined && { status }),
-        ...(supplierId !== undefined && { supplierId }),
-        ...(supplierRef !== undefined && { supplierRef }),
-        ...(deliveryDateExpected !== undefined && {
-          deliveryDateExpected: deliveryDateExpected
-            ? new Date(deliveryDateExpected)
-            : null,
-        }),
-        ...(siteRef !== undefined && { siteRef }),
-        ...(totalCostExpected !== undefined && { totalCostExpected }),
-      },
-      include: {
-        supplier: true,
-        lines: {
-          include: {
-            ticketLine: true,
-            supplierOption: true,
-          },
+    const updated = await prisma.$transaction(async (tx) => {
+      // If lines array provided, replace all lines + recompute total
+      let computedTotal: number | undefined;
+      if (Array.isArray(lines)) {
+        await tx.procurementOrderLine.deleteMany({ where: { procurementOrderId: id } });
+        if (lines.length > 0) {
+          await tx.procurementOrderLine.createMany({
+            data: lines.map(
+              (line: {
+                ticketLineId: string;
+                supplierOptionId?: string;
+                description: string;
+                qty: number;
+                unitCost: number;
+                lineTotal: number;
+              }) => ({
+                procurementOrderId: id,
+                ticketLineId: line.ticketLineId,
+                supplierOptionId: line.supplierOptionId,
+                description: line.description,
+                qty: line.qty,
+                unitCost: line.unitCost,
+                lineTotal: line.lineTotal,
+              }),
+            ),
+          });
+        }
+        computedTotal = lines.reduce(
+          (s: number, l: { lineTotal: number }) => s + Number(l.lineTotal || 0),
+          0,
+        );
+      }
+
+      return tx.procurementOrder.update({
+        where: { id },
+        data: {
+          ...(poNo !== undefined && { poNo }),
+          ...(status !== undefined && { status }),
+          ...(supplierId !== undefined && { supplierId }),
+          ...(supplierRef !== undefined && { supplierRef }),
+          ...(deliveryDateExpected !== undefined && {
+            deliveryDateExpected: deliveryDateExpected
+              ? new Date(deliveryDateExpected)
+              : null,
+          }),
+          ...(siteRef !== undefined && { siteRef }),
+          ...(siteContact !== undefined && { siteContact }),
+          ...(totalCostExpected !== undefined
+            ? { totalCostExpected }
+            : computedTotal !== undefined
+              ? { totalCostExpected: computedTotal }
+              : {}),
         },
-        ticket: true,
-      },
+        include: {
+          supplier: true,
+          lines: { include: { ticketLine: true, supplierOption: true } },
+          ticket: true,
+        },
+      });
     });
 
     return Response.json(updated);

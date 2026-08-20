@@ -12,7 +12,10 @@ import {
   Check,
   X,
   Search,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
+import { CustomerEmbedded } from "@/components/customers/customer-embedded";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +27,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
+import { ZohoSiteHistoryTab } from "@/components/zoho/ZohoSiteHistoryTab";
 import {
   Table,
   TableBody,
@@ -60,6 +64,7 @@ type CommercialLink = {
   billingAllowed: boolean;
   defaultBillingCustomer: boolean;
   isActive: boolean;
+  commercialNotes: string | null;
   customer: Customer;
 };
 
@@ -132,14 +137,39 @@ type SupplierBillLineRow = {
   customer: { id: string; name: string } | null;
 };
 
+type InboxMessage = {
+  id: string;
+  occurredAt: string | Date;
+  sender: string | null;
+  snippet: string | null;
+  hasAttachments: boolean;
+};
+
+type InboxThreadRow = {
+  id: string;
+  channel: string;
+  subject: string | null;
+  participants: string[];
+  latestAt: string | Date;
+  messageCount: number;
+  aiClassification: string | null;
+  aiSummary: string | null;
+  messages: InboxMessage[];
+  linkedTicket: { id: string; ticketNo: number; title: string } | null;
+};
+
 export function SiteDetail({
   site,
   customers,
   supplierBillLines = [],
+  inboxThreads = [],
+  embedded = false,
 }: {
   site: Site;
   customers: Customer[];
   supplierBillLines?: SupplierBillLineRow[];
+  inboxThreads?: InboxThreadRow[];
+  embedded?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -147,7 +177,11 @@ export function SiteDetail({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkSubmitting, setLinkSubmitting] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
+  const [editLinkMemo, setEditLinkMemo] = useState<string>("");
+  const [editLinkSubmitting, setEditLinkSubmitting] = useState(false);
   const [aliases, setAliases] = useState<string[]>(site.aliases || []);
+  const [expandedCustomerIds, setExpandedCustomerIds] = useState<Set<string>>(new Set());
 
   // Address fields are controlled so the postcode lookup can update them.
   const [postcode, setPostcode] = useState(site.postcode || "");
@@ -228,6 +262,7 @@ export function SiteDetail({
       role: formData.get("role") as string,
       billingAllowed: (formData.get("billingAllowed") as string) === "on",
       defaultBillingCustomer: (formData.get("defaultBillingCustomer") as string) === "on",
+      commercialNotes: (formData.get("commercialNotes") as string) || null,
     };
 
     try {
@@ -247,6 +282,28 @@ export function SiteDetail({
     }
   }
 
+  async function handleSaveLinkMemo() {
+    if (!editingLinkId) return;
+    setEditLinkSubmitting(true);
+    try {
+      const res = await fetch(
+        `/api/sites/${site.id}/commercial-links/${editingLinkId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ commercialNotes: editLinkMemo }),
+        }
+      );
+      if (res.ok) {
+        setEditingLinkId(null);
+        setEditLinkMemo("");
+        router.refresh();
+      }
+    } finally {
+      setEditLinkSubmitting(false);
+    }
+  }
+
   const addressParts = [
     site.addressLine1,
     site.addressLine2,
@@ -258,6 +315,7 @@ export function SiteDetail({
   return (
     <div>
       {/* Header */}
+      {!embedded && (
       <div className="mb-6">
         <Link
           href="/sites"
@@ -288,28 +346,38 @@ export function SiteDetail({
           </div>
         </div>
       </div>
+      )}
 
       {/* Tabs */}
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="commercial-links">
-            Commercial Links ({site.siteCommercialLinks.length})
-          </TabsTrigger>
+          {!embedded && (
+            <TabsTrigger value="commercial-links">
+              Commercial Links ({site.siteCommercialLinks.length})
+            </TabsTrigger>
+          )}
           <TabsTrigger value="contacts">
             Contacts ({site.siteContactLinks.length})
           </TabsTrigger>
           <TabsTrigger value="tickets">
             Tickets ({site.tickets.length})
           </TabsTrigger>
+          <TabsTrigger value="comms">
+            Comms ({inboxThreads.reduce((s, t) => s + t.messages.length, 0)})
+          </TabsTrigger>
           <TabsTrigger value="bills">
             Supplier Bills ({supplierBillLines.length})
           </TabsTrigger>
+          <TabsTrigger value="zoho">Historical (Zoho)</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-4">
-          <div className="border border-[#333333] bg-[#1A1A1A] p-6 max-w-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* LEFT RAIL */}
+            <div className="lg:col-span-1 space-y-4">
+          <div className="border border-[#333333] bg-[#1A1A1A] p-6">
             {editing ? (
               <form onSubmit={handleSiteUpdate} className="space-y-4">
                 <div className="space-y-1.5">
@@ -503,9 +571,142 @@ export function SiteDetail({
               </div>
             )}
           </div>
+
+          {/* Linked Customers — compact */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">
+              Linked Customers ({site.siteCommercialLinks.length})
+            </div>
+            {site.siteCommercialLinks.length === 0 ? (
+              <div className="text-xs text-[#666666]">None</div>
+            ) : (
+              <div className="space-y-1">
+                {site.siteCommercialLinks.map((link) => (
+                  <Link key={link.id} href={`/customers/${link.customer.id}`} className="block hover:bg-[#222222] -mx-2 px-2 py-1">
+                    <div className="text-xs text-[#E0E0E0] truncate">{link.customer.name}</div>
+                    <div className="text-[9px] text-[#666666]">
+                      {link.role}{link.billingAllowed ? " · billing" : ""}{link.defaultBillingCustomer ? " · default" : ""}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Site Contacts — compact */}
+          <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-2">
+              Site Contacts ({site.siteContactLinks.length})
+            </div>
+            {site.siteContactLinks.length === 0 ? (
+              <div className="text-xs text-[#666666]">No contacts</div>
+            ) : (
+              <div className="space-y-2">
+                {site.siteContactLinks.slice(0, 5).map((cl) => (
+                  <div key={cl.id} className="text-xs">
+                    <div className="text-[#E0E0E0] font-medium">{cl.contact.fullName}</div>
+                    <div className="text-[9px] text-[#666666]">
+                      {cl.roleOnSite || ""}{cl.contact.phone ? ` · ${cl.contact.phone}` : ""}
+                    </div>
+                  </div>
+                ))}
+                {site.siteContactLinks.length > 5 && (
+                  <div className="text-[9px] text-[#666666]">
+                    +{site.siteContactLinks.length - 5} more
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+            </div>
+
+            {/* RIGHT COLUMN */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Summary cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="text-[9px] text-[#666666] uppercase">Tickets</div>
+                  <div className="text-lg tabular-nums text-[#E0E0E0]">{site.tickets.length}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="text-[9px] text-[#666666] uppercase">Bill Lines</div>
+                  <div className="text-lg tabular-nums text-[#E0E0E0]">{supplierBillLines.length}</div>
+                </div>
+                <div className="border border-[#333333] bg-[#1A1A1A] p-3">
+                  <div className="text-[9px] text-[#666666] uppercase">Inbox Threads</div>
+                  <div className="text-lg tabular-nums text-[#E0E0E0]">{inboxThreads.length}</div>
+                </div>
+              </div>
+
+              {/* Activity timeline — tickets + bills + comms */}
+              {(() => {
+                type Activity = { date: Date; title: string; sub: string; href: string; badge: string; badgeClass: string };
+                const activity: Activity[] = [];
+                for (const t of site.tickets) {
+                  activity.push({
+                    date: new Date(t.createdAt),
+                    title: t.title,
+                    sub: `${t.ticketMode.replace(/_/g, " ")} · ${t.status} · ${t.payingCustomer.name}`,
+                    href: `/tickets/${t.id}`,
+                    badge: "TICKET",
+                    badgeClass: "text-[#FF6600] bg-[#FF6600]/10",
+                  });
+                }
+                for (const l of supplierBillLines.slice(0, 30)) {
+                  activity.push({
+                    date: new Date(l.supplierBill.billDate),
+                    title: `${l.supplierBill.supplier.name} · ${l.supplierBill.billNo}`,
+                    sub: `${l.description} · £${Number(l.lineTotal).toFixed(2)}`,
+                    href: `/procurement?bill=${l.supplierBill.id}`,
+                    badge: "BILL",
+                    badgeClass: "text-[#3399FF] bg-[#3399FF]/10",
+                  });
+                }
+                for (const th of inboxThreads.slice(0, 10)) {
+                  const latest = th.messages[0];
+                  activity.push({
+                    date: new Date(th.latestAt),
+                    title: th.subject || "(no subject)",
+                    sub: `${th.channel}${latest?.sender ? ` · ${latest.sender}` : ""} · ${th.messageCount} msg${th.messageCount === 1 ? "" : "s"}`,
+                    href: th.linkedTicket ? `/tickets/${th.linkedTicket.id}` : `/inbox`,
+                    badge: th.channel.toUpperCase(),
+                    badgeClass: "text-[#00CC66] bg-[#00CC66]/10",
+                  });
+                }
+                activity.sort((a, b) => b.date.getTime() - a.date.getTime());
+                const top = activity.slice(0, 30);
+                return (
+                  <div className="border border-[#333333] bg-[#1A1A1A] p-4">
+                    <div className="text-[10px] uppercase tracking-widest text-[#888888] font-bold mb-3">
+                      Activity
+                    </div>
+                    {top.length === 0 ? (
+                      <div className="text-xs text-[#666666]">No activity yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {top.map((a, i) => (
+                          <Link key={i} href={a.href} className="flex items-start gap-3 hover:bg-[#222222] -mx-2 px-2 py-1.5">
+                            <div className="text-[9px] text-[#666666] tabular-nums w-16 shrink-0 mt-0.5">
+                              {a.date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                            </div>
+                            <Badge className={`text-[8px] px-1 py-0 shrink-0 ${a.badgeClass}`}>{a.badge}</Badge>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs text-[#E0E0E0] truncate">{a.title}</div>
+                              <div className="text-[9px] text-[#666666] truncate">{a.sub}</div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
         </TabsContent>
 
         {/* Commercial Links Tab */}
+        {!embedded && (
         <TabsContent value="commercial-links" className="mt-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[11px] uppercase tracking-widest text-[#888888] font-bold">Commercial Links</h2>
@@ -578,6 +779,17 @@ export function SiteDetail({
                       Default Billing Customer
                     </Label>
                   </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="link-commercialNotes">
+                      Internal memo
+                    </Label>
+                    <Textarea
+                      id="link-commercialNotes"
+                      name="commercialNotes"
+                      rows={3}
+                      placeholder="Who is this site actually for? (e.g. real end client behind a Cash Accounts entry)"
+                    />
+                  </div>
                   <SheetFooter>
                     <Button
                       type="submit"
@@ -596,18 +808,21 @@ export function SiteDetail({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>Customer</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Billing Allowed</TableHead>
                   <TableHead>Default Billing</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Internal memo</TableHead>
+                  <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {site.siteCommercialLinks.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={5}
+                      colSpan={8}
                       className="text-center py-8 text-[#888888]"
                     >
                       No commercial links. Add one to connect a customer to
@@ -615,46 +830,145 @@ export function SiteDetail({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  site.siteCommercialLinks.map((link) => (
-                    <TableRow key={link.id}>
-                      <TableCell className="font-medium">
-                        {link.customer.name}
-                      </TableCell>
-                      <TableCell>{link.role}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            link.billingAllowed ? "default" : "outline"
-                          }
-                        >
-                          {link.billingAllowed ? "Yes" : "No"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            link.defaultBillingCustomer
-                              ? "default"
-                              : "outline"
-                          }
-                        >
-                          {link.defaultBillingCustomer ? "Yes" : "No"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={link.isActive ? "default" : "secondary"}
-                        >
-                          {link.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  site.siteCommercialLinks.map((link) => {
+                    const expanded = expandedCustomerIds.has(link.customer.id);
+                    const toggle = () => {
+                      setExpandedCustomerIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(link.customer.id)) next.delete(link.customer.id);
+                        else next.add(link.customer.id);
+                        return next;
+                      });
+                    };
+                    return (
+                      <>
+                        <TableRow key={link.id} className="cursor-pointer" onClick={toggle}>
+                          <TableCell>
+                            {expanded ? <ChevronDown className="size-4 text-[#888888]" /> : <ChevronRight className="size-4 text-[#888888]" />}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {link.customer.name}
+                          </TableCell>
+                          <TableCell>{link.role}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                link.billingAllowed ? "default" : "outline"
+                              }
+                            >
+                              {link.billingAllowed ? "Yes" : "No"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                link.defaultBillingCustomer
+                                  ? "default"
+                                  : "outline"
+                              }
+                            >
+                              {link.defaultBillingCustomer ? "Yes" : "No"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={link.isActive ? "default" : "secondary"}
+                            >
+                              {link.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-[#888888] max-w-[280px]">
+                            {link.commercialNotes ? (
+                              <span className="block whitespace-pre-wrap break-words text-xs">
+                                {link.commercialNotes}
+                              </span>
+                            ) : (
+                              <span className="text-[#555555] italic text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-[#888888] hover:text-[#FF6600]"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingLinkId(link.id);
+                                setEditLinkMemo(link.commercialNotes || "");
+                              }}
+                              aria-label="Edit memo"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                        {expanded && (
+                          <TableRow className="bg-[#161616] hover:bg-[#161616]">
+                            <TableCell colSpan={8} className="p-4">
+                              <div className="flex justify-end mb-2">
+                                <Link
+                                  href={`/customers/${link.customer.id}`}
+                                  className="text-[10px] text-[#FF6600] hover:underline"
+                                >
+                                  Open page →
+                                </Link>
+                              </div>
+                              <CustomerEmbedded customerId={link.customer.id} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
+
+          <Sheet
+            open={editingLinkId !== null}
+            onOpenChange={(open) => {
+              if (!open) {
+                setEditingLinkId(null);
+                setEditLinkMemo("");
+              }
+            }}
+          >
+            <SheetContent side="right" className="bg-[#1A1A1A] border-[#333333]">
+              <SheetHeader>
+                <SheetTitle className="text-[#E0E0E0]">
+                  Edit internal memo
+                </SheetTitle>
+                <SheetDescription className="text-[#666666]">
+                  Note who this site is actually for — e.g. the real end client
+                  behind a Cash Accounts entry.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-4 px-4 flex-1">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-link-memo">Internal memo</Label>
+                  <Textarea
+                    id="edit-link-memo"
+                    rows={5}
+                    value={editLinkMemo}
+                    onChange={(e) => setEditLinkMemo(e.target.value)}
+                    placeholder="Who is this site actually for?"
+                  />
+                </div>
+              </div>
+              <SheetFooter>
+                <Button
+                  onClick={handleSaveLinkMemo}
+                  disabled={editLinkSubmitting}
+                  className="bg-[#FF6600] text-black hover:bg-[#FF9900]"
+                >
+                  {editLinkSubmitting ? "Saving..." : "Save memo"}
+                </Button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
         </TabsContent>
+        )}
 
         {/* Contacts Tab */}
         <TabsContent value="contacts" className="mt-4">
@@ -783,6 +1097,87 @@ export function SiteDetail({
           </div>
         </TabsContent>
 
+        {/* Comms Tab — live WhatsApp + Email messages linked to this site's tickets */}
+        <TabsContent value="comms" className="mt-4">
+          {inboxThreads.length === 0 ? (
+            <div className="border border-[#333333] bg-[#1A1A1A] p-6">
+              <p className="text-sm text-[#888888]">
+                No comms linked yet. Link a WhatsApp or email thread to any ticket on this site and new messages will land here automatically.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {inboxThreads.map((thread) => {
+                const sorted = [...thread.messages].sort(
+                  (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+                );
+                return (
+                  <div key={thread.id} className="border border-[#333333] bg-[#1A1A1A]">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-[#333333] bg-[#0F0F0F]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                          {thread.channel}
+                        </Badge>
+                        <span className="text-sm font-medium text-[#E0E0E0] truncate">
+                          {thread.subject || "(no subject)"}
+                        </span>
+                        {thread.aiClassification && (
+                          <Badge variant="secondary" className="text-[10px] uppercase">
+                            {thread.aiClassification}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {thread.linkedTicket && (
+                          <Link
+                            href={`/tickets/${thread.linkedTicket.id}`}
+                            className="text-xs text-[#FF6600] hover:underline bb-mono"
+                          >
+                            CP-{thread.linkedTicket.ticketNo}
+                          </Link>
+                        )}
+                        <span className="text-[11px] text-[#888888] bb-mono">
+                          {thread.messageCount} msg · last {new Date(thread.latestAt).toLocaleString("en-GB")}
+                        </span>
+                      </div>
+                    </div>
+                    {thread.aiSummary && (
+                      <div className="px-4 py-2 text-[11px] text-[#888888] border-b border-[#2A2A2A]">
+                        {thread.aiSummary}
+                      </div>
+                    )}
+                    <div className="divide-y divide-[#222222]">
+                      {sorted.map((m) => (
+                        <div key={m.id} className="px-4 py-2 flex gap-3">
+                          <div className="w-32 shrink-0 text-[11px] text-[#888888] bb-mono">
+                            {new Date(m.occurredAt).toLocaleString("en-GB", {
+                              day: "2-digit",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
+                          <div className="w-40 shrink-0 text-[12px] text-[#E0E0E0] truncate">
+                            {m.sender || "—"}
+                          </div>
+                          <div className="flex-1 text-[12px] text-[#CCCCCC] whitespace-pre-wrap break-words">
+                            {m.snippet || <span className="text-[#555555]">(empty)</span>}
+                            {m.hasAttachments && (
+                              <Badge variant="outline" className="ml-2 text-[9px]">
+                                attachment
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
         {/* Supplier Bills Tab — every bill line landed on this site */}
         <TabsContent value="bills" className="mt-4">
           <div className="border border-[#333333] bg-[#1A1A1A]">
@@ -833,6 +1228,10 @@ export function SiteDetail({
               </Table>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="zoho" className="mt-4">
+          <ZohoSiteHistoryTab siteId={site.id} />
         </TabsContent>
       </Tabs>
     </div>

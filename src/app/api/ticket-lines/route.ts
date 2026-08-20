@@ -13,3 +13,40 @@ export async function GET(request: Request) {
 
   return Response.json(lines);
 }
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { ticketId, payingCustomerId, description, quantity, unitPrice, productCode } = body;
+
+    if (!ticketId || !payingCustomerId || !description || !quantity) {
+      return Response.json(
+        { error: "Missing required fields: ticketId, payingCustomerId, description, quantity" },
+        { status: 400 }
+      );
+    }
+
+    const line = await prisma.ticketLine.create({
+      data: {
+        ticketId,
+        payingCustomerId,
+        description,
+        qty: quantity,
+        unit: 'EA',
+        lineType: 'MATERIAL',
+        productCode,
+        expectedCostUnit: unitPrice ? parseFloat(unitPrice.toString()) : undefined,
+        expectedCostTotal: unitPrice ? parseFloat((quantity * unitPrice).toString()) : undefined,
+        status: 'CAPTURED',
+      },
+    });
+
+    return Response.json(line, { status: 201 });
+  } catch (error) {
+    console.error("Failed to create ticket line:", error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Failed to create ticket line" },
+      { status: 500 }
+    );
+  }
+}

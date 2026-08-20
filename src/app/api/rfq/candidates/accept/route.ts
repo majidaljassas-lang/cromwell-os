@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         description: lineDescription,
         internalNotes: lineNotes.trim() || undefined,
         qty: isMerge ? 1 : (candidates[0].extractedQty ? Number(candidates[0].extractedQty) : 1),
-        unit: isMerge ? "LOT" : ((candidates[0].extractedUnit || "EA") as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET"),
+        unit: isMerge ? "LOT" : ((candidates[0].extractedUnit || "EA") as "EA" | "M" | "LENGTH" | "PACK" | "LOT" | "SET" | "TONNE"),
         payingCustomerId,
         status: "CAPTURED",
         sourceItemIds: candidates.map((c) => c.id),

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AllocationStatus } from "@/generated/prisma";
+import { postSupplierBill } from "@/lib/finance/gl-posting";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -595,11 +596,15 @@ export async function processBill(
     };
   }
 
-  // ----- Step 1: Create AP journal entry (transactional) -----
+  // ----- Step 1: Create AP journal entry (idempotent on sourceId) -----
+  // Routed through src/lib/finance/gl-posting.ts → postSupplierBill, which
+  // checks for an existing JournalEntry with the same (sourceType, sourceId)
+  // and returns it instead of creating a duplicate. Replaces the legacy
+  // non-idempotent createAPJournalEntry which produced duplicate journals on
+  // every re-run (and was inflating COA balances 4x for re-processed bills).
   try {
-    journalEntryId = await prisma.$transaction(async (tx) => {
-      return createAPJournalEntry(tx, bill);
-    });
+    const result = await postSupplierBill(bill.id);
+    journalEntryId = result.id;
   } catch (err) {
     const msg =
       err instanceof Error ? err.message : "Unknown journal error";
@@ -682,28 +687,8 @@ export async function processBill(
         }
       }
 
-      // Update bill-level status
-      const totalLines = bill.lines.length;
-      const matchedCount = combined.length;
-      const alreadyMatched = bill.lines.filter(
-        (l) => l.allocationStatus === "MATCHED"
-      ).length;
-      const totalMatched = matchedCount + alreadyMatched;
-
-      let billStatus: string;
-      if (totalMatched >= totalLines) {
-        billStatus = "MATCHED";
-      } else if (totalMatched > 0) {
-        billStatus = "PARTIAL";
-      } else {
-        billStatus = "PENDING";
-      }
-
-      await tx.supplierBill.update({
-        where: { id: bill.id },
-        data: { status: billStatus },
-      });
-
+      // Status update happens AFTER this transaction (Step 5 below) so it runs
+      // even when matching early-returns. See createAPJournalEntry path.
       return combined;
     });
   } catch (err) {
@@ -711,6 +696,40 @@ export async function processBill(
       err instanceof Error ? err.message : "Unknown matching error";
     errors.push(`Matching failed: ${msg}`);
     console.error("[bill-processor] Matching error:", err);
+  }
+
+  // ----- Step 5: Bill-header status reflects POSTING state (not line matching) -----
+  // A bill is POSTED iff a JournalEntry exists for it (this run or a prior idempotent
+  // run). Line-level matching is surfaced separately via line.allocationStatus.
+  // This update is OUTSIDE the matching transaction so it runs even when matching
+  // early-returns (every line already MATCHED).
+  try {
+    const existingJournal = journalEntryId
+      ? true
+      : !!(await prisma.journalEntry.findFirst({
+          where: { sourceType: "SUPPLIER_BILL", sourceId: billId },
+          select: { id: true },
+        }));
+    await prisma.supplierBill.update({
+      where: { id: billId },
+      data: { status: existingJournal ? "POSTED" : "PENDING" },
+    });
+
+    // ----- Inbox auto-link: if the originating InboxThread is still
+    // unlinked and this bill resolves to a single dominant ticket via its
+    // line allocations, point the thread at that ticket so the email + the
+    // job stay connected. Skip when the bill spans multiple tickets — let
+    // the user decide which one (or leave it).
+    if (existingJournal) {
+      try {
+        await autoLinkInboxThreadToDominantTicket(billId);
+      } catch (err) {
+        console.error("[bill-processor] Inbox auto-link failed:", err);
+      }
+    }
+  } catch (err) {
+    console.error("[bill-processor] Status update failed:", err);
+    errors.push(`Status update failed: ${err instanceof Error ? err.message : "unknown"}`);
   }
 
   // ----- Build summary -----
@@ -742,4 +761,64 @@ export async function processBill(
     matches: allMatches,
     errors,
   };
+}
+
+/**
+ * After a SupplierBill is fully POSTED, walk its BillLineAllocations to find
+ * the dominant ticket (most £ allocated). If the bill resolves cleanly to one
+ * ticket and there's an InboxThread whose reaction Task points at this bill,
+ * link the thread to that ticket. No-op if:
+ *   - the bill spans multiple tickets (>1 ticket gets allocations)
+ *   - no inbox thread points at the bill
+ *   - the thread already has a different linkedTicketId
+ */
+async function autoLinkInboxThreadToDominantTicket(billId: string): Promise<void> {
+  const allocations = await prisma.billLineAllocation.findMany({
+    where: {
+      supplierBillLine: { supplierBillId: billId },
+      allocationType: "TICKET_LINE",
+    },
+    select: {
+      ticketLineId: true,
+      ticketId: true,
+      costAllocated: true,
+      ticketLine: { select: { ticketId: true } },
+    },
+  });
+
+  if (allocations.length === 0) return;
+
+  const byTicket = new Map<string, number>();
+  for (const a of allocations) {
+    const tid = a.ticketLine?.ticketId ?? a.ticketId;
+    if (!tid) continue;
+    const cost = Number(a.costAllocated ?? 0);
+    byTicket.set(tid, (byTicket.get(tid) ?? 0) + cost);
+  }
+  if (byTicket.size === 0) return;
+  if (byTicket.size > 1) return; // bill spans multiple tickets — don't pick
+  const dominantTicketId = [...byTicket.keys()][0];
+
+  // Find the InboxThread linked via reaction Task → SupplierBill.
+  const taskOnBill = await prisma.task.findFirst({
+    where: { supplierBillId: billId, taskType: { in: ["BILL_NEEDS_REVIEW", "PROCESS_BILL"] } },
+    select: { id: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!taskOnBill) return;
+  const thread = await prisma.inboxThread.findFirst({
+    where: { reactionTaskId: taskOnBill.id, linkedTicketId: null },
+    select: { id: true },
+  });
+  if (!thread) return;
+
+  await prisma.inboxThread.update({
+    where: { id: thread.id },
+    data: {
+      linkedTicketId: dominantTicketId,
+      linkSource: "AUTO",
+      linkConfidence: "HIGH",
+      status: "LINKED",
+    },
+  });
 }

@@ -1,8 +1,17 @@
 import { prisma } from "@/lib/prisma";
+import Link from "next/link";
 import { BankAccountCard } from "./BankAccountCard";
 import { RecentTransactions } from "./RecentTransactions";
 import { ReconciliationSummary } from "./ReconciliationSummary";
-import { EnableBankingPanel } from "./EnableBankingPanel";
+
+const FINANCE_MODULES: Array<{ href: string; title: string; desc: string }> = [
+  { href: "/finance/payments",       title: "Payments",        desc: "Record customer receipts and supplier payments" },
+  { href: "/finance/bank-inbox",     title: "Bank Inbox",      desc: "Reconcile bank transactions to invoices / bills" },
+  { href: "/finance/reports",        title: "Reports",         desc: "P&L · Trial Balance · GL · Aged AR/AP · VAT" },
+  { href: "/finance/backlog",        title: "Backlog Cleanup", desc: "Triage Zoho historical imports" },
+  { href: "/finance/journals",       title: "Manual Journals", desc: "Accruals, prepayments, corrections" },
+  { href: "/finance/period-close",   title: "Period Close",    desc: "Open / close / lock fiscal periods" },
+];
 
 export const dynamic = "force-dynamic";
 
@@ -58,47 +67,6 @@ export default async function FinancePage() {
     },
   });
 
-  // Check if Yapily is configured
-  const yapilyConfigured = !!(process.env.YAPILY_APP_UUID && process.env.YAPILY_APP_SECRET);
-
-  // Enable Banking — load connected sources and their stats
-  const enableCredentialsConfigured = !!(
-    process.env.ENABLE_APP_ID &&
-    process.env.ENABLE_JWT_KID &&
-    process.env.ENABLE_JWT_PRIVATE_KEY
-  );
-
-  const enableSources = await prisma.ingestionSource.findMany({
-    where: { sourceType: "ENABLE_BANKING" },
-    orderBy: { createdAt: "asc" },
-  });
-
-  // Per-source transaction counts — join through BankAccount.enableSessionId
-  const enableConnected = await Promise.all(
-    enableSources.map(async (src) => {
-      const bankAccountsForSource = await prisma.bankAccount.findMany({
-        where: { enableSessionId: src.externalRef ?? undefined },
-        select: { id: true },
-      });
-      const ids = bankAccountsForSource.map((b) => b.id);
-      const [txnCount, unreconciledCount] = await Promise.all([
-        prisma.bankTransaction.count({ where: { bankAccountId: { in: ids } } }),
-        prisma.bankTransaction.count({
-          where: { bankAccountId: { in: ids }, reconciliationStatus: "UNRECONCILED" },
-        }),
-      ]);
-      return {
-        id: src.id,
-        accountName: src.accountName,
-        connectorStatus: src.connectorStatus,
-        lastSyncAt: src.lastSyncAt?.toISOString() ?? null,
-        txnCount,
-        unreconciledCount,
-        reauthRequired: src.connectorStatus === "REAUTH_REQUIRED",
-      };
-    })
-  );
-
   // Group accounts by type
   const grouped: Record<string, typeof accounts> = {};
   for (const acct of accounts) {
@@ -127,11 +95,21 @@ export default async function FinancePage() {
         FINANCE
       </h1>
 
-      {/* Enable Banking connection panel */}
-      <EnableBankingPanel
-        connected={enableConnected}
-        credentialsConfigured={enableCredentialsConfigured}
-      />
+      {/* Finance modules */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {FINANCE_MODULES.map((m) => (
+          <Link
+            key={m.href}
+            href={m.href}
+            className="block border border-[#333333] bg-[#1A1A1A] p-3 hover:border-[#FF6600] transition-colors"
+          >
+            <div className="text-xs uppercase tracking-widest text-[#FF6600] font-bold">
+              {m.title}
+            </div>
+            <div className="text-[10px] text-[#888888] mt-1.5">{m.desc}</div>
+          </Link>
+        ))}
+      </div>
 
       {/* Bank Accounts */}
       <div className="space-y-3">
@@ -148,12 +126,10 @@ export default async function FinancePage() {
                 sortCode: ba.sortCode,
                 currentBalance: Number(ba.currentBalance),
                 lastSyncedAt: ba.lastSyncedAt?.toISOString() || null,
-                yapilyConnected: !!(ba.yapilyConsentToken && ba.yapilyAccountId),
                 transactionCount: ba._count.transactions,
               }}
               unreconciledCount={unreconciledMap.get(ba.id) || 0}
               matchedCount={matchedMap.get(ba.id) || 0}
-              yapilyConfigured={yapilyConfigured}
             />
           ))}
         </div>

@@ -6,7 +6,19 @@ This version (16.2.2) has breaking changes — APIs, conventions, and file struc
 
 # Automation map (Phases 1-12, 2026-04-16)
 
+⚠️ **UPDATE (2026-07-21)**: The `/api/scheduler` cron design below was never installed (crontab is empty). **The ACTUAL automation is `cromwell-poller` (pm2 process, `scripts/email-poller.js`), which runs every 2 minutes.** See the "ACTUAL automation (live)" section below for details.
+
+**Intended design (never implemented):**  
 External cron → `/api/scheduler` (5 min) and `/api/scheduler/daily-sweep` (07:00). Both require `x-scheduler-secret`. Every automation endpoint under `/api/automation/*` is secret-guarded; `run-all` and `trickle-down` forward the header. Every scheduled job wraps its work in `runJob()` which writes a `SchedulerLog` row with status + summary JSON.
+
+**ACTUAL automation (live, 2026-07-21):**
+- **cromwell-poller** (`pm2` process running `scripts/email-poller.js`) runs every 2 minutes and calls:
+  1. `/api/automation/sync/outlook` — fetch new emails from Outlook
+  2. `/api/intake/queue` with `action:tick` — Bills Intake Queue pipeline (PDF parse → OCR → bill extraction → 3-way match → allocate → post)
+  3. `/api/automation/trickle-down` — legacy pipeline (auto-progress, evidence, tasks, match-bills)
+  4. `/api/intake/rematch-all` — re-match sweep for newly-seeded aliases/mappings
+- **To restart the poller:** `pm2 restart cromwell-poller`
+- **To view logs:** `pm2 logs cromwell-poller`
 
 ## `/api/automation/run-all` — 16 steps in order
 

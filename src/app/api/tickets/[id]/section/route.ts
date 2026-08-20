@@ -1,54 +1,75 @@
 import { prisma } from "@/lib/prisma";
+import { resequenceLines } from "@/lib/tickets/resequence-lines";
 
 /**
  * POST /api/tickets/[id]/section
  *
  * Fully automatic section flow:
- * 1. Parses materials text into individual items (qty + description)
- * 2. Creates ticket lines (first one gets sectionLabel)
+ * 1. Parses materials text into individual items (qty + description + optional code)
+ * 2. Creates ticket lines, all tagged with the section label
  * 3. Logs EXTRA_ORDER_ADDED event per line
  *
  * Body: { label: string, source: string, materials: string, payingCustomerId: string }
  */
 
-function parseMaterials(text: string): Array<{ description: string; qty: number; unit: string }> {
+function parseMaterials(text: string): Array<{ description: string; qty: number; unit: string; productCode?: string }> {
   const lines = text
     .split(/\n|,\s*(?=\d)/)
     .map((l) => l.trim())
     .filter(Boolean);
 
   return lines.map((line) => {
-    // Try patterns like: "35mm Compression Valve - 2 no." or "2 x 35mm Valve" or "35mm Valve x 2"
     let qty = 1;
     let unit = "EA";
     let description = line;
+    let productCode: string | undefined;
 
-    // Pattern: "description - QTY no./ea/pcs/lengths/packs"
-    const trailingQty = line.match(/^(.+?)\s*[-–]\s*(\d+)\s*(no\.?|ea\.?|pcs?|lengths?|packs?|sets?|lot|rolls?|metres?|m\b)?\s*\.?\s*$/i);
-    if (trailingQty) {
-      description = trailingQty[1].trim();
-      qty = parseInt(trailingQty[2], 10);
-      unit = resolveUnit(trailingQty[3]);
-      return { description, qty, unit };
+    // Strip a trailing product code like "(DUO20)" / "[DUO20]" — keep only the description
+    const trailingCode = line.match(/^(.+?)\s*[(\[]([A-Za-z][A-Za-z0-9_-]*)[)\]]\s*$/);
+    if (trailingCode) {
+      description = trailingCode[1].trim();
+      productCode = trailingCode[2];
+    } else {
+      description = line;
     }
 
-    // Pattern: "QTY x description" or "QTY no. description"
-    const leadingQty = line.match(/^(\d+)\s*(?:x|no\.?|ea\.?|pcs?|of)?\s+(.+)$/i);
+    // Treat the unicode multiplication sign × the same as `x`.
+    const norm = description.replace(/×/g, "x");
+
+    // Pattern: "description - QTY no./ea/pcs/lengths/packs"
+    const trailingQty = norm.match(/^(.+?)\s*[-–—]\s*(\d+)\s*(no\.?|ea\.?|pcs?|lengths?|packs?|sets?|lot|rolls?|metres?|m\b)?\s*\.?\s*$/i);
+    if (trailingQty) {
+      return {
+        description: trailingQty[1].trim(),
+        qty: parseInt(trailingQty[2], 10),
+        unit: resolveUnit(trailingQty[3]),
+        productCode,
+      };
+    }
+
+    // Pattern: "QTY x description" or "QTY no. description" (also handles "QTY × description")
+    const leadingQty = norm.match(/^(\d+)\s*(?:x|no\.?|ea\.?|pcs?|of)\s+(.+)$/i);
     if (leadingQty) {
-      qty = parseInt(leadingQty[1], 10);
-      description = leadingQty[2].trim();
-      return { description, qty, unit };
+      return {
+        description: leadingQty[2].trim(),
+        qty: parseInt(leadingQty[1], 10),
+        unit,
+        productCode,
+      };
     }
 
     // Pattern: "description x QTY" or "description (QTY)"
-    const endQty = line.match(/^(.+?)\s*(?:x\s*|[(\[])(\d+)\s*[)\]]?\s*$/i);
+    const endQty = norm.match(/^(.+?)\s*(?:x\s*|[(\[])(\d+)\s*[)\]]?\s*$/i);
     if (endQty) {
-      description = endQty[1].trim();
-      qty = parseInt(endQty[2], 10);
-      return { description, qty, unit };
+      return {
+        description: endQty[1].trim(),
+        qty: parseInt(endQty[2], 10),
+        unit,
+        productCode,
+      };
     }
 
-    return { description, qty, unit };
+    return { description, qty, unit, productCode };
   });
 }
 
@@ -92,7 +113,8 @@ export async function POST(
       return Response.json({ error: "No items could be parsed from the materials text" }, { status: 400 });
     }
 
-    // Create ticket lines — first one gets the sectionLabel
+    // Create ticket lines — every line gets the sectionLabel so the
+    // renderer always shows them in one block, even after re-sorting.
     const createdLines = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -103,13 +125,13 @@ export async function POST(
           description: item.description,
           qty: item.qty,
           unit: item.unit as any,
+          productCode: item.productCode,
           payingCustomerId,
           status: "CAPTURED",
-          sectionLabel: i === 0 ? label.trim() : undefined,
+          sectionLabel: label.trim(),
         },
       });
 
-      // Log event for each line
       await prisma.event.create({
         data: {
           ticketId,
@@ -123,6 +145,9 @@ export async function POST(
 
       createdLines.push(line);
     }
+
+    // Compact every section into a single contiguous block
+    await resequenceLines(ticketId);
 
     return Response.json({
       ok: true,

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { TicketDetail } from "@/components/tickets/ticket-detail";
+import { TicketReconciliationsPanel } from "@/components/reconciliations/ticket-reconciliations-panel";
 
 export default async function TicketDetailPage({
   params,
@@ -30,7 +31,7 @@ export default async function TicketDetailPage({
             },
           },
         },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
       },
       evidenceFragments: {
         orderBy: { timestamp: "desc" },
@@ -149,11 +150,51 @@ export default async function TicketDetailPage({
     },
   });
 
+  const reconciliations = await prisma.reconciliation.findMany({
+    where: { parentTicketId: id },
+    orderBy: { createdAt: "desc" },
+    include: { _count: { select: { lines: true } } },
+  });
+
+  const callOffs = await prisma.callOff.findMany({
+    where: { ticketId: id },
+    orderBy: { callOffNo: "asc" },
+    select: {
+      id: true,
+      callOffNo: true,
+      status: true,
+      callOffDate: true,
+      customerPO: { select: { id: true, poNo: true } },
+      lines: { select: { ticketLineId: true, requestedQty: true, invoicedQty: true } },
+    },
+  });
+
+  // Per-PO call-off sequence (CO1 = first call-off on that PO). callOffs are
+  // ordered by callOffNo asc, so ranking within each PO group gives the label.
+  const coSeqByPo = new Map<string, number>();
+  const callOffsWithSeq = callOffs.map((c) => {
+    const n = (coSeqByPo.get(c.customerPO.id) ?? 0) + 1;
+    coSeqByPo.set(c.customerPO.id, n);
+    return { ...c, coSeq: n };
+  });
+
   // Serialize to plain objects — Prisma Decimal/Date objects can't pass to client components
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
     <div className="p-8">
+      <TicketReconciliationsPanel
+        parentTicketId={id}
+        reconciliations={reconciliations.map((r) => ({
+          id: r.id,
+          reconciliationNo: r.reconciliationNo,
+          title: r.title,
+          type: r.type,
+          workflowState: r.workflowState,
+          createdAt: r.createdAt.toISOString(),
+          lineCount: r._count.lines,
+        }))}
+      />
       <TicketDetail
         ticket={s(ticket)}
         quotes={s(quotes)}
@@ -169,6 +210,7 @@ export default async function TicketDetailPage({
         sites={s(sites)}
         commercialLinks={s(commercialLinks)}
         stockItems={s(stockItems)}
+        callOffs={s(callOffsWithSeq)}
       />
     </div>
   );

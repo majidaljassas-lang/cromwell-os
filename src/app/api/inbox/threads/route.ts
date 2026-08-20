@@ -88,6 +88,7 @@ export async function GET(request: Request) {
       aiSummary: t.aiSummary,
       aiClassification: t.aiClassification,
       aiConfidence: t.aiConfidence,
+      reactionTaskId: t.reactionTaskId,
       dealScore: t.dealScore,
       dealTier: t.dealScore >= 70 ? "HIGH" : t.dealScore >= 40 ? "MEDIUM" : "LOW",
       dealReasons: t.dealReasons,

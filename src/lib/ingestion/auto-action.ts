@@ -40,6 +40,15 @@ interface ActionResult {
   details: string;
 }
 
+// Own-team senders that get classified as bills by accident (e.g. internal AP
+// forwards). Blocks the self-bill loop where our own outgoing AP email would
+// otherwise create a SupplierBill against ourselves.
+const SELF_DOMAINS = [
+  "cromwellplumbing.co.uk",
+  "cromwellfreight.com",
+  "cromwell-freight.com",
+];
+
 /**
  * Create a BILL_NEEDS_REVIEW Task so that a bill failing ingestion does not
  * become a silent NEEDS_REVIEW event. The task is attached to the most
@@ -146,9 +155,29 @@ export async function processClassifiedEvents(): Promise<ActionResult[]> {
         case "DISPUTE":
           results.push(await handleDispute(event.id, subject, text, fromEmail, fromName));
           break;
-        case "BILL_DOCUMENT":
-          results.push(await handleBillDocument(event.id, subject, text, fromEmail, fromName, data));
+        case "BILL_DOCUMENT": {
+          const lower = fromEmail.toLowerCase();
+          if (SELF_DOMAINS.some((d) => lower.includes(d))) {
+            await prisma.ingestionEvent.update({
+              where: { id: event.id },
+              data: { status: "DISMISSED", errorMessage: "Self-bill: own AP team email, not a supplier bill" },
+            });
+            results.push({ eventId: event.id, action: "BILL_DOCUMENT", success: true, details: "Skipped self-bill" });
+            break;
+          }
+          // Auto-bill-parser disabled per classify-then-parse architecture —
+          // Majid manually classifies in /inbox; the manual path calls
+          // processBillThread directly. Auto-action only parks the event.
+          await prisma.ingestionEvent.update({
+            where: { id: event.id },
+            data: {
+              status: "NEEDS_TRIAGE",
+              errorMessage: "Auto-bill-parser disabled — awaiting manual classify in /inbox",
+            },
+          });
+          results.push({ eventId: event.id, action: "BILL_DOCUMENT", success: true, details: "Parked for manual classify" });
           break;
+        }
         case "OUTLOOK_SENT":
           // Sent emails — just link to ticket if possible, no action needed
           results.push(await handleSentEmail(event.id, subject, text, fromEmail));

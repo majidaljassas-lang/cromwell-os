@@ -767,8 +767,10 @@ function NewBidForm({
                 const costTotal = item.ourCost * item.qty;
                 const saleTotal = item.ourPrice * item.qty;
                 const margin = saleTotal - costTotal;
-                const undercut = item.competitorPrice > 0 && item.ourPrice > 0
-                  ? (item.competitorPrice - item.ourPrice) * item.qty
+                const competitorUnits = [item.competitorPrice, item.utopiaPrice, item.bestOnlinePrice].filter((p) => p > 0);
+                const lowestCompetitorUnit = competitorUnits.length > 0 ? Math.min(...competitorUnits) : 0;
+                const undercut = lowestCompetitorUnit > 0 && item.ourPrice > 0
+                  ? (lowestCompetitorUnit - item.ourPrice) * item.qty
                   : 0;
 
                 return (
@@ -956,7 +958,7 @@ function NewBidForm({
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={submitting || !competitorName.trim() || items.every((i) => !i.description.trim())}
+            disabled={submitting || !competitorLabel.trim() || items.every((i) => !i.description.trim())}
             className="bg-[#FF9900] hover:bg-[#FF9900]/90 text-black font-medium"
           >
             {submitting ? "Creating..." : "Accept & Create Lines"}

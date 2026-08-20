@@ -408,86 +408,208 @@ function matchOutgoingTransaction(
 // Apply reconciliation
 // ---------------------------------------------------------------------------
 
+/**
+ * MANUAL ↔ BANK FEED dedup.
+ * If the user already logged this payment manually (via /finance/payments)
+ * BEFORE the bank feed pulled the matching txn, we must NOT create a second
+ * Payment/PaymentMade — that would double-count cash and double-post the JE.
+ *
+ * Match rule: same amount, date within ±7 days, NOT already linked to any
+ * BankTransaction. We pick the closest-by-date candidate.
+ */
+const MATCH_DATE_WINDOW_DAYS = 7;
+
+async function findExistingPaymentForInvoice(
+  salesInvoiceId: string,
+  amount: number,
+  txnDate: Date
+): Promise<{ id: string } | null> {
+  const lo = new Date(txnDate);
+  lo.setDate(lo.getDate() - MATCH_DATE_WINDOW_DAYS);
+  const hi = new Date(txnDate);
+  hi.setDate(hi.getDate() + MATCH_DATE_WINDOW_DAYS);
+
+  const candidates = await prisma.payment.findMany({
+    where: {
+      salesInvoiceId,
+      amount: { gte: amount - 0.01, lte: amount + 0.01 },
+      paymentDate: { gte: lo, lte: hi },
+    },
+    select: { id: true, paymentDate: true },
+  });
+  if (candidates.length === 0) return null;
+  // Exclude payments already linked to any bank txn
+  const linked = await prisma.bankTransaction.findMany({
+    where: { matchedPaymentId: { in: candidates.map((c) => c.id) } },
+    select: { matchedPaymentId: true },
+  });
+  const linkedIds = new Set(linked.map((l) => l.matchedPaymentId));
+  const free = candidates.filter((c) => !linkedIds.has(c.id));
+  if (free.length === 0) return null;
+  free.sort(
+    (a, b) =>
+      Math.abs(a.paymentDate.getTime() - txnDate.getTime()) -
+      Math.abs(b.paymentDate.getTime() - txnDate.getTime())
+  );
+  return { id: free[0].id };
+}
+
+async function findExistingPaymentMadeForBill(
+  supplierBillId: string,
+  amount: number,
+  txnDate: Date
+): Promise<{ id: string } | null> {
+  const lo = new Date(txnDate);
+  lo.setDate(lo.getDate() - MATCH_DATE_WINDOW_DAYS);
+  const hi = new Date(txnDate);
+  hi.setDate(hi.getDate() + MATCH_DATE_WINDOW_DAYS);
+
+  // Find PaymentMade that allocates this bill, with matching amount + date
+  const allocations = await prisma.paymentMadeAllocation.findMany({
+    where: {
+      supplierBillId,
+      amount: { gte: amount - 0.01, lte: amount + 0.01 },
+      paymentMade: { paymentDate: { gte: lo, lte: hi } },
+    },
+    include: {
+      paymentMade: { select: { id: true, paymentDate: true } },
+    },
+  });
+  if (allocations.length === 0) return null;
+  const pmIds = allocations.map((a) => a.paymentMade.id);
+  const linked = await prisma.bankTransaction.findMany({
+    where: { matchedPaymentId: { in: pmIds } },
+    select: { matchedPaymentId: true },
+  });
+  const linkedIds = new Set(linked.map((l) => l.matchedPaymentId));
+  const free = allocations.filter((a) => !linkedIds.has(a.paymentMade.id));
+  if (free.length === 0) return null;
+  free.sort(
+    (a, b) =>
+      Math.abs(a.paymentMade.paymentDate.getTime() - txnDate.getTime()) -
+      Math.abs(b.paymentMade.paymentDate.getTime() - txnDate.getTime())
+  );
+  return { id: free[0].paymentMade.id };
+}
+
 async function applyReconciliation(
   transactionId: string,
   match: MatchCandidate,
   bankAccountId: string
 ): Promise<void> {
   const now = new Date();
+  const { postPaymentReceived, postPaymentMade } = await import("./gl-posting");
+
+  // Pull the txn date once so dedup uses the bank-reported date, not "now"
+  const txn = await prisma.bankTransaction.findUnique({
+    where: { id: transactionId },
+    select: { transactionDate: true },
+  });
+  const txnDate = txn?.transactionDate ?? now;
 
   if (match.type === "PAYMENT_RECEIVED") {
-    // Create a Payment record for the sales invoice
-    const payment = await prisma.payment.create({
-      data: {
-        salesInvoiceId: match.entityId,
-        amount: match.amount,
-        paymentDate: now,
-        paymentMethod: "BANK_TRANSFER",
-        reference: `Bank reconciliation - txn ${transactionId.slice(0, 8)}`,
-      },
-    });
+    // ── Dedup: existing manual Payment for this invoice? ─────────────────
+    const existing = await findExistingPaymentForInvoice(
+      match.entityId,
+      match.amount,
+      txnDate
+    );
 
-    // Mark transaction as reconciled
+    let paymentId: string;
+    let je: { id: string };
+    let dedupNote = "";
+
+    if (existing) {
+      // Manual payment already logged — link instead of duplicating.
+      paymentId = existing.id;
+      // postPaymentReceived is idempotent on (sourceType, sourceId), so this
+      // returns the existing JE if one's already posted; otherwise it posts now.
+      je = await postPaymentReceived(paymentId);
+      dedupNote = " · linked to manual payment (no double-count)";
+    } else {
+      const payment = await prisma.payment.create({
+        data: {
+          salesInvoiceId: match.entityId,
+          amount: match.amount,
+          paymentDate: txnDate,
+          paymentMethod: "BANK_TRANSFER",
+          reference: `Bank reconciliation - txn ${transactionId.slice(0, 8)}`,
+        },
+      });
+      paymentId = payment.id;
+      je = await postPaymentReceived(paymentId);
+    }
+
     await prisma.bankTransaction.update({
       where: { id: transactionId },
       data: {
         reconciliationStatus: "RECONCILED",
-        matchedPaymentId: payment.id,
+        matchedPaymentId: paymentId,
+        matchedJournalId: je.id,
         reconciledAt: now,
-        notes: `Auto-reconciled: ${match.matchReason}`,
+        notes: `Auto-reconciled: ${match.matchReason}${dedupNote}`,
       },
     });
 
-    // Update invoice status to PAID
     await prisma.salesInvoice.update({
       where: { id: match.entityId },
-      data: {
-        status: "PAID",
-        paidAt: now,
-      },
+      data: { status: "PAID", paidAt: now },
     });
   } else if (match.type === "SUPPLIER_BILL") {
-    // Look up the supplier from the bill
     const bill = await prisma.supplierBill.findUnique({
       where: { id: match.entityId },
       select: { supplierId: true },
     });
-
     if (!bill) throw new Error(`Bill ${match.entityId} not found`);
 
-    // Create PaymentMade record
-    const paymentMade = await prisma.paymentMade.create({
-      data: {
-        supplierId: bill.supplierId,
-        bankAccountId,
-        paymentDate: now,
-        amount: match.amount,
-        paymentMethod: "BANK_TRANSFER",
-        reference: `Bank reconciliation - txn ${transactionId.slice(0, 8)}`,
-      },
-    });
+    // ── Dedup: existing manual PaymentMade for this bill? ────────────────
+    const existing = await findExistingPaymentMadeForBill(
+      match.entityId,
+      match.amount,
+      txnDate
+    );
 
-    // Create allocation
-    await prisma.paymentMadeAllocation.create({
-      data: {
-        paymentMadeId: paymentMade.id,
-        supplierBillId: match.entityId,
-        amount: match.amount,
-      },
-    });
+    let paymentMadeId: string;
+    let je: { id: string };
+    let dedupNote = "";
 
-    // Mark transaction as reconciled
+    if (existing) {
+      paymentMadeId = existing.id;
+      je = await postPaymentMade(paymentMadeId);
+      dedupNote = " · linked to manual payment (no double-count)";
+    } else {
+      const paymentMade = await prisma.paymentMade.create({
+        data: {
+          supplierId: bill.supplierId,
+          bankAccountId,
+          paymentDate: txnDate,
+          amount: match.amount,
+          paymentMethod: "BANK_TRANSFER",
+          reference: `Bank reconciliation - txn ${transactionId.slice(0, 8)}`,
+        },
+      });
+      await prisma.paymentMadeAllocation.create({
+        data: {
+          paymentMadeId: paymentMade.id,
+          supplierBillId: match.entityId,
+          amount: match.amount,
+        },
+      });
+      paymentMadeId = paymentMade.id;
+      je = await postPaymentMade(paymentMadeId);
+    }
+
     await prisma.bankTransaction.update({
       where: { id: transactionId },
       data: {
         reconciliationStatus: "RECONCILED",
-        matchedPaymentId: paymentMade.id,
+        matchedPaymentId: paymentMadeId,
+        matchedJournalId: je.id,
         reconciledAt: now,
-        notes: `Auto-reconciled: ${match.matchReason}`,
+        notes: `Auto-reconciled: ${match.matchReason}${dedupNote}`,
       },
     });
 
-    // Update bill status to PAID
     await prisma.supplierBill.update({
       where: { id: match.entityId },
       data: { status: "PAID" },

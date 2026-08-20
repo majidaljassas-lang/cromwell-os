@@ -60,6 +60,23 @@ function num(val: Decimal): number {
   return Number(val.toString());
 }
 
+function invGross(inv: Invoice): number {
+  return num(inv.totalGross) || num(inv.totalSell);
+}
+function invPaid(inv: Invoice): number {
+  return (inv.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
+}
+// Credit notes applied to this invoice (exclude drafts / voided).
+function invCredits(inv: Invoice): number {
+  return (inv.salesCreditNotes ?? [])
+    .filter((c) => !["DRAFT", "VOID", "VOIDED", "CANCELLED"].includes(c.status))
+    .reduce((s, c) => s + num(c.total), 0);
+}
+// What the customer still owes: gross − payments − applied credit notes.
+function invNetDue(inv: Invoice): number {
+  return Math.max(invGross(inv) - invPaid(inv) - invCredits(inv), 0);
+}
+
 function pct(val: number): string {
   return val.toFixed(1) + "%";
 }
@@ -77,6 +94,7 @@ type InvoiceLine = {
   qty: Decimal;
   unitPrice: Decimal;
   lineTotal: Decimal;
+  sourceRef: string | null;
   poMatched: boolean;
   poMatchStatus: string | null;
   ticketLine: TicketLineRef;
@@ -115,6 +133,12 @@ type Invoice = {
     paymentMethod: string | null;
     reference: string | null;
     notes: string | null;
+  }[];
+  salesCreditNotes: {
+    id: string;
+    creditNoteNo: string | null;
+    total: Decimal;
+    status: string;
   }[];
 };
 
@@ -263,7 +287,7 @@ export function InvoicesView({
   const draftTotal = drafts.reduce((s, i) => s + grossOf(i), 0);
   const sentTotal = sent.reduce((s, i) => s + grossOf(i), 0);
   const paidTotal = paid.reduce((s, i) => s + grossOf(i), 0);
-  const outstandingTotal = outstanding.reduce((s, i) => s + grossOf(i), 0);
+  const outstandingTotal = outstanding.reduce((s, i) => s + invNetDue(i), 0);
 
   // Overdue invoices: SENT or OVERDUE status, with days > 0
   const overdueInvoices = useMemo(() => {
@@ -349,9 +373,7 @@ export function InvoicesView({
   }
 
   function openRecordPayment(inv: Invoice) {
-    const paid = (inv.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
-    const gross = num(inv.totalGross) || num(inv.totalSell);
-    const outstanding = gross - paid;
+    const outstanding = invNetDue(inv);
     setPayInvoice(inv);
     setPayAmount(outstanding > 0 ? outstanding.toFixed(2) : "");
     setPayDate(new Date().toISOString().slice(0, 10));
@@ -621,26 +643,54 @@ export function InvoicesView({
                         )}
                       </TableCell>
                       <TableCell>
-                        {(inv.status === "DRAFT" || inv.status === "VOIDED") && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 w-6 p-0 text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (!confirm(`Delete ${inv.invoiceNo || "this draft invoice"}?`)) return;
-                              const res = await fetch(`/api/sales-invoices/${inv.id}`, { method: "DELETE" });
-                              if (res.ok) {
-                                router.refresh();
-                              } else {
-                                const err = await res.json().catch(() => null);
-                                alert(err?.error || "Failed to delete");
-                              }
-                            }}
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {(inv.salesCreditNotes ?? []).length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-1.5 text-[10px] text-[#00CC66] border-[#333333] hover:bg-[#00CC66]/10"
+                              title={`Credit note PDF (${(inv.salesCreditNotes ?? []).map((c) => c.creditNoteNo).filter(Boolean).join(", ")})`}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const cns = inv.salesCreditNotes ?? [];
+                                if (cns.length !== 1) {
+                                  setExpandedId(inv.id);
+                                  return;
+                                }
+                                const res = await fetch(`/api/sales-credit-notes/${cns[0].id}/generate-pdf`, { method: "POST" });
+                                const json = await res.json().catch(() => null);
+                                if (res.ok && json?.path) {
+                                  window.open(json.path, "_blank");
+                                } else {
+                                  alert(json?.error || "Failed to generate credit note PDF");
+                                }
+                              }}
+                            >
+                              <Download className="size-3 mr-0.5" />
+                              CN
+                            </Button>
+                          )}
+                          {(inv.status === "DRAFT" || inv.status === "VOIDED") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 w-6 p-0 text-red-500 hover:text-red-400 hover:bg-red-950/30 border-[#333333]"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!confirm(`Delete ${inv.invoiceNo || "this draft invoice"}?`)) return;
+                                const res = await fetch(`/api/sales-invoices/${inv.id}`, { method: "DELETE" });
+                                if (res.ok) {
+                                  router.refresh();
+                                } else {
+                                  const err = await res.json().catch(() => null);
+                                  alert(err?.error || "Failed to delete");
+                                }
+                              }}
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
 
@@ -648,11 +698,15 @@ export function InvoicesView({
                       <TableRow>
                         <TableCell colSpan={activeTab === "OVERDUE_CHASE" ? 12 : 11} className="bg-[#1A1A1A] p-4">
                           <div className="space-y-4">
+                            {/* Editable invoice details (date, PO, notes) */}
+                            <InvoiceDetailsControl invoice={inv} />
                             {/* Billing entity swap (group sister entities only) */}
                             <ChangeEntityControl
                               invoiceId={inv.id}
                               currentName={inv.customer.name}
+                              currentCustomerId={inv.customerId}
                               status={inv.status}
+                              customers={customers}
                             />
                             {/* Overdue chase info */}
                             {days !== null && days > 0 && (
@@ -723,7 +777,12 @@ export function InvoicesView({
 
                                           return (
                                             <TableRow key={line.id}>
-                                              <TableCell>{line.description}</TableCell>
+                                              <TableCell>
+                                                {line.description}
+                                                {line.sourceRef && (
+                                                  <div className="text-xs text-[#888888] mt-0.5">Quote {line.sourceRef}</div>
+                                                )}
+                                              </TableCell>
                                               <TableCell className="text-right tabular-nums">{dec(line.qty)}</TableCell>
                                               <TableCell className="text-right tabular-nums">{dec(line.unitPrice)}</TableCell>
                                               <TableCell className="text-right tabular-nums">{dec(line.lineTotal)}</TableCell>
@@ -835,6 +894,22 @@ export function InvoicesView({
                                       {dec(gross)}
                                     </span>
                                   </div>
+                                  {invCredits(inv) > 0 && (
+                                    <>
+                                      <div>
+                                        <span className="text-[#888888]">Credits</span>{" "}
+                                        <span className="tabular-nums text-[#00CC66]">
+                                          -{dec(invCredits(inv))}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-[#888888]">Balance Due</span>{" "}
+                                        <span className="tabular-nums font-bold text-[#FF9900]">
+                                          {dec(invNetDue(inv))}
+                                        </span>
+                                      </div>
+                                    </>
+                                  )}
                                   {canApplyVat && (
                                     <Button
                                       size="sm"
@@ -861,11 +936,48 @@ export function InvoicesView({
                               );
                             })()}
 
+                            {/* Credit Notes */}
+                            {(inv.salesCreditNotes ?? []).length > 0 && (
+                              <div>
+                                <h4 className="text-sm font-medium mb-2">Credit Notes</h4>
+                                <div className="border border-[#333333] bg-[#1A1A1A] divide-y divide-[#2A2A2A]">
+                                  {(inv.salesCreditNotes ?? []).map((cn) => (
+                                    <div key={cn.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                                      <div className="flex items-center gap-3">
+                                        <span className="font-medium text-[#E0E0E0]">{cn.creditNoteNo || "—"}</span>
+                                        <Badge variant="outline" className="text-[9px]">{cn.status}</Badge>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="tabular-nums text-[#00CC66]">-{dec(cn.total)}</span>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-6 text-[10px]"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            const res = await fetch(`/api/sales-credit-notes/${cn.id}/generate-pdf`, { method: "POST" });
+                                            const json = await res.json().catch(() => null);
+                                            if (res.ok && json?.path) {
+                                              window.open(json.path, "_blank");
+                                            } else {
+                                              alert(json?.error || "Failed to generate credit note PDF");
+                                            }
+                                          }}
+                                        >
+                                          <Download className="size-3 mr-1" />
+                                          PDF
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {/* Payments */}
                             {(inv.payments ?? []).length > 0 && (() => {
                               const paid = (inv.payments ?? []).reduce((s, p) => s + num(p.amount), 0);
-                              const gross = num(inv.totalGross) || num(inv.totalSell);
-                              const outstanding = gross - paid;
+                              const outstanding = invNetDue(inv);
                               return (
                                 <div>
                                   <h4 className="text-sm font-medium mb-2">Payments</h4>
@@ -1037,7 +1149,8 @@ export function InvoicesView({
             const net = num(payInvoice.totalNet);
             const vat = num(payInvoice.totalVat);
             const gross = num(payInvoice.totalGross) || num(payInvoice.totalSell);
-            const outstanding = gross - paid;
+            const credits = invCredits(payInvoice);
+            const outstanding = invNetDue(payInvoice);
             return (
               <div className="text-xs text-[#888888] -mt-2 mb-2 space-y-0.5">
                 <div>
@@ -1045,7 +1158,8 @@ export function InvoicesView({
                   <span className="text-[#CCCCCC] font-medium">{dec(gross)}</span>
                 </div>
                 <div>
-                  Paid {dec(paid)} · Outstanding{" "}
+                  Paid {dec(paid)}
+                  {credits > 0 ? ` · Credits -${dec(credits)}` : ""} · Outstanding{" "}
                   <span style={{ color: outstanding > 0 ? "#FF9900" : "#00CC66" }}>
                     {dec(outstanding)}
                   </span>
@@ -1166,40 +1280,172 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Change billing entity (within a corporate group) ────────────────────
+function InvoiceDetailsControl({ invoice }: { invoice: Invoice }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [issuedAt, setIssuedAt] = useState(
+    invoice.issuedAt ? invoice.issuedAt.slice(0, 10) : ""
+  );
+  const [poNo, setPoNo] = useState(invoice.poNo ?? "");
+  const [notes, setNotes] = useState(invoice.notes ?? "");
+
+  const isPosted = invoice.status !== "DRAFT" && invoice.status !== "VOIDED";
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sales-invoices/${invoice.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issuedAt: issuedAt ? new Date(issuedAt).toISOString() : null,
+          poNo: poNo || null,
+          notes: notes || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded border border-[#333333] bg-[#1F1F1F] p-3 space-y-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-xs flex items-center gap-4 flex-wrap">
+          <span>
+            <span className="text-[#888888]">Invoice date: </span>
+            <span className="font-medium text-[#E0E0E0]">
+              {invoice.issuedAt
+                ? new Date(invoice.issuedAt).toLocaleDateString("en-GB")
+                : "—"}
+            </span>
+          </span>
+          <span>
+            <span className="text-[#888888]">PO: </span>
+            <span className="font-medium text-[#E0E0E0]">{invoice.poNo || "—"}</span>
+          </span>
+        </div>
+        {!editing && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-[10px] h-6"
+            onClick={() => setEditing(true)}
+          >
+            Edit Details
+          </Button>
+        )}
+      </div>
+
+      {editing && (
+        <div className="space-y-2 pt-1">
+          {isPosted && (
+            <div className="text-[10px] text-[#FFAA00]">
+              This invoice is {statusLabel(invoice.status).toLowerCase()}. Changing the date
+              will re-date its posted ledger entry into the matching period.
+            </div>
+          )}
+          <div className="flex items-end gap-2 flex-wrap">
+            <label className="text-[10px] text-[#888888] flex flex-col gap-1">
+              Invoice date
+              <Input
+                type="date"
+                value={issuedAt}
+                onChange={(e) => setIssuedAt(e.target.value)}
+                className="h-7 text-xs w-[150px]"
+              />
+            </label>
+            <label className="text-[10px] text-[#888888] flex flex-col gap-1">
+              PO number
+              <Input
+                type="text"
+                value={poNo}
+                onChange={(e) => setPoNo(e.target.value)}
+                placeholder="PO number"
+                className="h-7 text-xs w-[180px]"
+              />
+            </label>
+          </div>
+          <label className="text-[10px] text-[#888888] flex flex-col gap-1">
+            Notes
+            <Input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes"
+              className="h-7 text-xs w-full max-w-[420px]"
+            />
+          </label>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-7 text-[10px] bg-[#FF6600] text-black hover:bg-[#FF6600]/90"
+              disabled={busy}
+              onClick={save}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              disabled={busy}
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+                setIssuedAt(invoice.issuedAt ? invoice.issuedAt.slice(0, 10) : "");
+                setPoNo(invoice.poNo ?? "");
+                setNotes(invoice.notes ?? "");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {error && <div className="text-[11px] text-[#FF6666]">{error}</div>}
+    </div>
+  );
+}
+
 function ChangeEntityControl({
   invoiceId,
   currentName,
+  currentCustomerId,
   status,
+  customers,
 }: {
   invoiceId: string;
   currentName: string;
+  currentCustomerId: string;
   status: string;
+  customers: CustomerOption[];
 }) {
-  type Member = { id: string; name: string; isCurrent: boolean; isRoot: boolean };
   const router = useRouter();
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState<string>("");
+  const [query, setQuery] = useState<string>("");
   const [reason, setReason] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const isPaid = status === "PAID";
 
-  async function loadMembers() {
-    if (members || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sales-invoices/${invoiceId}/group-members`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
-      setMembers(json.members);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return customers
+      .filter((c) => c.id !== currentCustomerId)
+      .filter((c) => (q ? c.name.toLowerCase().includes(q) : true))
+      .slice(0, 50);
+  }, [customers, currentCustomerId, query]);
 
   async function submit() {
     if (!target) return;
@@ -1221,46 +1467,45 @@ function ChangeEntityControl({
     }
   }
 
-  const swappable = members?.filter((m) => !m.isCurrent) ?? [];
-
   return (
     <div className="rounded border border-[#333333] bg-[#1F1F1F] p-3 space-y-2">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-xs">
-          <span className="text-[#888888]">Billing entity: </span>
+          <span className="text-[#888888]">Billing customer: </span>
           <span className="font-medium text-[#E0E0E0]">{currentName}</span>
         </div>
-        {isPaid ? (
-          <span className="text-[10px] text-[#888888]">
-            Locked — invoice is PAID. Issue a credit note to change.
-          </span>
-        ) : !members ? (
+        {!open ? (
           <Button
             size="sm"
             variant="outline"
             className="text-[10px] h-6"
-            onClick={loadMembers}
-            disabled={loading}
+            onClick={() => setOpen(true)}
           >
-            {loading ? "Loading…" : "Change Entity"}
+            Change Customer
           </Button>
-        ) : swappable.length === 0 ? (
-          <span className="text-[10px] text-[#888888]">
-            No sister entities in this group.
-          </span>
         ) : (
           <div className="flex items-center gap-2 flex-wrap">
+            <Input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search customer…"
+              className="h-7 text-xs w-[180px]"
+            />
             <Select value={target} onValueChange={(v) => setTarget(v ?? "")}>
-              <SelectTrigger className="h-7 text-xs min-w-[200px]">
-                <SelectValue placeholder="— pick entity —" />
+              <SelectTrigger className="h-7 text-xs min-w-[220px]">
+                <SelectValue placeholder="— pick customer —" />
               </SelectTrigger>
               <SelectContent>
-                {swappable.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
-                    {m.isRoot ? " (parent)" : ""}
-                  </SelectItem>
-                ))}
+                {matches.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-[#888888]">No matches</div>
+                ) : (
+                  matches.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
             <Input
@@ -1268,7 +1513,7 @@ function ChangeEntityControl({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Reason (optional)"
-              className="h-7 text-xs min-w-[200px]"
+              className="h-7 text-xs min-w-[180px]"
             />
             <Button
               size="sm"
@@ -1278,9 +1523,29 @@ function ChangeEntityControl({
             >
               {busy ? "Switching…" : "Switch"}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setTarget("");
+                setQuery("");
+                setReason("");
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         )}
       </div>
+      {open && isPaid && (
+        <div className="text-[10px] text-[#FFAA00]">
+          Invoice is PAID — the payment on record will also move to the new customer.
+        </div>
+      )}
       {error && (
         <div className="text-[11px] text-[#FF6666]">{error}</div>
       )}

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { customerId, ticketId, siteId, issuedBy, poNo, poDate, fileRef, fileName, lines } = body;
+    const { customerId, ticketId, ticketIds, siteId, issuedBy, poNo, poDate, fileRef, fileName, lines } = body;
 
     if (!customerId || !poNo) {
       return Response.json({ error: "Customer and PO number are required" }, { status: 400 });
@@ -38,8 +38,16 @@ export async function POST(request: Request) {
 
     const totalExVat = (lines || []).reduce((s: number, l: any) => s + (l.lineTotal || 0), 0);
 
+    // Resolve ticket IDs — support both single ticketId (legacy) and ticketIds array (new)
+    let resolvedTicketIds: string[] = [];
+    if (ticketIds && Array.isArray(ticketIds) && ticketIds.length > 0) {
+      resolvedTicketIds = ticketIds;
+    } else if (ticketId) {
+      resolvedTicketIds = [ticketId];
+    }
+
     // Auto-create ticket if none provided
-    let resolvedTicketId = ticketId;
+    let resolvedTicketId = resolvedTicketIds[0] || null;
     if (!resolvedTicketId) {
       const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { name: true } });
       const site = await prisma.site.findUnique({ where: { id: resolvedSiteId }, select: { siteName: true } });
@@ -90,10 +98,10 @@ export async function POST(request: Request) {
       });
     }
 
-    // If no parsed lines but ticket has a quote, pull from quote
-    if ((!lines || lines.length === 0) && ticketId) {
+    // If no parsed lines but ticket has a quote, pull from quote (use first ticket for backward compat)
+    if ((!lines || lines.length === 0) && resolvedTicketIds.length > 0) {
       const quotes = await prisma.quote.findMany({
-        where: { ticketId },
+        where: { ticketId: resolvedTicketIds[0] },
         include: { lines: true },
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -113,7 +121,18 @@ export async function POST(request: Request) {
       }
     }
 
-    return Response.json({ id: po.id, poNo }, { status: 201 });
+    // Create CustomerPOTicketLink entries for all resolved ticket IDs
+    if (resolvedTicketIds.length > 0) {
+      await prisma.customerPOTicketLink.createMany({
+        data: resolvedTicketIds.map((tid) => ({
+          customerPOId: po.id,
+          ticketId: tid,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return Response.json({ id: po.id, poNo, linkedTickets: resolvedTicketIds.length }, { status: 201 });
   } catch (error) {
     console.error("Failed to confirm PO upload:", error);
     return Response.json({ error: error instanceof Error ? error.message : "Failed to create PO" }, { status: 500 });

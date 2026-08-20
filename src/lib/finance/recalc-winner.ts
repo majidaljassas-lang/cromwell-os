@@ -16,16 +16,23 @@
 import { prisma } from "@/lib/prisma";
 
 export async function recalcWinner(ticketLineId: string): Promise<void> {
+  const line = await prisma.ticketLine.findUnique({
+    where: { id: ticketLineId },
+    select: { priceOverride: true },
+  });
+
   const prices = await prisma.ticketLinePrice.findMany({
     where: { ticketLineId },
     orderBy: { costTotal: "asc" },
   });
 
   if (prices.length === 0) {
-    await prisma.ticketLine.update({
-      where: { id: ticketLineId },
-      data: { expectedCostUnit: null, expectedCostTotal: null, supplierName: null, supplierId: null },
-    });
+    if (!line?.priceOverride) {
+      await prisma.ticketLine.update({
+        where: { id: ticketLineId },
+        data: { expectedCostUnit: null, expectedCostTotal: null, supplierName: null, supplierId: null },
+      });
+    }
     return;
   }
 
@@ -40,6 +47,8 @@ export async function recalcWinner(ticketLineId: string): Promise<void> {
     where: { id: winner.id },
     data: { isWinner: true },
   });
+
+  if (line?.priceOverride) return;
 
   await prisma.ticketLine.update({
     where: { id: ticketLineId },

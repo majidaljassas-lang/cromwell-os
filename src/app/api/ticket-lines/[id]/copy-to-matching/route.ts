@@ -28,14 +28,15 @@ export async function POST(
 
   const normalDesc = source.description.trim().toLowerCase();
 
-  // Find all matching lines on the same ticket
+  // Find all matching lines on the same ticket. Locked siblings ("ticked off
+  // — happy with this line") are skipped so the lock actually means "leave alone".
   const siblings = await prisma.ticketLine.findMany({
-    where: { ticketId: source.ticketId, id: { not: id } },
+    where: { ticketId: source.ticketId, id: { not: id }, isLocked: false },
     select: { id: true, description: true, qty: true, productCode: true, isBomParent: true },
   });
 
   // Strip SKU prefix for fuzzy matching (e.g. "BSW0290T Crosswater..." → "Crosswater...")
-  const BRANDS = ["Geberit","Crosswater","VADO","Saneux","Coalbrook","D-Neo","Scudo","Merlyn","TrayMate","Level25","Ellis","Kensington"];
+  const BRANDS = ["Geberit","Crosswater","VADO","Saneux","Coalbrook","D-Neo","Scudo","Merlyn","TrayMate","Level25","Ellis","Kensington","Grohe","Hansgrohe","RAK Ceramics","Nuie","McAlpine","Ideal Standard","Roca","Bristan","Xaviga","Volente","Lakes","WuduMate","KeyPlumb","Mira","Aqualisa","Triton"];
   function stripSku(desc: string): string {
     const t = desc.trim();
     for (const b of BRANDS) { if (t.toLowerCase().startsWith(b.toLowerCase())) return t; }
@@ -77,7 +78,7 @@ export async function POST(
     });
 
     // Copy BOM if source has one and sibling doesn't
-    if (source.isBomParent && source.components.length > 0 && !sib.isBomParent) {
+    if (source.isBomParent && source.components.length > 0) {
       try {
         await fetch(`http://localhost:3000/api/ticket-lines/${sib.id}/bom`, {
           method: "POST",

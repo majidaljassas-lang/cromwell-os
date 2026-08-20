@@ -17,7 +17,7 @@ function buildHtml(quote: {
   versionNo: number;
   createdAt: Date;
   notes: string | null;
-  customer: { name: string };
+  customer: { name: string; billingAddress: string | null; outsideUkVatScope: boolean };
   site: { siteName: string } | null;
   ticket: { title: string };
   lines: Array<{
@@ -49,11 +49,13 @@ function buildHtml(quote: {
       </tr>`
     ).join("") : "";
 
-    const isFoc = Number(line.unitPrice) === 0 && Number(line.lineTotal) === 0;
+    // Any line with no sale price shows as TBC. FOC only when explicitly stated.
+    const isFoc = /\bFOC\b/i.test(String(line.description ?? ""));
+    const isTbc = !isFoc && Number(line.unitPrice) === 0 && Number(line.lineTotal) === 0;
     const focBadge = `<span style="display:inline-block;font-size:9px;font-weight:700;letter-spacing:0.1em;background:#E8F4FD;color:#0066CC;padding:2px 6px;margin-left:8px;border-radius:2px">FOC</span>`;
-    const priceCell = isFoc ? `FOC` : fmt(line.unitPrice);
-    const totalCell = isFoc ? `FOC` : fmt(line.lineTotal);
-    const priceStyle = isFoc ? "color:#0066CC;font-weight:700" : "";
+    const priceCell = isTbc ? `TBC` : isFoc ? `FOC` : fmt(line.unitPrice);
+    const totalCell = isTbc ? `TBC` : isFoc ? `FOC` : fmt(line.lineTotal);
+    const priceStyle = isTbc ? "color:#888;font-style:italic" : isFoc ? "color:#0066CC;font-weight:700" : "";
     const rowStyle = isFoc ? "background:#FBFCFE;" : "";
 
     return `${sectionHeader}<tr style="border-bottom:${isBom ? "none" : "1px solid #eee"};${rowStyle}">
@@ -108,6 +110,12 @@ function buildHtml(quote: {
     <div>
       <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.15em;color:#999;margin-bottom:5px">Prepared For</div>
       <div style="font-size:15px;font-weight:600">${quote.customer.name}</div>
+      ${(quote.customer.billingAddress || "")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => `<div style="font-size:12px;color:#555;margin-top:2px">${l}</div>`)
+        .join("")}
       ${quote.site ? `<div style="font-size:12px;color:#666;margin-top:3px">Site: ${quote.site.siteName}</div>` : ""}
     </div>
     <div style="text-align:right;max-width:280px">
@@ -136,13 +144,18 @@ function buildHtml(quote: {
       <span style="font-size:13px;color:#555">Sub Total</span>
       <span style="font-size:13px;font-variant-numeric:tabular-nums">${fmt(totalSale)}</span>
     </div>
-    <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid #eee">
+    ${quote.customer.outsideUkVatScope
+      ? `<div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid #eee">
+      <span style="font-size:13px;color:#555">VAT</span>
+      <span style="font-size:13px;font-variant-numeric:tabular-nums">Outside the scope of UK VAT</span>
+    </div>`
+      : `<div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid #eee">
       <span style="font-size:13px;color:#555">Standard Rate (20%)</span>
       <span style="font-size:13px;font-variant-numeric:tabular-nums">${fmt(totalSale * 0.2)}</span>
-    </div>
+    </div>`}
     <div style="display:flex;justify-content:space-between;padding:12px 0;border-top:2px solid #111">
       <span style="font-weight:700;font-size:14px">Total</span>
-      <span style="font-weight:700;font-size:14px;font-variant-numeric:tabular-nums">${fmt(totalSale * 1.2)}</span>
+      <span style="font-weight:700;font-size:14px;font-variant-numeric:tabular-nums">${fmt(quote.customer.outsideUkVatScope ? totalSale : totalSale * 1.2)}</span>
     </div>
   </div>
 </div>
@@ -155,7 +168,7 @@ ${quote.notes ? `
 
 <div style="border-top:1px solid #ddd;padding-top:18px;margin-top:45px;text-align:center">
   <div style="font-size:10px;color:#aaa">This quotation is valid for 30 days from the date of issue.</div>
-  <div style="font-size:10px;color:#aaa;margin-top:3px">All prices include VAT at 20% where applicable.</div>
+  <div style="font-size:10px;color:#aaa;margin-top:3px">${quote.customer.outsideUkVatScope ? "This supply is outside the scope of UK VAT. No UK VAT is chargeable." : "All prices include VAT at 20% where applicable."}</div>
 </div>
 
 </body></html>`;
@@ -171,7 +184,7 @@ export async function POST(
       where: { id },
       include: {
         lines: { orderBy: { sortOrder: "asc" }, include: { ticketLine: { select: { unit: true, sectionLabel: true, isBomParent: true, components: { select: { description: true, qty: true, unit: true, expectedCostUnit: true, supplierName: true }, orderBy: { createdAt: "asc" } } } } } },
-        customer: true,
+        customer: { select: { name: true, billingAddress: true, outsideUkVatScope: true } },
         site: true,
         ticket: { select: { title: true } },
       },

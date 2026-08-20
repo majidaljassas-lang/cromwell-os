@@ -14,6 +14,9 @@ import { matchBillLine } from "@/lib/intake/match-engine";
 import { allocateBillLine } from "@/lib/intake/allocation-engine";
 import { resolveSupplier } from "./supplier-resolver";
 import { inferDueDate } from "./due-date";
+import { allocateBillLines } from "./ai-allocator";
+import { resolveTasksForSignal } from "@/lib/ingestion/signal-resolver";
+import { ensureAttachmentsExtracted } from "@/lib/ingestion/ensure-attachments";
 
 export interface PipelineResult {
   threadId: string;
@@ -57,12 +60,26 @@ export async function processBillThread(threadId: string): Promise<PipelineResul
   let bill = existing;
 
   if (!bill) {
-    const rawText = buildThreadText(thread);
+    const rawText = await buildBillSourceText(thread);
     const extracted = await extractBillFromText(rawText);
     result.extractedLines = extracted.lines.length;
 
     if (extracted.lines.length === 0) {
       result.errors.push("AI extractor returned zero line items — thread may not be a parseable bill");
+      const snippet = rawText.slice(0, 200).replace(/\s+/g, " ").trim();
+      await prisma.reviewQueueItem.create({
+        data: {
+          // UNRESOLVED_PARSE not in ReviewQueueType enum; using closest match.
+          queueType: "MISSING_ORDER_EVIDENCE",
+          status: "OPEN_REVIEW",
+          entityType: "InboxThread",
+          entityId: threadId,
+          rawValue: extracted.supplierName ?? null,
+          description:
+            `Bill parser returned no lines for thread "${thread.subject ?? "(no subject)"}" ` +
+            `(supplier: ${extracted.supplierName ?? "unknown"}). Snippet: ${snippet}`,
+        },
+      });
       return result;
     }
 
@@ -177,6 +194,12 @@ export async function processBillThread(threadId: string): Promise<PipelineResul
     }
   }
 
+  try {
+    await allocateBillLines(bill.id);
+  } catch (e) {
+    result.errors.push(`ai-allocator: ${e instanceof Error ? e.message : "unknown"}`);
+  }
+
   await logAudit({
     objectType: "SupplierBill",
     objectId:   bill.id,
@@ -190,14 +213,64 @@ export async function processBillThread(threadId: string): Promise<PipelineResul
     },
   });
 
+  // Fire the BILL_DOCUMENT signal so any open watchlist tasks (e.g. statement
+  // chases of this billNo) can auto-close. Scoped by supplierId so a bill from
+  // supplier A can't accidentally close supplier B's chase task with the same
+  // raw number.
+  try {
+    const closed = await resolveTasksForSignal({
+      docType: "BILL_DOCUMENT",
+      matcher: { billNo: bill.billNo, supplierId: bill.supplierId },
+      source: bill.id,
+    });
+    if (closed.closedTaskIds.length > 0) {
+      await logAudit({
+        objectType: "SupplierBill",
+        objectId: bill.id,
+        actionType: "AUTO_CLOSED_WATCHLIST_TASKS",
+        actor: "SYSTEM",
+        newValue: { closedTaskIds: closed.closedTaskIds, count: closed.closedTaskIds.length },
+      });
+    }
+  } catch (e) {
+    result.errors.push(`signal-resolver: ${e instanceof Error ? e.message : "unknown"}`);
+  }
+
   return result;
 }
 
-function buildThreadText(thread: {
+/**
+ * Build the text the AI extractor sees for this bill thread.
+ *
+ * Snippets alone are useless for parseable bills — the line items live in the
+ * PDF attachment. We invoke ensureAttachmentsExtracted for each message so
+ * the attachment text is merged onto the message's ParsedMessage.extractedText
+ * (idempotent — skipped if already merged), then concatenate full extracted
+ * text per message instead of the snippet preview.
+ */
+async function buildBillSourceText(thread: {
   subject: string | null;
   participants: string[];
-  messages: Array<{ sender: string | null; snippet: string | null; occurredAt: Date }>;
-}): string {
+  messages: Array<{ ingestionEventId: string; sender: string | null; snippet: string | null; occurredAt: Date }>;
+}): Promise<string> {
+  for (const msg of thread.messages) {
+    try {
+      await ensureAttachmentsExtracted(msg.ingestionEventId);
+    } catch {
+      // Best-effort: a single message's attachment failure shouldn't kill
+      // the whole pipeline. Other messages may still carry the bill text.
+    }
+  }
+
+  const eventIds = thread.messages.map((m) => m.ingestionEventId).filter(Boolean);
+  const parsed = eventIds.length
+    ? await prisma.parsedMessage.findMany({
+        where: { ingestionEventId: { in: eventIds } },
+        select: { ingestionEventId: true, extractedText: true },
+      })
+    : [];
+  const textByEventId = new Map(parsed.map((p) => [p.ingestionEventId, p.extractedText]));
+
   const header = [
     thread.subject ? `Subject: ${thread.subject}` : "",
     thread.participants.length ? `Participants: ${thread.participants.join(", ")}` : "",
@@ -206,7 +279,8 @@ function buildThreadText(thread: {
   const body = thread.messages.map((m) => {
     const when = m.occurredAt.toISOString();
     const who  = m.sender ?? "unknown";
-    return `[${when}] ${who}\n${m.snippet ?? ""}`;
+    const text = textByEventId.get(m.ingestionEventId) ?? m.snippet ?? "";
+    return `[${when}] ${who}\n${text}`;
   }).join("\n\n---\n\n");
 
   return `${header}\n\n${body}`.trim();

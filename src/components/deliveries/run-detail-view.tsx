@@ -13,6 +13,7 @@ import {
   XCircle,
   Trash2,
   Send,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,10 +41,12 @@ import {
   allocateBillAction,
   completeStopAction,
   deleteStopAction,
+  deleteRunAction,
   dispatchRunAction,
   overrideStopShareAction,
   reorderStopAction,
   setSplitMethodAction,
+  updateRunAction,
 } from "@/app/(dashboard)/deliveries/actions";
 
 type Run = {
@@ -128,14 +131,18 @@ export function RunDetailView({
   run,
   openTickets,
   suppliers,
+  cfSuppliers,
   candidateBills,
 }: {
   run: Run;
   openTickets: OpenTicket[];
   suppliers: Supplier[];
+  cfSuppliers: Supplier[];
   candidateBills: Bill[];
 }) {
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editDriverSource, setEditDriverSource] = useState<Run["driverSource"]>(run.driverSource);
   const [completeId, setCompleteId] = useState<string | null>(null);
   const [stopType, setStopType] = useState<"COLLECT" | "DELIVER">("DELIVER");
   const [ticketSearch, setTicketSearch] = useState("");
@@ -195,6 +202,132 @@ export function RunDetailView({
               </Button>
             </form>
           )}
+          {!isLocked && (
+            <Sheet open={editOpen} onOpenChange={setEditOpen}>
+              <SheetTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-[#2A2A2A]"
+                  >
+                    <Pencil className="h-4 w-4 mr-1" /> Edit
+                  </Button>
+                }
+              />
+              <SheetContent
+                side="right"
+                className="bg-[#0D0D0D] border-l border-[#2A2A2A] w-[480px] sm:max-w-[480px]"
+              >
+                <SheetHeader>
+                  <SheetTitle className="bb-mono text-[#FF6600]">
+                    Edit Run #{run.runNo}
+                  </SheetTitle>
+                </SheetHeader>
+                <form
+                  action={async (fd) => {
+                    await updateRunAction(fd);
+                    setEditOpen(false);
+                  }}
+                  className="space-y-3 mt-4 px-4"
+                >
+                  <input type="hidden" name="runId" value={run.id} />
+                  <div>
+                    <Label className="text-xs bb-mono">Run date</Label>
+                    <Input
+                      type="date"
+                      name="runDate"
+                      defaultValue={run.runDate.slice(0, 10)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs bb-mono">Driver source</Label>
+                    <select
+                      name="driverSource"
+                      value={editDriverSource}
+                      onChange={(e) =>
+                        setEditDriverSource(e.target.value as Run["driverSource"])
+                      }
+                      className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
+                    >
+                      <option value="IN_HOUSE">In-house (Dad)</option>
+                      <option value="CROMWELL_FREIGHT">Cromwell Freight</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs bb-mono">Driver name</Label>
+                    <Input
+                      name="driverName"
+                      defaultValue={run.driverName ?? ""}
+                      placeholder={editDriverSource === "IN_HOUSE" ? "Dad" : "CF driver name"}
+                    />
+                  </div>
+                  {editDriverSource === "CROMWELL_FREIGHT" && (
+                    <div>
+                      <Label className="text-xs bb-mono">CF supplier</Label>
+                      <select
+                        name="cfSupplierId"
+                        defaultValue={run.cfSupplier?.id ?? ""}
+                        className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="">— select —</option>
+                        {cfSuppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <Label className="text-xs bb-mono">Vehicle reg</Label>
+                    <Input
+                      name="vehicleReg"
+                      defaultValue={run.vehicleReg ?? ""}
+                      placeholder="e.g. AB12 CDE"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs bb-mono">Notes</Label>
+                    <Textarea
+                      name="notes"
+                      rows={3}
+                      defaultValue={run.notes ?? ""}
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full bg-[#FF6600] text-black hover:bg-[#FF8533]"
+                  >
+                    Save
+                  </Button>
+                </form>
+              </SheetContent>
+            </Sheet>
+          )}
+          <form
+            action={deleteRunAction}
+            onSubmit={(e) => {
+              if (
+                !confirm(
+                  `Delete run #${run.runNo}? This removes the run and its ${run.stops.length} stop(s). Linked bills and logistics events stay (just unlinked).`,
+                )
+              ) {
+                e.preventDefault();
+              }
+            }}
+          >
+            <input type="hidden" name="runId" value={run.id} />
+            <Button
+              size="sm"
+              type="submit"
+              variant="ghost"
+              className="text-[#888888] hover:text-[#FF7F7F] hover:bg-[#4A1A1A]/30"
+              title="Delete this run"
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Delete
+            </Button>
+          </form>
         </div>
       </div>
 
@@ -303,24 +436,31 @@ export function RunDetailView({
                   </select>
                 </div>
 
-                {stopType === "COLLECT" && (
-                  <div>
-                    <Label className="text-xs bb-mono">Supplier (collection point)</Label>
-                    <select
-                      name="supplierId"
-                      required
-                      className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
-                      defaultValue=""
-                    >
-                      <option value="">— select —</option>
-                      {suppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <Label className="text-xs bb-mono">
+                    {stopType === "COLLECT"
+                      ? "Supplier (collection point)"
+                      : "Collection point (optional)"}
+                  </Label>
+                  <select
+                    name="supplierId"
+                    required={stopType === "COLLECT"}
+                    className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
+                    defaultValue=""
+                  >
+                    <option value="">— {stopType === "COLLECT" ? "select" : "none"} —</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  {stopType === "DELIVER" && (
+                    <p className="text-[10px] text-[#666666] mt-1">
+                      Set this if the driver picks up from a supplier first, then drops at the site.
+                    </p>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -435,6 +575,11 @@ export function RunDetailView({
                             ? stop.site?.siteName
                             : stop.supplier?.name)}
                       </div>
+                      {stop.type === "DELIVER" && stop.supplier?.name && (
+                        <div className="text-[10px] text-[#FFB97F] mt-0.5">
+                          ↑ collect from {stop.supplier.name}
+                        </div>
+                      )}
                       {stop.ticket.deliveryBillingMode === "CHARGEABLE" && (
                         <Badge className="mt-1 bg-[#1A3A2A] text-[#7FFFA1] text-[9px]">
                           CHARGEABLE

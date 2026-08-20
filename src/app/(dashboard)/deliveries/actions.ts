@@ -89,7 +89,9 @@ export async function addStopAction(formData: FormData) {
       type,
       ticketId,
       siteId: type === "DELIVER" ? ticket.siteId : null,
-      supplierId: type === "COLLECT" ? supplierId : null,
+      // Allow a collection point on DELIVER stops too (driver picks up
+      // from supplier first, then drops at the site).
+      supplierId: supplierId || null,
       addressSnapshot,
       timeWindowStart: timeWindowStart ? new Date(timeWindowStart) : null,
       timeWindowEnd: timeWindowEnd ? new Date(timeWindowEnd) : null,
@@ -157,6 +159,44 @@ export async function reorderStopAction(formData: FormData) {
   revalidatePath(`/deliveries/${runId}`);
 }
 
+export async function updateRunAction(formData: FormData) {
+  const runId = String(formData.get("runId") || "");
+  if (!runId) throw new Error("runId required");
+
+  const run = await prisma.deliveryRun.findUnique({
+    where: { id: runId },
+    select: { status: true },
+  });
+  if (!run) throw new Error("run not found");
+  if (run.status === "COMPLETED" || run.status === "CANCELLED") {
+    throw new Error("cannot edit a completed or cancelled run");
+  }
+
+  const runDate = String(formData.get("runDate") || "");
+  const driverSource = pickDriverSource(formData.get("driverSource"));
+  const driverName = String(formData.get("driverName") || "") || null;
+  const cfSupplierIdRaw = String(formData.get("cfSupplierId") || "") || null;
+  const vehicleReg = String(formData.get("vehicleReg") || "") || null;
+
+  await prisma.deliveryRun.update({
+    where: { id: runId },
+    data: {
+      runDate: runDate ? new Date(runDate) : undefined,
+      driverSource,
+      driverName,
+      cfSupplierId: driverSource === "CROMWELL_FREIGHT" ? cfSupplierIdRaw : null,
+      vehicleReg,
+      // Only write notes if the form actually included a notes field — otherwise
+      // editing from a form that omits notes would wipe existing notes.
+      notes: formData.has("notes")
+        ? String(formData.get("notes") || "") || null
+        : undefined,
+    },
+  });
+  revalidatePath(`/deliveries/${runId}`);
+  revalidatePath("/deliveries");
+}
+
 export async function setSplitMethodAction(formData: FormData) {
   const runId = String(formData.get("runId") || "");
   const splitMethod = pickSplitMethod(formData.get("splitMethod"));
@@ -198,4 +238,43 @@ export async function deleteStopAction(formData: FormData) {
   if (!stopId) throw new Error("stopId required");
   await prisma.deliveryRunStop.delete({ where: { id: stopId } });
   revalidatePath(`/deliveries/${runId}`);
+}
+
+export async function deleteRunAction(formData: FormData) {
+  const runId = String(formData.get("runId") || "");
+  if (!runId) throw new Error("runId required");
+
+  const run = await prisma.deliveryRun.findUnique({
+    where: { id: runId },
+    select: { id: true, runNo: true, status: true },
+  });
+  if (!run) throw new Error("run not found");
+
+  await prisma.$transaction(async (tx) => {
+    // 1. Detach any supplier bills linked to this run (preserve the bills).
+    await tx.supplierBill.updateMany({
+      where: { deliveryRunId: runId },
+      data: { deliveryRunId: null },
+    });
+
+    // 2. For every stop on this run, unlink any LogisticsEvents (preserve them).
+    const stops = await tx.deliveryRunStop.findMany({
+      where: { runId },
+      select: { id: true },
+    });
+    if (stops.length > 0) {
+      const stopIds = stops.map((s) => s.id);
+      await tx.logisticsEvent.updateMany({
+        where: { runStopId: { in: stopIds } },
+        data: { runStopId: null },
+      });
+      await tx.deliveryRunStop.deleteMany({ where: { runId } });
+    }
+
+    // 3. Delete the run itself.
+    await tx.deliveryRun.delete({ where: { id: runId } });
+  });
+
+  revalidatePath("/deliveries");
+  redirect("/deliveries");
 }

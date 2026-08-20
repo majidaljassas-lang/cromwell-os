@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { QuoteBuilder } from "@/components/quotes/quote-builder";
+import { DrawFromQuoteButton } from "@/components/quotes/draw-from-quote-button";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,11 @@ export default async function QuotePage({
 
   return (
     <div className="p-4 space-y-4">
+      <DrawFromQuoteButton
+        quoteId={quote.id}
+        customerId={quote.customerId}
+        status={quote.status}
+      />
       <QuoteBuilder quote={s(quote)} />
     </div>
   );

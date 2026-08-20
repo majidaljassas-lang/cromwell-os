@@ -6,8 +6,13 @@ export async function POST(
 ) {
   const { id: siteId } = await params;
   try {
-    const { customerId, role, billingAllowed, defaultBillingCustomer } =
-      await request.json();
+    const {
+      customerId,
+      role,
+      billingAllowed,
+      defaultBillingCustomer,
+      commercialNotes,
+    } = await request.json();
 
     const link = await prisma.siteCommercialLink.create({
       data: {
@@ -16,6 +21,7 @@ export async function POST(
         role,
         billingAllowed: billingAllowed ?? false,
         defaultBillingCustomer: defaultBillingCustomer ?? false,
+        commercialNotes: commercialNotes?.trim() || null,
       },
     });
     return Response.json(link, { status: 201 });

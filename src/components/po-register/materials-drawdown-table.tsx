@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,6 +84,54 @@ export function MaterialsDrawdownTable({
   const [unitSell, setUnitSell] = useState(0);
   const [costValueActual, setCostValueActual] = useState(0);
 
+  // Multi-select for "Create invoice from selected drawdowns"
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+
+  const loggedEntries = entries.filter((e) => e.status === "LOGGED");
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const allSelected =
+        loggedEntries.length > 0 && loggedEntries.every((e) => prev.has(e.id));
+      return allSelected ? new Set() : new Set(loggedEntries.map((e) => e.id));
+    });
+  }
+  async function createInvoiceFromSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Create one invoice from ${selectedIds.size} drawdown line(s)?`)) return;
+    setCreatingInvoice(true);
+    try {
+      const res = await fetch(
+        `/api/customer-pos/${poId}/materials-drawdowns/build-invoice`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entryIds: Array.from(selectedIds) }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setSelectedIds(new Set());
+      router.refresh();
+      alert(
+        `Invoice ${json.invoiceNo} created — £${Number(json.totalSell).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${json.lineCount} line(s).`
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to create invoice");
+    } finally {
+      setCreatingInvoice(false);
+    }
+  }
+
   const previewSell = qty * unitSell;
   const previewOverhead = previewSell * 0.1;
   const previewProfit = previewSell - costValueActual - previewOverhead;
@@ -149,6 +197,23 @@ export function MaterialsDrawdownTable({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">Materials Drawdown Entries</h3>
+        <div className="flex gap-2 items-center">
+        {selectedIds.size > 0 && (
+          <Button
+            size="sm"
+            onClick={createInvoiceFromSelected}
+            disabled={creatingInvoice}
+            className="h-7 text-[10px] bg-[#FF6600] hover:bg-[#FF6600]/90 text-black"
+          >
+            <Receipt className="size-3 mr-1" />
+            {creatingInvoice
+              ? "Creating…"
+              : `Create Invoice from ${selectedIds.size} line${selectedIds.size === 1 ? "" : "s"} · £${entries
+                  .filter((e) => selectedIds.has(e.id))
+                  .reduce((s, e) => s + n(e.sellValue), 0)
+                  .toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          </Button>
+        )}
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             render={
@@ -313,12 +378,24 @@ export function MaterialsDrawdownTable({
             </form>
           </SheetContent>
         </Sheet>
+        </div>
       </div>
 
       <div className="border border-[#333333] bg-[#1A1A1A]">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all logged"
+                  checked={
+                    loggedEntries.length > 0 &&
+                    loggedEntries.every((e) => selectedIds.has(e.id))
+                  }
+                  onChange={toggleSelectAll}
+                />
+              </TableHead>
               <TableHead>Draw Date</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="text-right">Qty</TableHead>
@@ -334,7 +411,7 @@ export function MaterialsDrawdownTable({
             {entries.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={10}
                   className="text-center py-6 text-[#888888]"
                 >
                   No materials entries logged yet.
@@ -344,6 +421,16 @@ export function MaterialsDrawdownTable({
               <>
                 {entries.map((entry) => (
                   <TableRow key={entry.id}>
+                    <TableCell>
+                      {entry.status === "LOGGED" ? (
+                        <input
+                          type="checkbox"
+                          aria-label="Select drawdown"
+                          checked={selectedIds.has(entry.id)}
+                          onChange={() => toggleSelect(entry.id)}
+                        />
+                      ) : null}
+                    </TableCell>
                     <TableCell className="tabular-nums">
                       {new Date(entry.drawdownDate).toLocaleDateString("en-GB")}
                     </TableCell>
@@ -381,7 +468,7 @@ export function MaterialsDrawdownTable({
                 ))}
                 {/* Summary row */}
                 <TableRow className="bg-[#222222] font-medium">
-                  <TableCell colSpan={4} className="text-right">
+                  <TableCell colSpan={5} className="text-right">
                     Totals
                   </TableCell>
                   <TableCell className="text-right tabular-nums">

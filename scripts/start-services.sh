@@ -102,33 +102,26 @@ WA_PID=$!
 ) &
 CATCHUP_PID=$!
 
-# ── 5. POLLER LOOP (every 10 min) ──────────────────────────────────────────
-log "📧 Poller loop running every 10 min"
-(
-  while true; do
-    sleep 600
-    curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
-      http://localhost:3000/api/automation/sync/outlook >/dev/null 2>&1 || true
-    curl -s -X POST -H "x-scheduler-secret: ${SCHEDULER_SECRET:-}" \
-      http://localhost:3000/api/automation/process >/dev/null 2>&1 || true
-  done
-) &
-POLLER_PID=$!
+# ── 5. POLLING ────────────────────────────────────────────────────────────────
+# Note: Polling is now handled by cromwell-poller (pm2 process running scripts/email-poller.js)
+# every 2 minutes. The old poller loop below has been removed to avoid duplicate polling.
+# If you need to restart the poller, run: pm2 restart cromwell-poller
 
-log "✅ All services up — Web :3000, WhatsApp :3001, poller running"
+log "✅ All services up — Web :3000, WhatsApp :3001 (polling via cromwell-poller)"
 
 cleanup() {
   log "⏹ Stopping — SIGTERM received"
-  kill "$WA_PID" "$POLLER_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
+  kill "$WA_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
   exit 0
 }
 trap cleanup INT TERM
 
-# Watchdog: if WA or the poller die, exit non-zero so launchd respawns everything.
-while kill -0 "$WA_PID" 2>/dev/null && kill -0 "$POLLER_PID" 2>/dev/null; do
+# Watchdog: if WA dies, exit non-zero so launchd respawns everything.
+# Note: CATCHUP_PID is a one-shot background job, so we only monitor WA.
+while kill -0 "$WA_PID" 2>/dev/null; do
   sleep 30
 done
 
-log "⚠ A critical service exited — shutting down so launchd restarts us"
-kill "$WA_PID" "$POLLER_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
+log "⚠ WhatsApp service exited — shutting down so launchd restarts us"
+kill "$WA_PID" "$CATCHUP_PID" ${NEXT_PID:+"$NEXT_PID"} 2>/dev/null || true
 exit 1

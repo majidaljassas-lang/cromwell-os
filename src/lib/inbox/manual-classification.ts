@@ -22,6 +22,7 @@ import { processBillThread } from "@/lib/bills/pipeline";
 import { resolveCustomer, resolveSite, extractLineItems, buildThreadText } from "@/lib/inbox/auto-ticket-creator";
 import { ensureAttachmentsExtracted } from "@/lib/ingestion/ensure-attachments";
 import { processManualAck } from "@/lib/inbox/process-manual-ack";
+import { handleStatement } from "@/lib/ingestion/handlers/statement-handler";
 
 export interface TagHandlerInput {
   tag: { id: string; name: string; label: string; routingHandler: string | null };
@@ -90,7 +91,7 @@ export async function runTagHandler(input: TagHandlerInput): Promise<TagHandlerR
       case "credit_note":
         return await attachAndTask(input, { eventType: "CREDIT_RECEIVED", taskType: "CREDIT_NOTE_REVIEW", priority: "MEDIUM" });
       case "statement":
-        return await attachAndTask(input, { eventType: "COMMS_RECEIVED", taskType: "STATEMENT_RECONCILE", priority: "MEDIUM" });
+        return await runStatementHandler(input);
       case "remittance":
         return await attachAndTask(input, { eventType: "PAYMENT_RECEIVED", taskType: "ALLOCATE_PAYMENT", priority: "MEDIUM" });
       case "payment":
@@ -267,6 +268,93 @@ async function runBillHandler(input: TagHandlerInput): Promise<TagHandlerResult>
       : `Bill: ${result.extractedLines} lines, ${result.matched} matched, ${result.exceptions} exceptions${result.supplierBillId ? ` (bill ${result.supplierBillId.slice(0, 8)})` : ""}`,
     data: { ...result, manualTicketIds: input.ticketIds },
   };
+}
+
+// ── Statement → AP reconciler (existing engine, wired to manual classify) ──
+
+async function runStatementHandler(input: TagHandlerInput): Promise<TagHandlerResult> {
+  // Make sure attachments are extracted so the parser sees the PDF body, not
+  // just the email cover text. Capture the result so the toast surfaces it.
+  const ensureResult = await ensureAttachmentsExtracted(input.ingestionEventId);
+
+  const event = await prisma.ingestionEvent.findUnique({
+    where: { id: input.ingestionEventId },
+    include: {
+      parsedMessages: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+  if (!event) {
+    return { handler: "statement", ok: false, message: `IngestionEvent ${input.ingestionEventId} not found.` };
+  }
+
+  const parsed = event.parsedMessages[0];
+  const raw = (event.rawPayload ?? {}) as Record<string, unknown>;
+
+  const { fromEmail, fromName } = extractSenderFromPayload(raw);
+  const subject = typeof raw.subject === "string" ? raw.subject : (typeof raw.Subject === "string" ? raw.Subject : "");
+  const text = parsed?.extractedText ?? "";
+
+  // Tag the thread so the inbox shows the doctype clearly.
+  await prisma.inboxThread.update({
+    where: { id: input.threadId },
+    data: { classification: "STATEMENT" },
+  });
+
+  const outcome = await handleStatement({
+    eventId: event.id,
+    classification: "STATEMENT",
+    intent: "REACTION",
+    subject,
+    text,
+    fromEmail,
+    fromName,
+    data: (parsed?.structuredData as Record<string, unknown>) ?? {},
+  });
+
+  const attachmentNote = ensureResult.extracted
+    ? ` · attachment text +${ensureResult.textChars ?? 0} chars`
+    : ensureResult.reason && ensureResult.reason !== "attachment text already present"
+      ? ` · attachment skipped: ${ensureResult.reason}`
+      : "";
+
+  return {
+    handler: "statement",
+    ok: outcome.success,
+    message: `${outcome.details}${attachmentNote}`,
+    data: { intakeDocumentId: outcome.intakeDocumentId, action: outcome.action, ensureResult },
+  };
+}
+
+/**
+ * Pull sender email + name out of an IngestionEvent.rawPayload, handling the
+ * shapes we see in practice:
+ *   - Outlook (Microsoft Graph): { from: { emailAddress: { address, name } } }
+ *   - Older / WhatsApp: { fromEmail: "x@y.com", fromName: "X" }
+ *   - Plain string: { from: "x@y.com" }
+ */
+function extractSenderFromPayload(raw: Record<string, unknown>): { fromEmail: string; fromName: string } {
+  // 1) explicit fromEmail / fromName fields (older shape, WhatsApp)
+  const fromEmailField = typeof raw.fromEmail === "string" ? raw.fromEmail : null;
+  const fromNameField = typeof raw.fromName === "string" ? raw.fromName : null;
+  if (fromEmailField || fromNameField) {
+    return { fromEmail: fromEmailField ?? "", fromName: fromNameField ?? "" };
+  }
+
+  // 2) Outlook shape: from = { emailAddress: { address, name } }
+  const fromObj = raw.from as { emailAddress?: { address?: string; name?: string } } | string | undefined;
+  if (fromObj && typeof fromObj === "object" && fromObj.emailAddress) {
+    return {
+      fromEmail: fromObj.emailAddress.address ?? "",
+      fromName: fromObj.emailAddress.name ?? "",
+    };
+  }
+
+  // 3) Plain string fallback
+  if (typeof fromObj === "string") {
+    return { fromEmail: fromObj, fromName: "" };
+  }
+
+  return { fromEmail: "", fromName: "" };
 }
 
 // ── Noise: archive thread ───────────────────────────────────────────────────

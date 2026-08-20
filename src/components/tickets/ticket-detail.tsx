@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   ArrowLeft,
@@ -46,6 +46,7 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { CustomerSitePicker } from "@/components/shared/customer-site-picker";
 import {
   Select,
   SelectTrigger,
@@ -460,6 +461,10 @@ function InlineLineRow({
   const fromStock = Number(fromStockVal || 0);
   const toOrder = Math.max(0, qty - fromStock);
   const costUnit = evalMathExpr(costVal || "0");
+  const isUncostedGap =
+    Number(line.expectedCostUnit || 0) === 0 &&
+    Number(line.expectedCostTotal || 0) === 0 &&
+    Number(line.actualCostTotal || 0) === 0;
   const saleUnit = evalMathExpr(saleVal || "0");
   const costTotal = (isNaN(costUnit) ? 0 : costUnit) * qty;
   const saleTotal = (isNaN(saleUnit) ? 0 : saleUnit) * qty;
@@ -778,8 +783,8 @@ function InlineLineRow({
   return (
     <>
     <TableRow
-      key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}`}
-      className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${selected ? "bg-[#FF6600]/5" : fromStock >= qty && fromStock > 0 ? "bg-[#00CC66]/8" : fromStock > 0 ? "bg-[#FF9900]/8" : ""}`}
+      key={`${line.id}-${line.actualSaleUnit}-${line.expectedCostUnit}-${line.isLocked ? 1 : 0}`}
+      className={`hover:bg-[#1E1E1E] ${saving ? "opacity-60" : ""} ${line.isLocked ? "bg-[#00CC66]/10 opacity-70" : selected ? "bg-[#FF6600]/5" : fromStock >= qty && fromStock > 0 ? "bg-[#00CC66]/8" : fromStock > 0 ? "bg-[#FF9900]/8" : isUncostedGap ? "bg-[#FFD600]/15" : ""}`}
     >
       <TableCell className="p-1 w-8">
         <input
@@ -839,7 +844,7 @@ function InlineLineRow({
           onChange={(e) => { saveField("unit", e.target.value); router.refresh(); }}
           className="bg-[#0A0A0A] text-[10px] text-[#888888] border border-[#333] outline-none cursor-pointer hover:text-[#E0E0E0] rounded px-1 py-0.5"
         >
-          {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL", "LM"].map(u => (
+          {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL", "LM", "TONNE"].map(u => (
             <option key={u} value={u} className="bg-[#1A1A1A] text-[#E0E0E0]">{u}</option>
           ))}
         </select>
@@ -1199,6 +1204,19 @@ function InlineLineRow({
             <span className="text-[9px]">▼</span>
           </button>
           <button
+            onClick={async () => {
+              await fetch(`/api/ticket-lines/${line.id}/lock-group`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(line.isLocked ? { unlock: true } : {}),
+              });
+              router.refresh();
+            }}
+            className={`p-0.5 transition-colors ${line.isLocked ? "text-[#00CC66] hover:text-[#FF9900]" : "text-[#666] hover:text-[#00CC66]"}`}
+            title={line.isLocked ? "Sorted — click to unlock the whole linked group" : "Tick off — mark this line and its linked siblings as sorted"}
+          >
+            <span className="text-[11px] leading-none">{line.isLocked ? "✓" : "○"}</span>
+          </button>
+          <button
             onClick={handleDelete}
             disabled={deleting}
             className="p-0.5 hover:bg-[#FF3333]/10 text-[#666666] hover:text-[#FF3333] transition-colors"
@@ -1283,7 +1301,7 @@ function InlineLineRow({
                         onChange={(e) => updateBomRow(idx, "unit", e.target.value)}
                         className="h-7 w-full text-xs bg-[#1A1A1A] border border-[#444444] text-[#E0E0E0] px-1"
                       >
-                        {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL"].map((u) => (
+                        {["EA", "M", "LENGTH", "PACK", "SET", "LOT", "PAIR", "BOX", "ROLL", "TONNE"].map((u) => (
                           <option key={u} value={u}>{u}</option>
                         ))}
                       </select>
@@ -1590,6 +1608,7 @@ export function TicketDetail({
   commercialLinks = [],
   stockItems = [],
   supplierBills = [],
+  callOffs = [],
 }: {
   ticket: TicketData;
   quotes?: QuoteData[];
@@ -1605,8 +1624,19 @@ export function TicketDetail({
   commercialLinks?: CommercialLinkOption[];
   stockItems?: any[];
   supplierBills?: any[];
+  callOffs?: Array<{
+    id: string;
+    callOffNo: number;
+    coSeq?: number;
+    status: string;
+    callOffDate: string;
+    customerPO: { id: string; poNo: string };
+    lines: Array<{ ticketLineId: string; requestedQty: string | number; invoicedQty: string | number }>;
+  }>;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab = searchParams?.get("tab") ?? "lines";
   const [summary, setSummary] = useState<{
     totals: {
       totalSale: number;
@@ -1677,6 +1707,8 @@ export function TicketDetail({
   const [submittingLine, setSubmittingLine] = useState(false);
   const [lineType, setLineType] = useState<string>("MATERIAL");
   const [lineUnit, setLineUnit] = useState<string>("EA");
+  const [lineSection, setLineSection] = useState<string>("");
+  const [lineSectionCustom, setLineSectionCustom] = useState<string>("");
   const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
   const [sectionLabel, setSectionLabel] = useState("EXTRA ORDER");
   const [sectionSource, setSectionSource] = useState("CALL");
@@ -1693,6 +1725,37 @@ export function TicketDetail({
 
   // ── RFQ Extract collapsible state ──
   const [rfqOpen, setRfqOpen] = useState(false);
+
+  // ── Reassign Customer / Site picker ──
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
+
+  async function handleReassign(customerId: string, siteId: string | null) {
+    setReassigning(true);
+    setReassignError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payingCustomerId: customerId,
+          siteId: siteId ?? null,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setReassignError(j.error ?? j.message ?? "Reassign failed");
+        return;
+      }
+      setReassignOpen(false);
+      router.refresh();
+    } catch (e) {
+      setReassignError(e instanceof Error ? e.message : "Reassign failed");
+    } finally {
+      setReassigning(false);
+    }
+  }
   const [compSheetOpen, setCompSheetOpen] = useState(false);
   const [comparisonPricingOpen, setComparisonPricingOpen] = useState(false);
 
@@ -2096,6 +2159,13 @@ export function TicketDetail({
     const form = e.currentTarget;
     const formData = new FormData(form);
 
+    const resolvedSection =
+      lineSection === "__new__"
+        ? lineSectionCustom.trim() || null
+        : lineSection === "__none__" || lineSection === ""
+          ? null
+          : lineSection;
+
     const body: Record<string, unknown> = {
       lineType,
       description: formData.get("description") as string,
@@ -2108,6 +2178,7 @@ export function TicketDetail({
       suggestedSaleUnit:
         Number(formData.get("suggestedSaleUnit")) || undefined,
       actualSaleUnit: Number(formData.get("actualSaleUnit")) || undefined,
+      sectionLabel: resolvedSection || undefined,
     };
 
     try {
@@ -2122,6 +2193,8 @@ export function TicketDetail({
         setLineSheetOpen(false);
         setLineType("MATERIAL");
         setLineUnit("EA");
+        // Keep lineSection so the next line defaults to the same section
+        setLineSectionCustom("");
         router.refresh();
       }
     } finally {
@@ -2353,14 +2426,24 @@ export function TicketDetail({
             <Badge variant={statusVariant(ticket.status)}>
               {ticket.status.replace(/_/g, " ")}
             </Badge>
-            <span className="text-sm text-[#888888]">
+            <button
+              type="button"
+              onClick={() => setReassignOpen(true)}
+              className="text-sm text-[#888888] hover:text-[#FF6600] underline-offset-2 hover:underline"
+              title="Change customer / site"
+            >
               {ticket.payingCustomer.name}
-            </span>
+            </button>
             <span className="text-[#888888]">/</span>
             {ticket.site ? (
-              <span className="text-sm text-[#888888]">
+              <button
+                type="button"
+                onClick={() => setReassignOpen(true)}
+                className="text-sm text-[#888888] hover:text-[#FF6600] underline-offset-2 hover:underline"
+                title="Change customer / site"
+              >
                 {ticket.site.siteName}
-              </span>
+              </button>
             ) : (
               <Select
                 value=""
@@ -2391,18 +2474,32 @@ export function TicketDetail({
               ID: {ticket.id.slice(0, 8)}
             </span>
 
-            {/* PO Number */}
+            {/* PO Number(s) */}
             <Separator orientation="vertical" className="h-4 mx-1" />
-            {linkedPO ? (
-              <Link
-                href="/po-register"
-                className="text-xs text-[#FF6600] hover:underline flex items-center gap-1"
-              >
-                <FileText className="size-3" />
-                PO: {linkedPO.poNo}
-              </Link>
-            ) : (
+            {customerPOs && customerPOs.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {customerPOs.map((po) => (
+                  <Link
+                    key={po.id}
+                    href="/po-register"
+                    className="text-xs text-[#FF6600] hover:underline flex items-center gap-1"
+                  >
+                    <FileText className="size-3" />
+                    PO: {po.poNo}
+                  </Link>
+                ))}
+              </div>
+            )}
+            {/* Always allow adding another PO */}
+            {(
               <Sheet open={poSheetOpen} onOpenChange={setPoSheetOpen}>
+                <Link
+                  href={`/tickets/${ticket.id}/create-po`}
+                  className="inline-flex items-center h-6 text-[10px] px-2 mr-1 rounded border bg-[#222222] text-[#888888] border-[#333333] hover:text-[#FF6600] hover:border-[#FF6600]"
+                  title="Open the full converter with line-level selection (for partial / split POs)"
+                >
+                  Create PO (lines)
+                </Link>
                 <SheetTrigger
                   render={
                     <Button
@@ -2411,7 +2508,7 @@ export function TicketDetail({
                       className="h-6 text-[10px] px-2 bg-[#222222] text-[#888888] border-[#333333] hover:text-[#FF6600] hover:border-[#FF6600]"
                     >
                       <Plus className="size-3 mr-0.5" />
-                      Add PO
+                      Create PO
                     </Button>
                   }
                 />
@@ -2593,7 +2690,7 @@ export function TicketDetail({
       )}
 
       {/* ── 6 TABS ─────────────────────────────────────────────────── */}
-      <Tabs defaultValue="lines">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="lines">Lines ({activeLines.length})</TabsTrigger>
           <TabsTrigger value="evidence">
@@ -2614,6 +2711,12 @@ export function TicketDetail({
           <TabsTrigger value="pods">
             PODs{ticket.payingCustomer.podRequired ? " ⚠" : ""}
           </TabsTrigger>
+          <Link
+            href={`/tickets/${ticket.id}/call-offs`}
+            className="ml-2 inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium border border-[#FF6600] text-[#FF6600] hover:bg-[#FF6600]/10 transition-colors"
+          >
+            <Package className="size-4" /> Call-offs
+          </Link>
         </TabsList>
 
         {/* ── TAB 1: LINES ──────────────────────────────────────────── */}
@@ -3020,7 +3123,7 @@ export function TicketDetail({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {["EA", "M", "LENGTH", "PACK", "LOT", "SET"].map(
+                            {["EA", "M", "LENGTH", "PACK", "LOT", "SET", "TONNE"].map(
                               (u) => (
                                 <SelectItem key={u} value={u}>
                                   {u}
@@ -3145,7 +3248,7 @@ export function TicketDetail({
                       automatically with events logged.
                     </SheetDescription>
                   </SheetHeader>
-                  <div className="flex flex-col gap-4 px-4">
+                  <div className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto">
                     <div className="space-y-1.5">
                       <Label>Source</Label>
                       <Select
@@ -3187,21 +3290,21 @@ export function TicketDetail({
                         and descriptions.
                       </p>
                     </div>
-                    <SheetFooter>
-                      <Button
-                        onClick={handleAddSection}
-                        disabled={
-                          addingSection ||
-                          !sectionLabel.trim() ||
-                          !sectionMaterials.trim()
-                        }
-                      >
-                        {addingSection
-                          ? "Processing..."
-                          : "Add Section & Lines"}
-                      </Button>
-                    </SheetFooter>
                   </div>
+                  <SheetFooter>
+                    <Button
+                      onClick={handleAddSection}
+                      disabled={
+                        addingSection ||
+                        !sectionLabel.trim() ||
+                        !sectionMaterials.trim()
+                      }
+                    >
+                      {addingSection
+                        ? "Processing..."
+                        : "Add Section & Lines"}
+                    </Button>
+                  </SheetFooter>
                 </SheetContent>
               </Sheet>
 
@@ -3291,6 +3394,40 @@ export function TicketDetail({
                           </SelectContent>
                         </Select>
                       </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Section</Label>
+                      <Select
+                        value={lineSection || "__none__"}
+                        onValueChange={(v) => setLineSection(v ?? "__none__")}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Pick a section" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No section</SelectItem>
+                          {Array.from(
+                            new Set(
+                              activeLines
+                                .map((l) => l.sectionLabel)
+                                .filter((s): s is string => !!s)
+                            )
+                          ).map((sec) => (
+                            <SelectItem key={sec} value={sec}>
+                              {sec}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__new__">+ New section…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {lineSection === "__new__" && (
+                        <Input
+                          autoFocus
+                          placeholder="New section name (e.g. Coalbrook)"
+                          value={lineSectionCustom}
+                          onChange={(e) => setLineSectionCustom(e.target.value)}
+                        />
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="internalNotes">
@@ -3664,11 +3801,18 @@ export function TicketDetail({
               status: l.status,
               sectionLabel: l.sectionLabel,
               supplierName: l.supplierName,
+              internalNotes: l.internalNotes,
+              substitutedFrom: l.substitutedFromLineId
+                ? (ticket.lines.find((p) => p.id === l.substitutedFromLineId)?.description?.split(" - ")[0]?.trim() ?? null)
+                : null,
               stockUsages: (l as any).stockUsages || [],
               isBomParent: l.isBomParent || false,
               parentLineId: l.parentLineId || null,
               parentDescription: l.parentLineId ? ticket.lines.find((p) => p.id === l.parentLineId)?.description || null : null,
+              parentQty: l.parentLineId ? ticket.lines.find((p) => p.id === l.parentLineId)?.qty || null : null,
             }))}
+            customerPONo={linkedPO?.poNo ?? null}
+            callOffs={callOffs}
           />
         </TabsContent>
 
@@ -3680,6 +3824,29 @@ export function TicketDetail({
           />
         </TabsContent>
       </Tabs>
+      {reassignOpen && (
+        <CustomerSitePicker
+          headline="Reassign customer & site"
+          subheadline="Pick the right customer and site for this ticket"
+          confirmLabel="Save"
+          busy={reassigning}
+          error={reassignError}
+          initialCustomer={{
+            id: ticket.payingCustomer.id,
+            label: ticket.payingCustomer.name,
+          }}
+          initialSite={
+            ticket.site
+              ? { id: ticket.site.id, label: ticket.site.siteName }
+              : null
+          }
+          onCancel={() => {
+            setReassignOpen(false);
+            setReassignError(null);
+          }}
+          onConfirm={handleReassign}
+        />
+      )}
     </div>
   );
 }

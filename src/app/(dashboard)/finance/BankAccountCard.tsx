@@ -10,7 +10,6 @@ interface BankAccountData {
   sortCode: string;
   currentBalance: number;
   lastSyncedAt: string | null;
-  yapilyConnected: boolean;
   transactionCount: number;
 }
 
@@ -18,18 +17,15 @@ interface Props {
   bankAccount: BankAccountData;
   unreconciledCount: number;
   matchedCount: number;
-  yapilyConfigured: boolean;
 }
 
 function fmt(val: number): string {
   return val.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function BankAccountCard({ bankAccount, unreconciledCount, matchedCount, yapilyConfigured }: Props) {
+export function BankAccountCard({ bankAccount, unreconciledCount, matchedCount }: Props) {
   const [importing, setImporting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -93,58 +89,6 @@ export function BankAccountCard({ bankAccount, unreconciledCount, matchedCount, 
     }
   }
 
-  async function handleYapilyConnect() {
-    setConnecting(true);
-    setMessage(null);
-
-    try {
-      const res = await fetch("/api/finance/bank/yapily/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          institutionId: "barclays-business",
-          bankAccountId: bankAccount.id,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage(`Error: ${data.error}`);
-      } else if (data.authorisationUrl) {
-        window.location.href = data.authorisationUrl;
-      }
-    } catch (err) {
-      setMessage(`Connect failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  async function handleYapilySync() {
-    setSyncing(true);
-    setMessage(null);
-
-    try {
-      const res = await fetch("/api/finance/bank/yapily/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bankAccountId: bankAccount.id }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage(`Error: ${data.error}`);
-      } else {
-        setMessage(data.message);
-        setTimeout(() => window.location.reload(), 1500);
-      }
-    } catch (err) {
-      setMessage(`Sync failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   return (
     <div className="border border-[#333333] bg-[#1A1A1A] p-4">
       {/* Header */}
@@ -174,11 +118,6 @@ export function BankAccountCard({ bankAccount, unreconciledCount, matchedCount, 
         {matchedCount > 0 && (
           <span className="text-[9px] bg-[#3399FF] text-black px-1.5 py-0.5 font-bold">
             {matchedCount} suggested
-          </span>
-        )}
-        {bankAccount.yapilyConnected && (
-          <span className="text-[9px] bg-[#00CC66] text-black px-1.5 py-0.5 font-bold">
-            OPEN BANKING
           </span>
         )}
       </div>
@@ -219,27 +158,6 @@ export function BankAccountCard({ bankAccount, unreconciledCount, matchedCount, 
           </button>
         )}
 
-        {/* Yapily Connect */}
-        {yapilyConfigured && !bankAccount.yapilyConnected && (
-          <button
-            onClick={handleYapilyConnect}
-            disabled={connecting}
-            className="text-[10px] px-2 py-1 border border-[#00CC66] text-[#00CC66] hover:bg-[#00CC66] hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {connecting ? "Connecting..." : "Connect Barclays"}
-          </button>
-        )}
-
-        {/* Yapily Sync */}
-        {bankAccount.yapilyConnected && (
-          <button
-            onClick={handleYapilySync}
-            disabled={syncing}
-            className="text-[10px] px-2 py-1 border border-[#00CC66] text-[#00CC66] hover:bg-[#00CC66] hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {syncing ? "Syncing..." : "Sync Transactions"}
-          </button>
-        )}
       </div>
 
       {/* Message */}

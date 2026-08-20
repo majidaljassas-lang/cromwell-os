@@ -1,8 +1,20 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  REACTIONS,
+  alternativesTo,
+  suggestReaction,
+  DEFAULT_REACTION,
+  CATEGORY_COLOUR,
+  type ReactionId,
+  type ReactionSpec,
+} from "@/lib/inbox/reactions";
+import { ReactionPanel } from "./reaction-panel";
+import { TriageTiles } from "./triage-tiles";
 
 type Thread = {
   id: string;
@@ -17,6 +29,10 @@ type Thread = {
   status: "NEW" | "TRIAGED" | "LINKED" | "NOISE" | "ARCHIVED" | "AUTO_TICKETED";
   linkConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
   linkSource: "AUTO" | "MANUAL" | null;
+  aiClassification?: string | null;
+  aiConfidence?: number | null;
+  aiSummary?: string | null;
+  reactionTaskId?: string | null;
   linkedTicket: {
     id: string;
     ticketNo: number;
@@ -43,9 +59,61 @@ type Customer = { id: string; name: string };
 type Site = { id: string; siteName: string };
 
 export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } = {}) {
+  const router = useRouter();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus ?? "NEW");
+  const [highWatermark, setHighWatermark] = useState<number | null>(null);
+  const [openAltMenu, setOpenAltMenu] = useState<string | null>(null);
+  const [pendingReactionId, setPendingReactionId] = useState<ReactionId | null>(null);
+  const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
+
+  // Daily inbox-zero high-watermark (resets at midnight)
+  useEffect(() => {
+    const todayKey = `inbox-hwm-${new Date().toISOString().slice(0, 10)}`;
+    try {
+      const stored = localStorage.getItem(todayKey);
+      if (stored) setHighWatermark(parseInt(stored, 10));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const newCount = counts.NEW ?? 0;
+    if (newCount > (highWatermark ?? 0)) {
+      setHighWatermark(newCount);
+      const todayKey = `inbox-hwm-${new Date().toISOString().slice(0, 10)}`;
+      try {
+        localStorage.setItem(todayKey, String(newCount));
+      } catch {}
+    }
+  }, [counts.NEW, highWatermark]);
+
+  // Close the alternative-reaction menu on outside click
+  useEffect(() => {
+    if (!openAltMenu) return;
+    function onDocClick() {
+      setOpenAltMenu(null);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [openAltMenu]);
+
+  // Open the drawer with the reaction form pre-loaded. The user confirms /
+  // edits inside the drawer; submit happens there. No more navigate-away on
+  // first click.
+  function openReactionDrawer(thread: Thread, reactionId: ReactionId) {
+    setSelectedThread(thread);
+    setPendingReactionId(reactionId);
+    setOpenAltMenu(null);
+  }
+
+  async function onReactionComplete() {
+    setPendingReactionId(null);
+    setSelectedThread(null);
+    setToast(`✓ Reaction applied`);
+    await refresh();
+  }
+
   const [channelFilter, setChannelFilter] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
@@ -61,6 +129,7 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
 
   // New Ticket form state
   const [newTicketThread, setNewTicketThread] = useState<Thread | null>(null);
+  const [bulkTicketThreadIds, setBulkTicketThreadIds] = useState<string[] | null>(null);
   const [ntTitle, setNtTitle] = useState("");
   const [ntCustomerId, setNtCustomerId] = useState("");
   const [ntSiteId, setNtSiteId] = useState("");
@@ -179,6 +248,7 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
 
   function openNewTicketForm(t: Thread) {
     setNewTicketThread(t);
+    setBulkTicketThreadIds(null);
     setNtTitle(t.subject ?? "");
     setNtCustomerId("");
     setNtSiteId("");
@@ -187,10 +257,69 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
     setNtSource(srcMap[t.channel] ?? "OTHER");
   }
 
+  function openBulkNewTicketForm() {
+    if (selected.size === 0) return;
+    const ids = sortedThreads.filter((t) => selected.has(t.id)).map((t) => t.id);
+    const first = threads.find((t) => t.id === ids[0]);
+    if (!first) return;
+    setNewTicketThread(first);
+    setBulkTicketThreadIds(ids);
+    setNtTitle(first.subject ?? "");
+    setNtCustomerId("");
+    setNtSiteId("");
+    setNtMode("PRICING_FIRST");
+    const srcMap: Record<string, string> = { EMAIL: "EMAIL", WHATSAPP: "WHATSAPP", WHATSAPP_GROUP: "WHATSAPP", SMS: "SMS" };
+    setNtSource(srcMap[first.channel] ?? "OTHER");
+  }
+
+  function closeNewTicketForm() {
+    setNewTicketThread(null);
+    setBulkTicketThreadIds(null);
+  }
+
   async function submitNewTicket() {
     if (!newTicketThread) return;
     setNtSaving(true);
     try {
+      if (bulkTicketThreadIds && bulkTicketThreadIds.length > 1) {
+        const [firstId, ...rest] = bulkTicketThreadIds;
+        const r = await fetch(`/api/inbox/threads/${firstId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "ACCEPT",
+            title: ntTitle || undefined,
+            customerId: ntCustomerId || undefined,
+            siteId: ntSiteId || undefined,
+            ticketMode: ntMode,
+            source: ntSource || undefined,
+          }),
+        });
+        const j = await safeJson(r);
+        if (!r.ok || !j.ticket?.id) {
+          setToast(`✗ ${j.error ?? "Failed to create ticket"}`);
+          return;
+        }
+        const ticketId = j.ticket.id as string;
+        let linked = 0;
+        for (const tid of rest) {
+          try {
+            const lr = await fetch(`/api/inbox/threads/${tid}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "LINK", ticketId }),
+            });
+            if (lr.ok) linked++;
+          } catch {}
+        }
+        setToast(`✓ T-${j.ticket.ticketNo} created · ${1 + linked} thread${1 + linked !== 1 ? "s" : ""} attached`);
+        closeNewTicketForm();
+        setSelected(new Set());
+        if (selectedThread && bulkTicketThreadIds.includes(selectedThread.id)) setSelectedThread(null);
+        await refresh();
+        return;
+      }
+
       const r = await fetch(`/api/inbox/threads/${newTicketThread.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -206,7 +335,7 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
       const j = await safeJson(r);
       if (r.ok && j.ticket) {
         setToast(`✓ Ticket T-${j.ticket.ticketNo} created`);
-        setNewTicketThread(null);
+        closeNewTicketForm();
         if (selectedThread?.id === newTicketThread.id) setSelectedThread(null);
         await refresh();
       } else {
@@ -419,8 +548,42 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
               INBOX
             </div>
             <div className="text-xs text-[#888] mt-0.5">
-              {counts.NEW ?? 0} new · {counts.LINKED ?? 0} linked · {counts.NOISE ?? 0} noise
+              {(() => {
+                const newCount = counts.NEW ?? 0;
+                const hwm = highWatermark ?? newCount;
+                const cleared = Math.max(0, hwm - newCount);
+                const pct = hwm > 0 ? Math.min(100, Math.round((cleared / hwm) * 100)) : 0;
+                if (newCount === 0 && hwm > 0) {
+                  return <span className="text-[#00CC66]">✓ inbox zero — {cleared} cleared today</span>;
+                }
+                return (
+                  <>
+                    <span className="text-[#FF6600]">{newCount} waiting</span>
+                    {" · "}
+                    <span>{counts.LINKED ?? 0} linked</span>
+                    {" · "}
+                    <span>{counts.NOISE ?? 0} noise</span>
+                    {hwm > newCount && (
+                      <span className="ml-2 text-[#00CC66]">▼ {cleared} cleared today ({pct}%)</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
+            {(() => {
+              const newCount = counts.NEW ?? 0;
+              const hwm = highWatermark ?? 0;
+              if (hwm <= 0) return null;
+              const pct = Math.min(100, Math.round(((hwm - newCount) / hwm) * 100));
+              return (
+                <div className="mt-1.5 h-1 w-64 bg-[#222] rounded overflow-hidden">
+                  <div
+                    className="h-full bg-[#00CC66] transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <input
@@ -443,6 +606,8 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
                 { key: "NEW", label: "New", color: "#FF6600" },
                 { key: "TRIAGED", label: "To Do", color: "#FFCC00" },
                 { key: "LINKED", label: "Linked", color: "#00CC66" },
+                { key: "AUTO_TICKETED", label: "AI", color: "#CC66FF" },
+                { key: "NOISE", label: "Noise", color: "#666" },
                 { key: "ALL", label: "All", color: "#888" },
               ].map((tab) => (
                 <button key={tab.key}
@@ -464,6 +629,10 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
         {selected.size > 0 && (
           <div className="mt-2 flex items-center gap-2 bg-[#1A1A1A] border border-[#444] px-3 py-2">
             <span className="text-xs font-bold text-[#FF6600]">{selected.size} selected</span>
+            <Button size="sm" className="h-6 text-[10px] bg-[#FF6600] hover:bg-[#FF9900] text-black font-bold px-3"
+              onClick={openBulkNewTicketForm} disabled={working === "bulk"}>
+              New Ticket from selected
+            </Button>
             <Button size="sm" className="h-6 text-[10px] bg-red-600 hover:bg-red-700 text-white px-3"
               onClick={bulkDelete} disabled={working === "bulk"}>
               {working === "bulk" ? "..." : "Delete selected"}
@@ -516,7 +685,6 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
                 <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">Subject / Message</th>
                 <th className="p-2 text-left text-[10px] uppercase tracking-wider text-[#888] font-normal">Type</th>
                 <th className="p-2 text-right text-[10px] uppercase tracking-wider text-[#888] font-normal w-8">#</th>
-                <th className="p-2 text-right text-[10px] uppercase tracking-wider text-[#888] font-normal">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -533,9 +701,10 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
                   : rawSender;
 
                 return (
-                  <tr key={t.id}
-                    className={`border-b border-[#222] hover:bg-[#161616] cursor-pointer ${isSelected ? "bg-[#FF6600]/5" : ""} ${selectedThread?.id === t.id ? "bg-[#1A1A1A]" : ""}`}
-                    onClick={() => openThread(t)}
+                  <React.Fragment key={t.id}>
+                  <tr
+                    className={`border-b border-[#222] hover:bg-[#161616] cursor-pointer ${isSelected ? "bg-[#FF6600]/5" : ""} ${expandedThreadId === t.id ? "bg-[#1A1A1A]" : ""}`}
+                    onClick={() => setExpandedThreadId(expandedThreadId === t.id ? null : t.id)}
                   >
                     <td className="p-2" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={isSelected} onChange={() => toggleOne(t.id)} className="accent-[#FF6600]" />
@@ -553,6 +722,29 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
                         {t.subject ?? <span className="text-[#666] italic">(no subject)</span>}
                       </div>
                       {t.lastSnippet && <div className="text-[10px] text-[#666] truncate mt-0.5">{t.lastSnippet}</div>}
+                      {t.aiSummary && (
+                        <div className="text-[10px] text-[#FFCC00] mt-0.5 flex items-center gap-1.5">
+                          <span className="opacity-60">↳</span>
+                          <span className="truncate">{t.aiSummary}</span>
+                          {typeof t.aiConfidence === "number" && (
+                            <span
+                              className="px-1 py-0 rounded text-[9px] tabular-nums"
+                              style={{
+                                color:
+                                  t.aiConfidence >= 75
+                                    ? "#00CC66"
+                                    : t.aiConfidence >= 50
+                                      ? "#FFCC00"
+                                      : "#888",
+                                background: "rgba(255,255,255,0.05)",
+                              }}
+                              title="AI classification confidence"
+                            >
+                              {t.aiConfidence}%
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {t.linkedTicket && (
                         <a href={`/tickets/${t.linkedTicket.id}`} className="text-[10px] text-[#FF6600] hover:underline" onClick={(e) => e.stopPropagation()}>
                           → T-{t.linkedTicket.ticketNo} {t.linkedTicket.title?.slice(0, 30)}
@@ -589,90 +781,26 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
                       )}
                     </td>
                     <td className="p-2 text-right tabular-nums text-[#888]">{t.messageCount}</td>
-                    <td className="p-2 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-1 justify-end">
-                        {t.status === "NEW" && (
-                          <>
-                            <Button size="sm" variant="default" className="h-5 text-[10px] px-2"
-                              onClick={() => openNewTicketForm(t)} disabled={working === t.id}>
-                              New Ticket
-                            </Button>
-                            <select
-                              className="h-5 text-[10px] bg-[#0A0A0A] border border-[#444] px-1 rounded"
-                              defaultValue=""
-                              onChange={(e) => { if (e.target.value) doAction(t.id, "LINK", { ticketId: e.target.value }); e.target.value = ""; }}
-                              disabled={working === t.id}
-                            >
-                              <option value="">Link →</option>
-                              {tickets.map((tk) => (
-                                <option key={tk.id} value={tk.id}>T-{tk.ticketNo} {tk.title?.slice(0,30)}</option>
-                              ))}
-                            </select>
-                            <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
-                              onClick={() => doDelete(t.id)} disabled={working === t.id}>
-                              Delete
-                            </Button>
-                            <select
-                              className="h-5 text-[10px] bg-[#FFCC00]/10 border border-[#FFCC00]/30 text-[#FFCC00] px-1 rounded"
-                              defaultValue=""
-                              onChange={async (e) => {
-                                if (!e.target.value) return;
-                                setWorking(t.id);
-                                try {
-                                  const r = await fetch(`/api/inbox/threads/${t.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ action: "TRIAGE", triageAction: e.target.value }),
-                                  });
-                                  if (r.ok) { setToast(`✓ → To Do (${e.target.value})`); await refresh(); }
-                                } finally { setWorking(null); }
-                                e.target.value = "";
-                              }}
-                              disabled={working === t.id}
-                            >
-                              <option value="">To Do →</option>
-                              <option value="RESPOND">Respond</option>
-                              <option value="PAY">Pay / Finance</option>
-                              <option value="CHASE">Chase</option>
-                              <option value="ADMIN">Admin</option>
-                              <option value="REVIEW">Review</option>
-                            </select>
-                            <Button size="sm" className="h-5 text-[10px] px-2 bg-red-600 hover:bg-red-700 text-white"
-                              onClick={() => doDelete(t.id)} disabled={working === t.id}>
-                              Del
-                            </Button>
-                            <Button size="sm" className="h-5 text-[10px] px-1.5 bg-red-900 hover:bg-red-800 text-red-300"
-                              onClick={() => doDelete(t.id, true)} disabled={working === t.id}
-                              title="Delete and block future messages from this sender">
-                              🚫
-                            </Button>
-                          </>
-                        )}
-                        {t.status === "TRIAGED" && (
-                          <div className="flex gap-1">
-                            <Button size="sm" className="h-5 text-[10px] px-2 bg-[#00CC66] hover:bg-[#00AA55] text-black"
-                              onClick={() => markDone(t.id)} disabled={working === t.id}>
-                              Done
-                            </Button>
-                            <Button size="sm" variant="default" className="h-5 text-[10px] px-2"
-                              onClick={() => openNewTicketForm(t)} disabled={working === t.id}>
-                              → Ticket
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
-                              onClick={() => doAction(t.id, "UNDO")} disabled={working === t.id}>
-                              Undo
-                            </Button>
-                          </div>
-                        )}
-                        {t.status === "LINKED" && (
-                          <Button size="sm" variant="outline" className="h-5 text-[10px] px-2"
-                            onClick={() => doAction(t.id, "UNDO")} disabled={working === t.id}>
-                            Undo
-                          </Button>
-                        )}
-                      </div>
-                    </td>
                   </tr>
+                  {expandedThreadId === t.id && (
+                    <tr key={`${t.id}-expand`} className="bg-[#0F0F0F]">
+                      <td colSpan={7} className="p-0 border-b-2 border-[#FF6600]">
+                        <TriageRow
+                          threadId={t.id}
+                          onDone={(removed) => {
+                            setExpandedThreadId(null);
+                            if (removed) {
+                              setThreads((prev) => prev.filter((x) => x.id !== t.id));
+                            } else {
+                              refresh();
+                            }
+                          }}
+                          onCancel={() => setExpandedThreadId(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -682,14 +810,22 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
 
       {/* New Ticket form — fixed overlay */}
       {newTicketThread && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setNewTicketThread(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={closeNewTicketForm}>
         <div className="border-2 border-[#FF6600] bg-[#0F0F0F] p-4 w-[600px] max-h-[80vh] overflow-auto rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold text-[#FF6600]">New Ticket</div>
-            <button className="text-xs text-[#888]" onClick={() => setNewTicketThread(null)}>cancel ✕</button>
+            <div className="text-sm font-bold text-[#FF6600]">
+              {bulkTicketThreadIds && bulkTicketThreadIds.length > 1
+                ? `New Ticket from ${bulkTicketThreadIds.length} threads`
+                : "New Ticket"}
+            </div>
+            <button className="text-xs text-[#888]" onClick={closeNewTicketForm}>cancel ✕</button>
           </div>
           <div className="text-[10px] text-[#888] mb-3">
-            From: {newTicketThread.channel.toLowerCase()} · {newTicketThread.participants.join(", ")}
+            {bulkTicketThreadIds && bulkTicketThreadIds.length > 1 ? (
+              <>Attaching {bulkTicketThreadIds.length} selected threads — ticket created from the first, remaining linked as evidence.</>
+            ) : (
+              <>From: {newTicketThread.channel.toLowerCase()} · {newTicketThread.participants.join(", ")}</>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3 mb-3">
@@ -794,19 +930,28 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
           </div>
 
           <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="outline" onClick={() => setNewTicketThread(null)}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={closeNewTicketForm}>Cancel</Button>
             <Button size="sm" className="bg-[#FF6600] hover:bg-[#FF9900] text-black font-bold"
               onClick={submitNewTicket} disabled={ntSaving}>
-              {ntSaving ? "Creating..." : "Create Ticket"}
+              {ntSaving
+                ? "Creating..."
+                : bulkTicketThreadIds && bulkTicketThreadIds.length > 1
+                  ? `Create Ticket + link ${bulkTicketThreadIds.length - 1}`
+                  : "Create Ticket"}
             </Button>
           </div>
         </div>
         </div>
       )}
 
-      {/* Thread detail drawer with message-level actions */}
+      {/* Thread detail drawer — fixed right-side overlay */}
       {selectedThread && (
-        <div className="border border-[#FF6600] bg-[#0F0F0F] p-3">
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 z-40"
+            onClick={() => { setSelectedThread(null); setSelectedMsgIds(new Set()); setPendingReactionId(null); }}
+          />
+          <div className="fixed top-0 right-0 bottom-0 w-[640px] max-w-[95vw] bg-[#0F0F0F] border-l-2 border-[#FF6600] z-50 overflow-y-auto p-4 shadow-2xl">
           <div className="flex items-start justify-between mb-2">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-[#888]">
@@ -815,8 +960,33 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
               <div className="text-sm font-medium">{selectedThread.subject ?? "(no subject)"}</div>
               <div className="text-[10px] text-[#888]">{selectedThread.participants.join(", ")}</div>
             </div>
-            <button className="text-xs text-[#888]" onClick={() => { setSelectedThread(null); setSelectedMsgIds(new Set()); }}>close ✕</button>
+            <button className="text-sm text-[#888] hover:text-[#FF6600] px-2" onClick={() => { setSelectedThread(null); setSelectedMsgIds(new Set()); setPendingReactionId(null); }}>close ✕</button>
           </div>
+
+          {/* Reaction panel — embedded form for the chosen reaction */}
+          {pendingReactionId && (
+            <ReactionPanel
+              thread={{
+                id: selectedThread.id,
+                subject: selectedThread.subject,
+                aiSummary: selectedThread.aiSummary ?? null,
+                aiClassification: selectedThread.aiClassification ?? null,
+                aiEntities: null /* not loaded on the list payload yet */,
+                linkedTicket: selectedThread.linkedTicket ? {
+                  id: selectedThread.linkedTicket.id,
+                  ticketNo: selectedThread.linkedTicket.ticketNo,
+                  title: selectedThread.linkedTicket.title,
+                } : null,
+              }}
+              reactionId={pendingReactionId}
+              customers={customers}
+              sites={allSites}
+              commercialLinks={commercialLinks}
+              onChangeReaction={setPendingReactionId}
+              onComplete={onReactionComplete}
+              onCancel={() => setPendingReactionId(null)}
+            />
+          )}
 
           {/* Ticket suggestions */}
           {suggestions.length > 0 && (
@@ -966,8 +1136,172 @@ export function InboxThreadsPanel({ initialStatus }: { initialStatus?: string } 
               </Button>
             </div>
           )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Inline triage card, rendered when a list row is expanded ────────────────
+
+type TriageRowDetail = {
+  id: string;
+  subject: string | null;
+  channel: string;
+  participants: string[];
+  aiClassification: string | null;
+  aiConfidence: number | null;
+  aiSummary: string | null;
+  aiEntities: { customerName?: string | null; siteName?: string | null } | null;
+  messages: Array<{
+    id: string;
+    occurredAt: string;
+    sender: string | null;
+    snippet: string | null;
+    hasAttachments: boolean;
+  }>;
+};
+
+function TriageRow({
+  threadId,
+  onDone,
+  onCancel,
+}: {
+  threadId: string;
+  onDone: (removed: boolean) => void;
+  onCancel: () => void;
+}) {
+  const [detail, setDetail] = useState<TriageRowDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/inbox/threads/${threadId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const t = j.thread;
+        if (!t) {
+          setError(j.error ?? "thread not found");
+          return;
+        }
+        setDetail({
+          id: t.id,
+          subject: t.subject,
+          channel: t.channel,
+          participants: t.participants ?? [],
+          aiClassification: t.aiClassification ?? null,
+          aiConfidence: t.aiConfidence ?? null,
+          aiSummary: t.aiSummary ?? null,
+          aiEntities: t.aiEntities ?? null,
+          messages: t.messages ?? [],
+        });
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "failed"))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  if (loading) {
+    return <div className="p-3 text-xs text-[#888]">Loading…</div>;
+  }
+  if (error || !detail) {
+    return (
+      <div className="p-3 text-xs text-[#FF6666] flex items-center justify-between">
+        <span>Failed: {error}</span>
+        <button onClick={onCancel} className="text-[10px] uppercase tracking-widest text-[#888] hover:text-[#CCC]">
+          Close
+        </button>
+      </div>
+    );
+  }
+
+  const visible = showAll ? detail.messages : detail.messages.slice(-3);
+
+  return (
+    <div className="p-4 space-y-3">
+      {/* AI hint */}
+      {(detail.aiClassification || detail.aiSummary) && (
+        <div className="bg-[#0A0A0A] border border-[#222] p-2 text-[11px]">
+          <div className="text-[9px] uppercase tracking-widest text-[#888] mb-0.5">
+            AI hint (informational only — manual classification)
+          </div>
+          <div className="text-[#FFCC00]">
+            {detail.aiClassification && (
+              <span className="font-bold">{detail.aiClassification.replace(/_/g, " ")}</span>
+            )}
+            {typeof detail.aiConfidence === "number" && (
+              <span className="ml-2 text-[#888]">{detail.aiConfidence}%</span>
+            )}
+            {detail.aiEntities?.customerName && (
+              <span className="ml-2 text-[#3399FF]">· {detail.aiEntities.customerName}</span>
+            )}
+            {detail.aiEntities?.siteName && (
+              <span className="ml-1 text-[#3399FF]">· {detail.aiEntities.siteName}</span>
+            )}
+            {detail.aiSummary && <div className="text-[#CCC] mt-1 italic">{detail.aiSummary}</div>}
+          </div>
         </div>
       )}
+
+      {/* Messages */}
+      {detail.messages.length > 0 && (
+        <div className="bg-[#0A0A0A] border border-[#222] p-2 max-h-72 overflow-auto">
+          <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">
+            Messages ({detail.messages.length})
+          </div>
+          <div className="space-y-2">
+            {visible.map((m) => (
+              <div key={m.id} className="border-l-2 border-[#333] pl-2">
+                <div className="text-[10px] text-[#888] flex items-center justify-between">
+                  <span>{m.sender ?? "(unknown)"}</span>
+                  <span>{new Date(m.occurredAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                {m.hasAttachments && <span className="text-[10px] text-[#FF6600]">📎 attachment</span>}
+                {m.snippet && <div className="text-xs text-[#CCC] whitespace-pre-wrap mt-0.5">{m.snippet}</div>}
+              </div>
+            ))}
+          </div>
+          {detail.messages.length > 3 && !showAll && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="mt-2 text-[10px] text-[#FF6600] hover:underline"
+            >
+              ↓ Show all {detail.messages.length} messages
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tiles */}
+      <TriageTiles
+        threadId={threadId}
+        onClassified={(result) => {
+          if (result.ok) {
+            // Always remove from local list — the thread has moved out of NEW.
+            // Server hard-deletes on NOISE; for everything else it's just status TRIAGED/LINKED/AUTO_TICKETED.
+            onDone(true);
+          }
+        }}
+      />
+
+      <div className="flex justify-end pt-2 border-t border-[#222]">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-[10px] uppercase tracking-widest text-[#888] hover:text-[#CCC]"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

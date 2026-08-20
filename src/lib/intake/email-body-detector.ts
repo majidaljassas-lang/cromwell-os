@@ -19,8 +19,7 @@ export const BILL_SUBJECT_KEYWORDS = [
   "ord-",
   "hansgrohe eserv. inv",
   // Useful additions for emails the Outlook rule already routed but Cromwell
-  // OS may also see directly (account statements, order acknowledgements, etc.)
-  "statement",
+  // OS may also see directly (order acknowledgements, etc.)
   "acknowledgement",
   "acknowledgment",
   "order confirmation",
@@ -28,6 +27,15 @@ export const BILL_SUBJECT_KEYWORDS = [
   "credit note",
   "pro forma",
   "proforma",
+] as const;
+
+// Statement subjects are differentiated from bill subjects so the universal
+// ingestion engine can route them to the AP reconciler instead of the bill
+// parser (statements summarise existing bills, they don't create new ones).
+export const STATEMENT_SUBJECT_KEYWORDS = [
+  "statement",
+  "statement of account",
+  "account statement",
 ] as const;
 
 const BILL_KEYWORDS = ["invoice", "bill", "total", "vat", "subtotal", "amount due", "balance"] as const;
@@ -40,8 +48,16 @@ const BILL_KEYWORDS = ["invoice", "bill", "total", "vat", "subtotal", "amount du
  */
 export function subjectLooksLikeBill(subject: string | null | undefined): boolean {
   if (!subject) return false;
+  // Statement subjects are routed to the reconciler, not the bill parser.
+  if (subjectLooksLikeStatement(subject)) return false;
   const s = subject.toLowerCase();
   return BILL_SUBJECT_KEYWORDS.some((kw) => s.includes(kw));
+}
+
+export function subjectLooksLikeStatement(subject: string | null | undefined): boolean {
+  if (!subject) return false;
+  const s = subject.toLowerCase();
+  return STATEMENT_SUBJECT_KEYWORDS.some((kw) => s.includes(kw));
 }
 
 /**

@@ -55,7 +55,7 @@ export async function POST(request: Request) {
         AND NOT EXISTS (
           SELECT 1 FROM "ParsedMessage" pm
           WHERE pm."ingestionEventId" = ie.id
-            AND pm."extractedText" LIKE '%--- %'
+            AND pm."extractedText" ~* '--- [^\n]+\.(pdf|png|jpe?g|tiff?|bmp|webp|docx?|xlsx?|csv) ---'
         )
       ORDER BY ie."createdAt" DESC
       LIMIT ${limit}

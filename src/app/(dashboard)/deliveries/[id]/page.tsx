@@ -65,7 +65,7 @@ export default async function DeliveryRunPage({
   const stopTicketIds = run.stops.map((s) => s.ticketId);
   const openTickets = await prisma.ticket.findMany({
     where: {
-      status: { notIn: ["CLOSED", "INVOICED", "LOCKED"] },
+      status: { notIn: ["CLOSED", "LOCKED"] },
       id: { notIn: stopTicketIds.length ? stopTicketIds : undefined },
       createdAt: { gte: new Date("2026-04-01") },
     },
@@ -82,6 +82,17 @@ export default async function DeliveryRunPage({
   });
 
   const suppliers = await prisma.supplier.findMany({
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
+  const cfSuppliers = await prisma.supplier.findMany({
+    where: {
+      OR: [
+        { deliveryRunsAsCarrier: { some: {} } },
+        { name: { contains: "cromwell freight", mode: "insensitive" } },
+      ],
+    },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
@@ -107,6 +118,7 @@ export default async function DeliveryRunPage({
         run={s(run)}
         openTickets={s(openTickets)}
         suppliers={suppliers}
+        cfSuppliers={cfSuppliers}
         candidateBills={s(candidateBills)}
       />
     </div>

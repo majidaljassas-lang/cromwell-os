@@ -82,15 +82,49 @@ export async function GET() {
   return Response.json({ counts, recent, kpis });
 }
 
+// Module-level lock so the poller (every 2min) doesn't pile up overlapping
+// ticks when one run takes longer than the poll interval. Reset on hot-reload.
+let tickInFlight: { startedAt: Date; promise: Promise<unknown> } | null = null;
+let lastTickResult: { finishedAt: Date; durationMs: number; result: unknown } | null = null;
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const action = (body as { action?: string }).action;
-    if (action !== "tick") {
-      return Response.json({ error: `Unknown action '${action}' — expected 'tick'` }, { status: 400 });
+    if (action === "status") {
+      return Response.json({
+        inFlight: tickInFlight ? { startedAt: tickInFlight.startedAt.toISOString() } : null,
+        lastResult: lastTickResult
+          ? { finishedAt: lastTickResult.finishedAt.toISOString(), durationMs: lastTickResult.durationMs, result: lastTickResult.result }
+          : null,
+      });
     }
-    const result = await runAllPending();
-    return Response.json(result);
+    if (action !== "tick") {
+      return Response.json({ error: `Unknown action '${action}' — expected 'tick' or 'status'` }, { status: 400 });
+    }
+    if (tickInFlight) {
+      return Response.json(
+        { skipped: true, reason: "tick already in progress", startedAt: tickInFlight.startedAt.toISOString() },
+        { status: 202 },
+      );
+    }
+    const startedAt = new Date();
+    const promise = runAllPending()
+      .then((result) => {
+        lastTickResult = { finishedAt: new Date(), durationMs: Date.now() - startedAt.getTime(), result };
+        return result;
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[intake-tick]", message);
+        lastTickResult = { finishedAt: new Date(), durationMs: Date.now() - startedAt.getTime(), result: { error: message } };
+        return { error: message };
+      })
+      .finally(() => {
+        tickInFlight = null;
+      });
+    tickInFlight = { startedAt, promise };
+    return Response.json({ accepted: true, startedAt: startedAt.toISOString() }, { status: 202 });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "tick failed" }, { status: 500 });
   }

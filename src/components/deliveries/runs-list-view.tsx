@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Plus, Truck, User } from "lucide-react";
+import { Plus, Truck, User, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,7 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { createRunAction } from "@/app/(dashboard)/deliveries/actions";
+import {
+  createRunAction,
+  deleteRunAction,
+  updateRunAction,
+} from "@/app/(dashboard)/deliveries/actions";
 
 type Run = {
   id: string;
@@ -185,12 +189,13 @@ export function RunsListView({
                 <TableHead className="bb-mono text-[10px]">STOPS</TableHead>
                 <TableHead className="bb-mono text-[10px]">PROGRESS</TableHead>
                 <TableHead className="bb-mono text-[10px]">STATUS</TableHead>
+                <TableHead className="bb-mono text-[10px] w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {runs.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-[#666666] py-8 bb-mono text-xs">
+                  <TableCell colSpan={9} className="text-center text-[#666666] py-8 bb-mono text-xs">
                     No runs yet — create one
                   </TableCell>
                 </TableRow>
@@ -238,6 +243,36 @@ export function RunsListView({
                     <TableCell>
                       <Badge className={statusColours[run.status]}>{run.status}</Badge>
                     </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        {run.status !== "COMPLETED" && run.status !== "CANCELLED" && (
+                          <EditRunSheet run={run} cfSuppliers={cfSuppliers} />
+                        )}
+                        <form
+                          action={deleteRunAction}
+                          onSubmit={(e) => {
+                            if (
+                              !confirm(
+                                `Delete run #${run.runNo}? This removes the run and its ${run._count.stops} stop(s). Linked bills and logistics events stay (just unlinked).`,
+                              )
+                            ) {
+                              e.preventDefault();
+                            }
+                          }}
+                        >
+                          <input type="hidden" name="runId" value={run.id} />
+                          <Button
+                            type="submit"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-[#666666] hover:text-[#FF7F7F] hover:bg-[#4A1A1A]/30"
+                            title="Delete run"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </form>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -246,5 +281,113 @@ export function RunsListView({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function EditRunSheet({
+  run,
+  cfSuppliers,
+}: {
+  run: Run;
+  cfSuppliers: { id: string; name: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [driverSource, setDriverSource] = useState<Run["driverSource"]>(run.driverSource);
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-[#666666] hover:text-[#FF6600] hover:bg-[#1A1A1A]"
+            title="Edit run"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        }
+      />
+      <SheetContent
+        side="right"
+        className="bg-[#0D0D0D] border-l border-[#2A2A2A] w-[480px] sm:max-w-[480px]"
+      >
+        <SheetHeader>
+          <SheetTitle className="bb-mono text-[#FF6600]">
+            Edit Run #{run.runNo}
+          </SheetTitle>
+        </SheetHeader>
+        <form
+          action={async (fd) => {
+            await updateRunAction(fd);
+            setOpen(false);
+          }}
+          className="space-y-3 mt-4 px-4"
+        >
+          <input type="hidden" name="runId" value={run.id} />
+          <div>
+            <Label className="text-xs bb-mono">Run date</Label>
+            <Input
+              type="date"
+              name="runDate"
+              defaultValue={run.runDate.slice(0, 10)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs bb-mono">Driver source</Label>
+            <select
+              name="driverSource"
+              value={driverSource}
+              onChange={(e) =>
+                setDriverSource(e.target.value as Run["driverSource"])
+              }
+              className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
+            >
+              <option value="IN_HOUSE">In-house (Dad)</option>
+              <option value="CROMWELL_FREIGHT">Cromwell Freight</option>
+            </select>
+          </div>
+          <div>
+            <Label className="text-xs bb-mono">Driver name</Label>
+            <Input
+              name="driverName"
+              defaultValue={run.driverName ?? ""}
+              placeholder={driverSource === "IN_HOUSE" ? "Dad" : "CF driver"}
+            />
+          </div>
+          {driverSource === "CROMWELL_FREIGHT" && (
+            <div>
+              <Label className="text-xs bb-mono">CF supplier</Label>
+              <select
+                name="cfSupplierId"
+                defaultValue={run.cfSupplier?.id ?? ""}
+                className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— select —</option>
+                {cfSuppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <Label className="text-xs bb-mono">Vehicle reg</Label>
+            <Input
+              name="vehicleReg"
+              defaultValue={run.vehicleReg ?? ""}
+              placeholder="AB12 CDE"
+            />
+          </div>
+          <Button
+            type="submit"
+            className="w-full bg-[#FF6600] text-black hover:bg-[#FF8533]"
+          >
+            Save
+          </Button>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }

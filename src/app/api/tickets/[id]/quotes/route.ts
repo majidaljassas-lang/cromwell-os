@@ -51,32 +51,25 @@ export async function POST(
     const versionNo = (latestQuote?.versionNo ?? 0) + 1;
 
     // Get ticket lines — filter by selected lineIds if provided, exclude BOM children
-    // Order by createdAt to preserve ticket line sequence (sections flow through)
+    // Order by displayOrder (immutable line position), id as tiebreaker.
     const ticketLines = await prisma.ticketLine.findMany({
       where: {
         ticketId: id,
         parentLineId: null,
         ...(lineIds && lineIds.length > 0 ? { id: { in: lineIds } } : {}),
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
     });
 
-    // Include every line with an explicit price, including FOC (£0.00) lines.
-    // Only exclude lines that have NO price anywhere (all three fields NULL) —
-    // those are not yet ready to quote.
-    const pricedLines = ticketLines.filter((line) => {
-      return line.actualSaleUnit !== null
-          || line.actualSaleTotal !== null
-          || line.suggestedSaleUnit !== null;
-    });
-
-    if (pricedLines.length === 0) {
-      return Response.json({ error: "No priced lines to quote" }, { status: 400 });
+    // Include every top-level line. Lines with no sale price (£0 or NULL) still
+    // appear, in their fixed displayOrder position, and render as TBC on the
+    // quote. They compute to £0 so they contribute nothing to the total.
+    if (ticketLines.length === 0) {
+      return Response.json({ error: "No lines to quote" }, { status: 400 });
     }
 
-    // Calculate total sell from priced lines only
     let totalSell = 0;
-    const quoteLineData = pricedLines.map((line, index) => {
+    const quoteLineData = ticketLines.map((line, index) => {
       const unitPrice = Number(line.actualSaleUnit ?? line.suggestedSaleUnit ?? 0);
       const lineTotal = unitPrice * Number(line.qty);
       totalSell += lineTotal;

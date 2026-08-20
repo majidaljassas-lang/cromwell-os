@@ -5,6 +5,8 @@
  * Rules-based first, AI assistance layered afterward.
  */
 
+import { subjectLooksLikeBill, subjectLooksLikeStatement } from "@/lib/intake/email-body-detector";
+
 // Message classification for WhatsApp/Outlook
 export type MessageClassification =
   | "CUSTOMER_ORDER"
@@ -17,11 +19,48 @@ export type MessageClassification =
   | "DISPUTE"
   | "PO_DOCUMENT"
   | "BILL_DOCUMENT"
+  | "STATEMENT"
   | "CREDIT_NOTE"
+  | "SUPPLIER_QUOTE"
+  | "RETURN_REQUEST"
   | "GENERAL_CHATTER"
   | "SCHEDULE"
   | "RECOVERY_EVIDENCE"
   | "UNKNOWN";
+
+/**
+ * Action / reaction frame (Universal Ingestion, Phase A).
+ *   ACTION   — opens a new loop (new ticket, new task, new draft)
+ *   REACTION — closes an existing loop (resolves a task, posts AP, marks delivered)
+ *   NOISE    — no trigger; archive
+ *   REVIEW   — needs human eyes before we can decide intent
+ */
+export type Intent = "ACTION" | "REACTION" | "NOISE" | "REVIEW";
+
+const INTENT_BY_CLASSIFICATION: Record<MessageClassification, Intent> = {
+  CUSTOMER_ORDER:     "ACTION",
+  QUOTE_REQUEST:      "ACTION",
+  PO_DOCUMENT:        "ACTION",
+  RETURN_REQUEST:     "ACTION",
+  SUPPLIER_ORDER_ACK: "REACTION",
+  ORDER:              "REACTION",
+  APPROVAL:           "REACTION",
+  FOLLOW_UP:          "REACTION",
+  DELIVERY_UPDATE:    "REACTION",
+  DISPUTE:            "REACTION",
+  BILL_DOCUMENT:      "REACTION",
+  STATEMENT:          "REACTION",
+  CREDIT_NOTE:        "REACTION",
+  SUPPLIER_QUOTE:     "REACTION",
+  SCHEDULE:           "REACTION",
+  GENERAL_CHATTER:    "NOISE",
+  RECOVERY_EVIDENCE:  "NOISE",
+  UNKNOWN:            "REVIEW",
+};
+
+export function intentForClassification(c: MessageClassification): Intent {
+  return INTENT_BY_CLASSIFICATION[c];
+}
 
 // Cost line classification (maps to CostClassification enum)
 export type CostLineClassification =
@@ -72,8 +111,29 @@ const BILL_KEYWORDS = [
   "invoice attached", "please find attached invoice", "invoice number",
   "invoice no", "inv no", "amount due", "payment terms", "net total",
   "total inc vat", "total incl vat", "grand total", "balance due",
-  "remittance advice", "statement of account", "tax invoice",
+  "remittance advice", "tax invoice",
   "vat invoice", "proforma invoice",
+];
+
+const STATEMENT_KEYWORDS = [
+  "statement of account", "account statement", "statement period",
+  "outstanding invoices", "aged debt", "balance carried forward",
+  "balance brought forward", "opening balance", "closing balance",
+];
+
+const SUPPLIER_QUOTE_KEYWORDS = [
+  "quotation", "quote ref", "quote no", "quote number",
+  "valid until", "quote valid", "quotation valid",
+  "lead time", "delivery in", "stock on hand",
+  "pro-forma quotation", "proforma quotation",
+];
+
+const RETURN_REQUEST_KEYWORDS = [
+  "return request", "would like to return", "want to return",
+  "need to return", "returning these", "raise a return",
+  "wrong item delivered", "wrong size delivered",
+  "please collect", "arrange collection", "collect from site",
+  "send a collection", "items to go back",
 ];
 
 const ABSORBED_KEYWORDS = [
@@ -81,24 +141,60 @@ const ABSORBED_KEYWORDS = [
   "rush", "express", "same day", "next day delivery",
 ];
 
-export function classifyMessage(
-  text: string,
-  options: { fallback?: MessageClassification } = {}
-): {
+export interface ClassifyResult {
   classification: MessageClassification;
   confidence: number;
   reasons: string[];
-} {
+  intent: Intent;
+}
+
+export function classifyMessage(
+  text: string,
+  options: { fallback?: MessageClassification; subject?: string | null } = {}
+): ClassifyResult {
   const lower = text.toLowerCase();
   const reasons: string[] = [];
   let classification: MessageClassification = "UNKNOWN";
   let confidence = 30;
 
-  // Check in priority order
+  // Subject is the strongest signal — Majid's Outlook accounts-payable rule
+  // matches on subject alone. Statement first (more specific), then bill.
+  if (options.subject && subjectLooksLikeStatement(options.subject)) {
+    return {
+      classification: "STATEMENT",
+      confidence: 90,
+      reasons: ["Subject matches statement-of-account pattern"],
+      intent: intentForClassification("STATEMENT"),
+    };
+  }
+  if (options.subject && subjectLooksLikeBill(options.subject)) {
+    return {
+      classification: "BILL_DOCUMENT",
+      confidence: 90,
+      reasons: ["Subject matches accounts-payable bill rule"],
+      intent: intentForClassification("BILL_DOCUMENT"),
+    };
+  }
+
+  // Check in priority order. Statement is checked before bill because
+  // "statement of account" emails carry many bill-flavoured words but are
+  // a different doctype with a different downstream handler.
   if (matchesKeywords(lower, PO_KEYWORDS)) {
     classification = "PO_DOCUMENT";
     confidence = 80;
     reasons.push("Contains PO reference keywords");
+  } else if (matchesKeywords(lower, STATEMENT_KEYWORDS)) {
+    classification = "STATEMENT";
+    confidence = 80;
+    reasons.push("Contains statement-of-account keywords");
+  } else if (matchesKeywords(lower, SUPPLIER_QUOTE_KEYWORDS)) {
+    classification = "SUPPLIER_QUOTE";
+    confidence = 75;
+    reasons.push("Contains supplier quotation keywords");
+  } else if (matchesKeywords(lower, RETURN_REQUEST_KEYWORDS)) {
+    classification = "RETURN_REQUEST";
+    confidence = 80;
+    reasons.push("Contains return-request keywords");
   } else if (matchesKeywords(lower, BILL_KEYWORDS)) {
     classification = "BILL_DOCUMENT";
     confidence = 80;
@@ -164,7 +260,7 @@ export function classifyMessage(
     reasons.push("Contains monetary value");
   }
 
-  return { classification, confidence, reasons };
+  return { classification, confidence, reasons, intent: intentForClassification(classification) };
 }
 
 export function classifyCostLine(description: string): {

@@ -35,6 +35,8 @@ function termsToDays(terms: string | null | undefined): number {
 function buildHtml(invoice: {
   invoiceNo: string | null;
   invoiceType: string;
+  status: string;
+  paidAt: Date | null;
   issuedAt: Date | null;
   poNo: string | null;
   notes: string | null;
@@ -46,8 +48,21 @@ function buildHtml(invoice: {
     qty: unknown;
     unitPrice: unknown;
     lineTotal: unknown;
-    ticketLine: { unit: string; sectionLabel: string | null } | null;
+    displayMode: string;
+    sourceRef: string | null;
+    ticketLine: {
+      unit: string;
+      sectionLabel: string | null;
+      parentLineId: string | null;
+      isBomParent: boolean;
+    } | null;
   }>;
+  totalNet: unknown;
+  totalVat: unknown;
+  totalGross: unknown;
+  totalSell: unknown;
+  payments: Array<{ amount: unknown; paymentDate: Date; paymentMethod: string | null; reference: string | null }>;
+  salesCreditNotes: Array<{ creditNoteNo: string | null; total: unknown; status: string }>;
 }, totalSale: number, fontBase64: string): string {
   const invoiceDate = invoice.issuedAt ? new Date(invoice.issuedAt) : new Date();
   const dateStr = invoiceDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -81,28 +96,66 @@ function buildHtml(invoice: {
     .map(l => l.trim())
     .filter(Boolean);
 
+  // Number only top-level (non-BOM-child) rows — components nest under their parent.
+  let displayIndex = 0;
   const lineRows = invoice.lines.map((line, i) => {
+    const isBomChild =
+      line.displayMode === "BOM_CHILD" || !!line.ticketLine?.parentLineId;
+    if (!isBomChild) displayIndex++;
+
     const prevSection = i > 0 ? invoice.lines[i - 1].ticketLine?.sectionLabel : null;
-    const sectionHeader = line.ticketLine?.sectionLabel && line.ticketLine.sectionLabel !== prevSection
-      ? `<tr><td colspan="5" style="padding:8px 10px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#555;background:#f5f5f5;border-top:2px solid #ddd">${line.ticketLine.sectionLabel}</td></tr>`
-      : "";
-    const isFoc = Number(line.unitPrice) === 0 && Number(line.lineTotal) === 0;
+    const sectionHeader =
+      !isBomChild &&
+      line.ticketLine?.sectionLabel &&
+      line.ticketLine.sectionLabel !== prevSection
+        ? `<tr><td colspan="5" style="padding:8px 10px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#555;background:#f5f5f5;border-top:2px solid #ddd">${line.ticketLine.sectionLabel}</td></tr>`
+        : "";
+
+    if (isBomChild) {
+      // Component line: indented description, "Included" instead of price.
+      return `<tr style="border-bottom:1px solid #f4f4f4;background:#fafafa">
+        <td style="padding:5px 10px;color:#bbb;font-size:11px"></td>
+        <td style="padding:5px 10px 5px 28px;font-size:11px;color:#666;font-style:italic">↳ ${line.description}</td>
+        <td style="padding:5px 10px;text-align:center;font-size:11px;color:#888;white-space:nowrap">${Number(line.qty)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:10px;color:#888;font-style:italic">Included</td>
+        <td style="padding:5px 10px;text-align:right;font-size:10px;color:#888;font-style:italic">Included</td>
+      </tr>`;
+    }
+
+    const isFoc =
+      Number(line.unitPrice) === 0 && Number(line.lineTotal) === 0;
     const focBadge = `<span style="display:inline-block;font-size:8px;font-weight:700;letter-spacing:0.1em;background:#E8F4FD;color:#0066CC;padding:2px 5px;margin-left:6px;border-radius:2px">FOC</span>`;
     const priceCell = isFoc ? `FOC` : fmt(line.unitPrice);
     const totalCell = isFoc ? `FOC` : fmt(line.lineTotal);
     const priceStyle = isFoc ? "color:#0066CC;font-weight:700" : "";
     const rowStyle = isFoc ? "background:#FBFCFE;" : "";
     return `${sectionHeader}<tr style="border-bottom:1px solid #eee;${rowStyle}">
-      <td style="padding:8px 10px;color:#888;font-size:12px;width:35px">${i + 1}</td>
-      <td style="padding:8px 10px;font-size:12px">${line.description}${isFoc ? focBadge : ""}</td>
+      <td style="padding:8px 10px;color:#888;font-size:12px;width:35px">${displayIndex}</td>
+      <td style="padding:8px 10px;font-size:12px">${line.description}${isFoc ? focBadge : ""}${line.sourceRef ? `<div style="font-size:10px;color:#999;margin-top:2px">Quote ${line.sourceRef}</div>` : ""}</td>
       <td style="padding:8px 10px;text-align:center;font-size:12px;white-space:nowrap">${Number(line.qty)}</td>
       <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;${priceStyle}">${priceCell}</td>
       <td style="padding:8px 10px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:700;${priceStyle}">${totalCell}</td>
     </tr>`;
   }).join("");
 
-  const vatAmount = totalSale * 0.2;
-  const grandTotal = totalSale * 1.2;
+  // Use header VAT/gross fields. Fall back to *0.2 only if missing entirely.
+  const headerNet = Number(invoice.totalNet ?? 0);
+  const headerVat = Number(invoice.totalVat ?? 0);
+  const headerGross = Number(invoice.totalGross ?? invoice.totalSell ?? 0);
+  const subTotal = headerNet > 0 ? headerNet : totalSale;
+  const vatAmount = headerVat > 0 || headerGross > 0 ? headerVat : totalSale * 0.2;
+  const grandTotal = headerGross > 0 ? headerGross : subTotal + vatAmount;
+  const paymentRowsTotal = (invoice.payments ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  // Status is the authoritative paid signal. If invoice.status === 'PAID' but no
+  // Payment rows exist (e.g. settled outside the OS), treat the whole gross as paid.
+  const statusPaid = invoice.status === "PAID";
+  const paidTotal = statusPaid ? Math.max(paymentRowsTotal, grandTotal) : paymentRowsTotal;
+  // Credit notes applied to this invoice reduce the balance due (exclude drafts/voided).
+  const creditsTotal = (invoice.salesCreditNotes ?? [])
+    .filter((c) => !["DRAFT", "VOID", "VOIDED", "CANCELLED"].includes(c.status))
+    .reduce((s, c) => s + Number(c.total), 0);
+  const balanceDue = statusPaid ? 0 : Math.max(grandTotal - paidTotal - creditsTotal, 0);
+  const fullyPaid = statusPaid || ((paidTotal > 0 || creditsTotal > 0) && balanceDue < 0.005);
   const invRef = invoice.invoiceNo || "DRAFT";
 
   return `<!DOCTYPE html>
@@ -171,7 +224,7 @@ function buildHtml(invoice: {
   <div style="width:260px">
     <div style="display:flex;justify-content:space-between;padding:6px 0">
       <span style="font-size:11px;color:#555">Sub Total</span>
-      <span style="font-size:11px;font-variant-numeric:tabular-nums">${fmt(totalSale)}</span>
+      <span style="font-size:11px;font-variant-numeric:tabular-nums">${fmt(subTotal)}</span>
     </div>
     <div style="display:flex;justify-content:space-between;padding:6px 0">
       <span style="font-size:11px;color:#555">VAT (20%)</span>
@@ -181,12 +234,49 @@ function buildHtml(invoice: {
       <span style="font-weight:700;font-size:13px">Total</span>
       <span style="font-weight:700;font-size:13px;font-variant-numeric:tabular-nums">${fmt(grandTotal)}</span>
     </div>
-    <div style="display:flex;justify-content:space-between;padding:8px 10px;background:#222;color:#fff;margin-top:6px">
-      <span style="font-weight:700;font-size:12px">Balance Due</span>
-      <span style="font-weight:700;font-size:12px;font-variant-numeric:tabular-nums">${fmt(grandTotal)}</span>
+    ${paidTotal > 0 ? `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;color:#0a7a39">
+      <span style="font-size:11px">Paid to date</span>
+      <span style="font-size:11px;font-variant-numeric:tabular-nums">-${fmt(paidTotal)}</span>
+    </div>` : ""}
+    ${(invoice.salesCreditNotes ?? [])
+      .filter((c) => !["DRAFT", "VOID", "VOIDED", "CANCELLED"].includes(c.status))
+      .map((c) => `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;color:#0a7a39">
+      <span style="font-size:11px">Less Credit Note ${c.creditNoteNo ?? ""}</span>
+      <span style="font-size:11px;font-variant-numeric:tabular-nums">-${fmt(Number(c.total))}</span>
+    </div>`).join("")}
+    <div style="display:flex;justify-content:space-between;padding:8px 10px;background:${fullyPaid ? "#0a7a39" : "#222"};color:#fff;margin-top:6px">
+      <span style="font-weight:700;font-size:12px">${fullyPaid ? "PAID" : "Balance Due"}</span>
+      <span style="font-weight:700;font-size:12px;font-variant-numeric:tabular-nums">${fmt(balanceDue)}</span>
     </div>
   </div>
 </div>
+
+${paidTotal > 0 ? `
+<!-- Payments received -->
+<div style="margin-top:24px">
+  <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:#999;margin-bottom:6px">Payments Received</div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="background:#f3f3f3">
+        <th style="padding:6px 8px;font-size:10px;text-align:left;font-weight:600">Date</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:left;font-weight:600">Method</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:left;font-weight:600">Reference</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;font-weight:600">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${(invoice.payments ?? []).map(p => `
+      <tr>
+        <td style="padding:6px 8px;font-size:11px;border-top:1px solid #eee">${new Date(p.paymentDate).toLocaleDateString("en-GB")}</td>
+        <td style="padding:6px 8px;font-size:11px;border-top:1px solid #eee">${p.paymentMethod || "—"}</td>
+        <td style="padding:6px 8px;font-size:11px;border-top:1px solid #eee">${p.reference || "—"}</td>
+        <td style="padding:6px 8px;font-size:11px;border-top:1px solid #eee;text-align:right;font-variant-numeric:tabular-nums">${fmt(Number(p.amount))}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+</div>` : ""}
 
 <!-- Payment details -->
 <div style="border-top:1px solid #ddd;padding-top:16px;margin-top:30px;font-size:10px;color:#555;line-height:1.7">
@@ -209,25 +299,30 @@ export async function POST(
       where: { id },
       include: {
         lines: {
-          include: { ticketLine: { select: { unit: true, sectionLabel: true, createdAt: true } } },
-          orderBy: { createdAt: "asc" },
+          include: {
+            ticketLine: {
+              select: {
+                unit: true,
+                sectionLabel: true,
+                createdAt: true,
+                parentLineId: true,
+                isBomParent: true,
+              },
+            },
+          },
+          orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
         },
         customer: true,
         site: true,
         ticket: { select: { title: true } },
+        payments: { orderBy: { paymentDate: "asc" } },
+        salesCreditNotes: { select: { creditNoteNo: true, total: true, status: true } },
       },
     });
 
     if (!invoice) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
     }
-
-    // Sort lines by ticket line creation order to match ticket
-    invoice.lines.sort((a, b) => {
-      const ta = a.ticketLine?.createdAt ? new Date(a.ticketLine.createdAt).getTime() : 0;
-      const tb = b.ticketLine?.createdAt ? new Date(b.ticketLine.createdAt).getTime() : 0;
-      return ta - tb;
-    });
 
     const totalSale = invoice.lines.reduce((s, l) => s + Number(l.lineTotal), 0);
     const fontBase64 = getGeistFontBase64();

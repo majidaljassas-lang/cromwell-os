@@ -267,7 +267,7 @@ export async function extractLineItems(threadText: string): Promise<ExtractedLin
     const parsed = JSON.parse(jsonStr) as { lines: ExtractedLine[] };
     if (!Array.isArray(parsed.lines)) return [];
 
-    const validUnits = new Set(["EA", "M", "LENGTH", "PACK", "LOT", "SET"]);
+    const validUnits = new Set(["EA", "M", "LENGTH", "PACK", "LOT", "SET", "TONNE"]);
 
     return parsed.lines
       .filter((l) => l.description && typeof l.description === "string" && l.description.length > 0)
@@ -317,6 +317,11 @@ export async function buildThreadText(threadId: string): Promise<string> {
 export async function runAutoCreateTickets(
   opts: { limit?: number } = {},
 ): Promise<AutoCreateResult> {
+  // Disabled per user instruction — customer + site must be allocated manually
+  // via the inbox triage picker. Re-enable by removing this short-circuit.
+  return { ticketsCreated: [], flaggedForReview: [], skipped: 0, errors: [] };
+
+  // eslint-disable-next-line no-unreachable
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
 
   // Find qualifying threads:

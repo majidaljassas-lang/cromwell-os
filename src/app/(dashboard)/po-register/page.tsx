@@ -47,6 +47,13 @@ export default async function PORegisterPage() {
     where: { isActive: true },
   });
 
+  const [bfAmountRow, bfDateRow] = await Promise.all([
+    prisma.systemSetting.findUnique({ where: { key: "plumberBroughtForwardAmount" } }),
+    prisma.systemSetting.findUnique({ where: { key: "plumberBroughtForwardDate" } }),
+  ]);
+  const plumberBroughtForwardAmount = Number(bfAmountRow?.value ?? 0) || 0;
+  const plumberBroughtForwardDate = bfDateRow?.value ?? null;
+
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
@@ -58,6 +65,8 @@ export default async function PORegisterPage() {
         tickets={s(tickets)}
         contacts={s(contacts)}
         commercialLinks={s(commercialLinks)}
+        plumberBroughtForwardAmount={plumberBroughtForwardAmount}
+        plumberBroughtForwardDate={plumberBroughtForwardDate}
       />
     </div>
   );

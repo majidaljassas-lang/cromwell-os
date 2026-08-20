@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { reverseJournal, postSalesInvoice } from "@/lib/finance/gl-posting";
 
 export async function GET(
   request: Request,
@@ -58,16 +59,34 @@ export async function PATCH(
     if (notes !== undefined) data.notes = notes;
     if (poNo !== undefined) data.poNo = poNo;
 
-    const invoice = await prisma.salesInvoice.update({
-      where: { id },
-      data,
-      include: {
-        ticket: true,
-        customer: true,
-        site: true,
-        lines: true,
-        poAllocations: true,
-      },
+    const invoice = await prisma.$transaction(async (tx) => {
+      const updated = await tx.salesInvoice.update({
+        where: { id },
+        data,
+        include: {
+          ticket: true,
+          customer: true,
+          site: true,
+          lines: true,
+          poAllocations: true,
+        },
+      });
+
+      // If the invoice date moved and this invoice is already posted to the GL,
+      // re-date its AR journal entry so the ledger sits in the correct fiscal
+      // period. Reverse + re-post rebuilds the JE from the new issuedAt.
+      if (issuedAt !== undefined && updated.issuedAt) {
+        const existingJe = await tx.journalEntry.findFirst({
+          where: { sourceType: "SALES_INVOICE", sourceId: id },
+          select: { id: true },
+        });
+        if (existingJe) {
+          await reverseJournal(tx, "SALES_INVOICE", id);
+          await postSalesInvoice(id, tx);
+        }
+      }
+
+      return updated;
     });
 
     // Auto-run PO match if poNo changed or was set

@@ -484,6 +484,64 @@ function isMaterialLine(text: string): boolean {
   return MATERIAL_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
+// ─── Email preamble / footer stripping ──────────────────────────────────────
+//
+// Auto-generated procurement emails (Buildertrend, Trade Partner portals,
+// some PO platforms) wrap the actual quote text inside boilerplate. The
+// real items start AFTER a marker like "Bid Request Description:",
+// "Specification:", "Items:", "Please quote", and END before footers like
+// "Login View & Submit Bid" or "© 2026 Buildertrend".
+//
+// Without stripping, the preamble becomes a phantom giant "line" and
+// items leak into it.
+
+const PREAMBLE_MARKERS = [
+  /\bBid Request Description\s*:/i,
+  /\bRequest for Quote\s*:/i,
+  /\bRFQ\s*:/i,
+  /\bSpecification\s*:/i,
+  /\bItem(?:s| List)\s*:/i,
+  /\bPlease quote(?: for)?(?: the following)?[.:]/i,
+  /\bQuote required for\s*:?/i,
+  /\bWe require\s*:/i,
+];
+
+const FOOTER_MARKERS = [
+  /\bLogin View\b/i,
+  /\bSubmit Bid\b/i,
+  /\bThis email has been auto-generated\b/i,
+  /©\s*\d{4}\s+Buildertrend/i,
+  /\bCreated from inbox email thread\b/i,
+  /\bUnsubscribe\b/i,
+  /\bDo not reply\b/i,
+  /\bAttachments\s*:/i,
+  // Sign-offs: "Thanks Dumitru", "Regards John", "Kind regards Bob", "Cheers Bob"
+  /\b(?:Thanks|Thank\s+you|Regards|Kind\s+regards|Best\s+regards|Cheers|Yours)\s+[A-Z][a-zA-Z]+\b/,
+];
+
+function stripBoilerplate(text: string): string {
+  let t = text;
+
+  // Strip preamble: keep everything AFTER the latest marker found.
+  for (const re of PREAMBLE_MARKERS) {
+    const m = t.match(re);
+    if (m && m.index !== undefined) {
+      t = t.slice(m.index + m[0].length).trim();
+      break; // strip on first hit only
+    }
+  }
+
+  // Strip footer: keep everything BEFORE the first footer marker.
+  for (const re of FOOTER_MARKERS) {
+    const m = t.match(re);
+    if (m && m.index !== undefined) {
+      t = t.slice(0, m.index).trim();
+    }
+  }
+
+  return t;
+}
+
 // ─── Line splitting ──────────────────────────────────────────────────────────
 
 function splitIntoLines(text: string): string[] {
@@ -496,9 +554,12 @@ function splitIntoLines(text: string): string[] {
     if (commaSplit.length > 2) lines = commaSplit;
   }
 
-  // If still 1-2 lines, try splitting on "Nx " pattern boundaries
+  // If still 1-2 lines, try splitting on "Nx LETTER" item-start boundaries.
+  // Same rule as the per-line exploder below: digit-x-space-DIGIT is a SIZE
+  // ("90x 22mm"), not an item start. Only digit-x-space-LETTER reliably
+  // marks a new line item.
   if (lines.length <= 2) {
-    const qtyBoundary = text.split(/(?=\b\d+\s*[xX×]\s)/);
+    const qtyBoundary = text.split(/(?=\b\d+\s*[xX×]\s+[A-Za-z])/);
     const filtered = qtyBoundary.map((l) => l.trim()).filter((l) => l.length > 2);
     if (filtered.length > 2) lines = filtered;
   }
@@ -524,19 +585,40 @@ function splitIntoLines(text: string): string[] {
     }
   }
 
-  // Explode lines containing multiple item markers
+  // Explode lines containing multiple item markers.
+  //
+  // CRITICAL: "Nx LETTER" is a real item boundary ("4x LBV valve").
+  //           "Nx DIGIT" is usually a SIZE component ("elbow 90x 22mm M/F"),
+  //           NOT an item boundary. The previous regex split on the latter
+  //           and fragmented items mid-description. We now split only on
+  //           letter-after-Nx, which is the reliable item-start signal.
+  //
+  // To avoid losing items like "1x 110mm pipe" (qty + measurement-leading
+  // product), we treat "Nx N(mm|cm|inch|")" as a soft boundary too — but
+  // ONLY when the preceding context is itself an item-end (a known
+  // descriptor word like "press", "compression", "white", "brass", "M/F",
+  // "F", "M", "iron", "chrome", "PVC", "MLCP"). Inside a fitting size
+  // ("elbow 90x 22mm") the preceding word is "elbow", which we exclude.
+  const ITEM_END_WORDS = "(?:press|compression|white|brass|chrome|cooper|copper|iron|steel|F|M|PVC|MLCP|ABS|inch|mm)";
   const finalLines: string[] = [];
   for (const line of expanded) {
-    const xMatches = line.match(/\b\d+\s*[xX×]\s+\d/g);
-    const mOfMatches = line.match(/\b\d+\s*(?:meters?|metres?|m)\s+of\s+\d/gi);
-    // Leading "xN " pattern (e.g. "x10 Delabie ... x10 Armitage ...") — common
-    // when an email collapses line breaks. Only counts when preceded by a word
-    // boundary (so it doesn't trigger inside "56x278x200").
-    const leadingXNMatches = line.match(/\bx\s*\d+\s+[A-Za-z]/g);
-    const totalMarkers = (xMatches?.length || 0) + (mOfMatches?.length || 0) + (leadingXNMatches?.length || 0);
+    // Prefer letter boundary; fall back to measurement-after-item-end boundary.
+    const splitter = new RegExp(
+      // Boundary 1: \d+x LETTER  (item start with named product)
+      `(?=\\b\\d+\\s*[xX×]\\s+[A-Za-z])` +
+        // Boundary 2: \d+ meters of N (legacy)
+        `|(?=\\b\\d+\\s*(?:meters?|metres?|m)\\s+of\\s+\\d)` +
+        // Boundary 3: leading xN <letter> (collapsed-newline RFQs)
+        `|(?=\\bx\\s*\\d+\\s+[A-Za-z])` +
+        // Boundary 4a: <item-end> \d+x N(mm|cm|inch|") — qty + measurement product
+        `|(?<=${ITEM_END_WORDS}\\s)(?=\\d+\\s*[xX×]\\s+\\d+\\s*(?:mm|cm|inch|"))` +
+        // Boundary 4b: <item-end> \d+x N/N(mm|"|inch) — qty + fractional measurement
+        `|(?<=${ITEM_END_WORDS}\\s)(?=\\d+\\s*[xX×]\\s+\\d+\\/\\d+(?:\\s*(?:mm|inch|"|'))?)`,
+      "g"
+    );
+    const fragments = line.split(splitter);
 
-    if (totalMarkers >= 2) {
-      const fragments = line.split(/(?=\b\d+\s*(?:[xX×]|meters?|metres?|m)\s+(?:of\s+)?\d)|(?=\bx\s*\d+\s+[A-Za-z])/);
+    if (fragments.length >= 2) {
       for (const frag of fragments) {
         const t = frag.trim();
         if (t.length > 2) finalLines.push(t);
@@ -660,7 +742,11 @@ function parseLine(rawText: string): ExtractedCandidate | null {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export function extractRfqCandidates(rawText: string): ExtractedCandidate[] {
-  const lines = splitIntoLines(rawText);
+  // Strip auto-generated email preamble (Buildertrend "Bid Request Description:",
+  // "Notes From Builder:", etc.) and footers (Login View, © 2026 Buildertrend,
+  // "Created from inbox email thread").
+  const cleaned = stripBoilerplate(rawText);
+  const lines = splitIntoLines(cleaned);
   const candidates: ExtractedCandidate[] = [];
 
   for (const line of lines) {

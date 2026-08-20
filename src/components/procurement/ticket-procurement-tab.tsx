@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Upload, FileText, ExternalLink, Package, Pencil, Trash2 } from "lucide-react";
 import { OrderReconciliation } from "./order-reconciliation";
 import { Button } from "@/components/ui/button";
@@ -112,8 +112,18 @@ type StockUsageInfo = {
   id: string; qtyUsed: Decimal; costPerUnit: Decimal; totalCost: Decimal; stockItemId: string;
   stockItem?: { id: string; description: string; supplierName: string | null; originBillNo: string | null; sourceType: string; originTicketTitle: string | null };
 };
-type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; stockUsages?: StockUsageInfo[]; isBomParent?: boolean; parentLineId?: string | null; parentDescription?: string | null };
+type TicketLineOption = { id: string; description: string; qty: Decimal; unit: string; expectedCostUnit: Decimal; status: string; sectionLabel: string | null; supplierName: string | null; internalNotes?: string | null; substitutedFrom?: string | null; stockUsages?: StockUsageInfo[]; isBomParent?: boolean; parentLineId?: string | null; parentDescription?: string | null; parentQty?: Decimal | number | null; sourceItemIds?: string[] };
 type StockItemOption = { id: string; description: string; productCode: string | null; qtyOnHand: Decimal; unit: string; costPerUnit: Decimal; supplierName: string | null; sourceType: string; originBillNo: string | null; originTicketTitle: string | null };
+
+type CallOffOption = {
+  id: string;
+  callOffNo: number;
+  coSeq?: number;
+  status: string;
+  callOffDate: string;
+  customerPO: { id: string; poNo: string };
+  lines: Array<{ ticketLineId: string; requestedQty: string | number; invoicedQty: string | number }>;
+};
 
 type Props = {
   ticketId: string;
@@ -126,6 +136,8 @@ type Props = {
   suppliers: SupplierOption[];
   stockItems?: StockItemOption[];
   ticketLines: TicketLineOption[];
+  customerPONo?: string | null;
+  callOffs?: CallOffOption[];
 };
 
 export function TicketProcurementTab({
@@ -138,6 +150,8 @@ export function TicketProcurementTab({
   suppliers,
   stockItems = [],
   ticketLines,
+  customerPONo = null,
+  callOffs = [],
 }: Props) {
   const router = useRouter();
   const [orderedLines, setOrderedLines] = useState<Set<string>>(new Set());
@@ -155,12 +169,31 @@ export function TicketProcurementTab({
   const [deliveryNoteOpen, setDeliveryNoteOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().split("T")[0]);
   const [deliveryItems, setDeliveryItems] = useState<Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL" | "DIRECT"; qtyDelivered: number; qtyTotal: number }>>({});
+  // "" = no scope (all ordered ticket lines); otherwise restrict to a single CallOff.
+  const [dnCallOffId, setDnCallOffId] = useState<string>("");
+  // Procurement checklist (stock vs order), scoped to a call-off — mirrors the DN sheet.
+  const [procOpen, setProcOpen] = useState(false);
+  const [procCallOffId, setProcCallOffId] = useState<string>("");
+  const [procSubmitting, setProcSubmitting] = useState(false);
+  const [procItems, setProcItems] = useState<
+    Record<string, { action: "ORDER" | "SPLIT" | "STOCK" | "SKIP"; qtyTotal: number; qtyStock: number; stockItemId: string | null; stockAvail: number }>
+  >({});
+  // Prior DNs for this ticket — used to compute remaining outstanding qty so the
+  // next sheet only shows what's still owed. Loaded on openDeliveryNote().
+  const [priorDeliveryNotes, setPriorDeliveryNotes] = useState<Array<{
+    id: string;
+    deliveryNo: number;
+    deliveryDate: string;
+    callOffId: string | null;
+    lines: Array<{ ticketLineId: string; qtyDelivered: string | number; qtyBackOrder: string | number; status: string; note?: string | null }>;
+  }>>([]);
   const [absorbedOpen, setAbsorbedOpen] = useState(false);
   const [absorbedSubmitting, setAbsorbedSubmitting] = useState(false);
   const [stockPickerLine, setStockPickerLine] = useState<string | null>(null);
   const [stockPickerItemId, setStockPickerItemId] = useState("");
   const [stockPickerQty, setStockPickerQty] = useState("");
   const [stockPickerSubmitting, setStockPickerSubmitting] = useState(false);
+  const [editLineItems, setEditLineItems] = useState<Array<{ id: string; description: string; qty: string; unitCost: string; lineTotal: string; supplierCode?: string }>>([]);
 
   async function handleLogAcknowledgement(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -189,6 +222,39 @@ export function TicketProcurementTab({
       setAckSubmitting(false);
     }
   }
+
+  // Canonical render order for the delivery note: each parent immediately followed by its children
+  // (mirrors buildRenderOrder in src/lib/tickets/sync-downstream.ts). Independent of displayOrder gaps.
+  const orderedTicketLines = useMemo<TicketLineOption[]>(() => {
+    const filtered = ticketLines.filter((l) => {
+      if (l.status === "INVOICED" && (!l.sourceItemIds || l.sourceItemIds.length === 0)) {
+        return false;
+      }
+      return true;
+    });
+    const inScope = new Set(filtered.map((l) => l.id));
+    const childrenByParent = new Map<string, TicketLineOption[]>();
+    const orphans: TicketLineOption[] = [];
+    for (const l of filtered) {
+      if (l.parentLineId) {
+        if (inScope.has(l.parentLineId)) {
+          const arr = childrenByParent.get(l.parentLineId) ?? [];
+          arr.push(l);
+          childrenByParent.set(l.parentLineId, arr);
+        } else {
+          orphans.push(l);
+        }
+      }
+    }
+    const topLines = filtered.filter((l) => !l.parentLineId);
+    const out: TicketLineOption[] = [];
+    for (const p of topLines) {
+      out.push(p);
+      for (const k of childrenByParent.get(p.id) ?? []) out.push(k);
+    }
+    for (const o of orphans) out.push(o);
+    return out;
+  }, [ticketLines]);
 
   // Calculate stock usage per line
   function stockQtyUsed(line: TicketLineOption): number {
@@ -484,49 +550,416 @@ export function TicketProcurementTab({
     }
   }
 
-  function openDeliveryNote() {
-    const items: Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL"; qtyDelivered: number; qtyTotal: number }> = {};
-    for (const l of ticketLines) {
-      const qty = Number(l.qty?.toString() || 0);
-      if (l.status === "PARTIALLY_ORDERED") items[l.id] = { status: "BACK_ORDER", qtyDelivered: 0, qtyTotal: qty };
-      else if (l.status === "ORDERED" || l.status === "FROM_STOCK" || l.status === "PARTIALLY_COSTED" || l.status === "FULLY_COSTED" || l.status === "INVOICED") items[l.id] = { status: "DELIVERED", qtyDelivered: qty, qtyTotal: qty };
-      else items[l.id] = { status: "NOT_ORDERED", qtyDelivered: 0, qtyTotal: qty };
+  // BOM child qty is stored per-assembly; physical delivery qty = child.qty × parent.qty.
+  function physicalQty(l: TicketLineOption): number {
+    const own = Number(l.qty?.toString() || 0);
+    if (!l.parentLineId) return own;
+    const pq = Number(l.parentQty?.toString() || 1);
+    return own * pq;
+  }
+
+  const loadPriorDeliveryNotes = useCallback(async (): Promise<typeof priorDeliveryNotes> => {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/delivery-notes`);
+      if (res.ok) {
+        const data = await res.json();
+        setPriorDeliveryNotes(data);
+        return data;
+      }
+    } catch {
+      // non-fatal
     }
-    setDeliveryItems(items);
+    return [];
+  }, [ticketId]);
+
+  useEffect(() => {
+    void loadPriorDeliveryNotes();
+  }, [loadPriorDeliveryNotes]);
+
+  // Auto-open the DN sheet pre-scoped to a call-off when navigated here with
+  // ?openDn=<callOffId>. Runs once on mount and clears the param.
+  const searchParams = useSearchParams();
+  const openDnParam = searchParams?.get("openDn") ?? null;
+  useEffect(() => {
+    if (!openDnParam) return;
+    if (!callOffs.some((c) => c.id === openDnParam)) return;
+    void openDeliveryNote(openDnParam);
+    // Strip the param so refresh doesn't keep re-opening
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openDn");
+      window.history.replaceState({}, "", url.toString());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDnParam]);
+
+  function computeDeliveryItems(
+    prior: typeof priorDeliveryNotes,
+    callOffId: string
+  ): Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL" | "DIRECT"; qtyDelivered: number; qtyTotal: number }> {
+    // If scoped to a call-off, only consider lines on that call-off, and use
+    // requestedQty as the universe; subtract only prior DNs scoped to this call-off.
+    const callOff = callOffId ? callOffs.find((c) => c.id === callOffId) : null;
+    const requestedByLine = new Map<string, number>();
+    if (callOff) {
+      for (const cl of callOff.lines) {
+        requestedByLine.set(
+          cl.ticketLineId,
+          (requestedByLine.get(cl.ticketLineId) ?? 0) + Number(cl.requestedQty)
+        );
+      }
+    }
+
+    const deliveredByLine = new Map<string, number>();
+    for (const dn of prior) {
+      if (callOffId && dn.callOffId !== callOffId) continue; // scoped: only count this call-off's DNs
+      for (const dl of dn.lines) {
+        deliveredByLine.set(
+          dl.ticketLineId,
+          (deliveredByLine.get(dl.ticketLineId) ?? 0) + Number(dl.qtyDelivered)
+        );
+      }
+    }
+
+    const items: Record<string, { status: "DELIVERED" | "BACK_ORDER" | "NOT_ORDERED" | "PARTIAL" | "DIRECT"; qtyDelivered: number; qtyTotal: number }> = {};
+    for (const l of orderedTicketLines) {
+      if (callOff && !requestedByLine.has(l.id)) continue; // not on this call-off
+      const universe = callOff ? (requestedByLine.get(l.id) ?? 0) : physicalQty(l);
+      const alreadyDelivered = deliveredByLine.get(l.id) ?? 0;
+      const remaining = Math.max(0, universe - alreadyDelivered);
+      if (remaining === 0) continue; // fully delivered already
+      if (l.status === "PARTIALLY_ORDERED") {
+        items[l.id] = { status: "BACK_ORDER", qtyDelivered: 0, qtyTotal: remaining };
+      } else if (
+        l.status === "ORDERED" || l.status === "FROM_STOCK" || l.status === "PARTIALLY_COSTED" ||
+        l.status === "FULLY_COSTED" || l.status === "INVOICED"
+      ) {
+        items[l.id] = { status: "DELIVERED", qtyDelivered: remaining, qtyTotal: remaining };
+      } else {
+        items[l.id] = { status: "NOT_ORDERED", qtyDelivered: 0, qtyTotal: remaining };
+      }
+    }
+    return items;
+  }
+
+  async function openDeliveryNote(scope: string = dnCallOffId) {
+    const prior = await loadPriorDeliveryNotes();
+    setDnCallOffId(scope);
+    setDeliveryItems(computeDeliveryItems(prior, scope));
     setDeliveryNoteOpen(true);
   }
 
-  function printDeliveryNote() {
-    const rows = ticketLines.map((line, i) => {
-      const item = deliveryItems[line.id] || { status: "DELIVERED", qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
+  function changeDnScope(scope: string) {
+    setDnCallOffId(scope);
+    setDeliveryItems(computeDeliveryItems(priorDeliveryNotes, scope));
+  }
+
+  // ── Procurement checklist (stock vs order) ──
+  function findStockMatch(line: TicketLineOption): { id: string; avail: number } | null {
+    if (!stockItems.length) return null;
+    const normLine = normalizeDesc(line.description);
+    const lineTokens = normLine.split(" ").filter((t) => t.length > 1);
+    let best: { id: string; avail: number } | null = null;
+    for (const si of stockItems) {
+      const avail = Number(si.qtyOnHand?.toString() || 0);
+      if (avail <= 0) continue;
+      const normStock = normalizeDesc(si.description);
+      const stockTokens = normStock.split(" ").filter((t) => t.length > 1);
+      const overlap = lineTokens.filter((t) => stockTokens.includes(t)).length;
+      const score = lineTokens.length > 0 ? overlap / lineTokens.length : 0;
+      if (score >= 0.7 || normLine.includes(normStock) || normStock.includes(normLine)) {
+        if (!best || avail > best.avail) best = { id: si.id, avail };
+      }
+    }
+    return best;
+  }
+
+  function computeProcItems(callOffId: string) {
+    const callOff = callOffId ? callOffs.find((c) => c.id === callOffId) : null;
+    const requestedByLine = new Map<string, number>();
+    if (callOff) {
+      for (const cl of callOff.lines) {
+        requestedByLine.set(cl.ticketLineId, (requestedByLine.get(cl.ticketLineId) ?? 0) + Number(cl.requestedQty));
+      }
+    }
+    const poLineIds = new Set(
+      procurementOrders.flatMap((po) => po.lines.map((l) => l.ticketLine?.id).filter(Boolean))
+    );
+    const items: Record<string, { action: "ORDER" | "SPLIT" | "STOCK" | "SKIP"; qtyTotal: number; qtyStock: number; stockItemId: string | null; stockAvail: number }> = {};
+    for (const l of orderedTicketLines) {
+      if (l.isBomParent) continue;
+      if (callOff && !requestedByLine.has(l.id)) continue;
+      const qtyTotal = callOff ? (requestedByLine.get(l.id) ?? 0) : physicalQty(l);
+      if (qtyTotal <= 0) continue;
+      const match = findStockMatch(l);
+      const alreadyHandled = poLineIds.has(l.id) || ["ORDERED", "FROM_STOCK", "INVOICED", "CLOSED"].includes(l.status);
+      items[l.id] = {
+        action: alreadyHandled ? "SKIP" : "ORDER",
+        qtyTotal,
+        qtyStock: match ? Math.min(match.avail, qtyTotal) : 0,
+        stockItemId: match?.id ?? null,
+        stockAvail: match?.avail ?? 0,
+      };
+    }
+    return items;
+  }
+
+  function openProcurement(scope?: string) {
+    const def = scope ?? ([...callOffs].reverse().find((c) => c.status === "OPEN")?.id ?? "");
+    setProcCallOffId(def);
+    setProcItems(computeProcItems(def));
+    setProcOpen(true);
+  }
+
+  function changeProcScope(scope: string) {
+    setProcCallOffId(scope);
+    setProcItems(computeProcItems(scope));
+  }
+
+  function procSplit(it: { action: string; qtyTotal: number; qtyStock: number }) {
+    const stock = it.action === "STOCK" ? it.qtyTotal : it.action === "SPLIT" ? Math.min(Math.max(0, it.qtyStock), it.qtyTotal) : 0;
+    const order = it.action === "ORDER" ? it.qtyTotal : it.action === "SPLIT" ? Math.max(0, it.qtyTotal - stock) : 0;
+    return { stock, order };
+  }
+
+  function printProcurement() {
+    const callOff = procCallOffId ? callOffs.find((c) => c.id === procCallOffId) : null;
+    const lines = orderedTicketLines.filter((l) => !l.isBomParent && procItems[l.id] && procItems[l.id].action !== "SKIP");
+    const bySupplier: Record<string, number> = {};
+    let totalStock = 0, totalOrder = 0;
+    const rows = lines.map((line) => {
+      const it = procItems[line.id];
+      const { stock, order } = procSplit(it);
+      totalStock += stock; totalOrder += order;
+      if (order > 0) { const k = line.supplierName || "(no supplier)"; bySupplier[k] = (bySupplier[k] || 0) + order; }
+      const label = it.action === "ORDER" ? "Order" : it.action === "STOCK" ? "Stock" : "Split";
+      const color = it.action === "ORDER" ? "#b45309" : it.action === "STOCK" ? "#047857" : "#1d4ed8";
+      return `<tr>
+        <td style="width:24px;text-align:center">☐</td>
+        <td>${line.description}${line.internalNotes ? `<div style="font-size:9px;color:#b45309">📝 ${line.internalNotes}</div>` : ""}</td>
+        <td style="text-align:right">${it.qtyTotal}</td>
+        <td>${line.unit}</td>
+        <td style="text-align:right;color:#047857">${stock || "—"}</td>
+        <td style="text-align:right;color:#b45309">${order || "—"}</td>
+        <td style="font-weight:700;color:${color}">${label}</td>
+        <td>${line.supplierName || "—"}</td>
+      </tr>`;
+    }).join("");
+    const supplierRows = Object.entries(bySupplier)
+      .sort((a, b) => b[1] - a[1])
+      .map(([s, q]) => `<tr><td>${s}</td><td style="text-align:right">${q}</td></tr>`).join("");
+    const dateStr = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:-apple-system,'Helvetica Neue',Arial,sans-serif; padding:30px 40px; font-size:12px; color:#000; }
+      h1 { font-size:18px; font-weight:800; } .sub { font-size:11px; color:#555; margin-top:2px; }
+      h2 { font-size:12px; text-transform:uppercase; letter-spacing:0.5px; margin-top:20px; }
+      hr { border:none; border-top:2px solid #000; margin:12px 0; }
+      .ref { font-size:13px; font-weight:600; margin-top:12px; }
+      .meta { font-size:11px; color:#555; margin-top:2px; margin-bottom:16px; }
+      table { width:100%; border-collapse:collapse; margin-top:8px; }
+      th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #000; font-weight:700; }
+      td { padding:5px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      .summary { margin-top:12px; font-size:11px; display:flex; gap:30px; }
+      @page { margin:15mm; }
+    </style></head><body>
+      <h1>Cromwell Plumbing Ltd</h1>
+      <div class="sub">Procurement Checklist</div>
+      <hr />
+      <div class="ref">${ticketTitle}</div>
+      <div class="meta">Date: ${dateStr}${callOff ? ` &nbsp;·&nbsp; Call-off <b>CO${callOff.coSeq ?? callOff.callOffNo}</b> (PO ${callOff.customerPO.poNo})` : (customerPONo ? ` &nbsp;·&nbsp; Customer PO: <b>${customerPONo}</b>` : "")}</div>
+      <table>
+        <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Stock</th><th style="text-align:right">Order</th><th>Action</th><th>Supplier</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="summary">
+        <div><b>Lines:</b> ${lines.length}</div>
+        <div><b>From stock:</b> ${totalStock}</div>
+        <div><b>To order:</b> ${totalOrder}</div>
+      </div>
+      ${supplierRows ? `<h2>Order by supplier</h2><table><thead><tr><th>Supplier</th><th style="text-align:right">Units to order</th></tr></thead><tbody>${supplierRows}</tbody></table>` : ""}
+    </body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+  }
+
+  async function submitProcurement() {
+    setProcSubmitting(true);
+    try {
+      const orderLines: Array<{ line: TicketLineOption; qty: number }> = [];
+      const stockAllocs: Array<{ line: TicketLineOption; stockItemId: string; qty: number }> = [];
+      for (const [lineId, it] of Object.entries(procItems)) {
+        const line = ticketLines.find((l) => l.id === lineId);
+        if (!line) continue;
+        if (it.action === "ORDER") {
+          orderLines.push({ line, qty: it.qtyTotal });
+        } else if (it.action === "STOCK" && it.stockItemId) {
+          stockAllocs.push({ line, stockItemId: it.stockItemId, qty: it.qtyTotal });
+        } else if (it.action === "SPLIT") {
+          const stockQty = Math.min(Math.max(0, it.qtyStock), it.qtyTotal);
+          const orderQty = it.qtyTotal - stockQty;
+          if (it.stockItemId && stockQty > 0) stockAllocs.push({ line, stockItemId: it.stockItemId, qty: stockQty });
+          if (orderQty > 0) orderLines.push({ line, qty: orderQty });
+        }
+        // SKIP -> nothing
+      }
+
+      // Order lines -> supplier POs grouped by supplier
+      const bySupplier: Record<string, Array<{ line: TicketLineOption; qty: number }>> = {};
+      for (const ol of orderLines) {
+        const key = ol.line.supplierName || "(no supplier)";
+        (bySupplier[key] ??= []).push(ol);
+      }
+      for (const [supplierName, lines] of Object.entries(bySupplier)) {
+        const sup = suppliers.find((s) => s.name.toLowerCase() === supplierName.toLowerCase());
+        const poNo = `PO-${Date.now()}-${supplierName.substring(0, 4).toUpperCase().replace(/\s/g, "")}`;
+        await fetch(`/api/tickets/${ticketId}/procurement-orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticketId,
+            supplierId: sup?.id || undefined,
+            poNo,
+            lines: lines.map(({ line, qty }) => ({
+              ticketLineId: line.id,
+              description: line.description,
+              qty,
+              unitCost: Number(line.expectedCostUnit?.toString() || 0),
+              lineTotal: qty * Number(line.expectedCostUnit?.toString() || 0),
+            })),
+          }),
+        });
+      }
+
+      // Stock allocations
+      for (const sa of stockAllocs) {
+        await fetch(`/api/stock/${sa.stockItemId}/use`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticketLineId: sa.line.id, qtyUsed: sa.qty }),
+        });
+      }
+
+      // Status: any ordered qty -> ORDERED; pure-stock -> FROM_STOCK
+      const orderedSet = new Set(orderLines.map((o) => o.line.id));
+      for (const id of orderedSet) {
+        await fetch(`/api/ticket-lines/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "ORDERED" }) });
+      }
+      for (const [lineId, it] of Object.entries(procItems)) {
+        if (it.action === "STOCK" && !orderedSet.has(lineId)) {
+          await fetch(`/api/ticket-lines/${lineId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "FROM_STOCK" }) });
+        }
+      }
+
+      setProcOpen(false);
+      router.refresh();
+    } finally {
+      setProcSubmitting(false);
+    }
+  }
+
+  async function printDeliveryNote() {
+    // Only lines actually in scope for this delivery (in deliveryItems). Lines
+    // fully delivered on prior DNs were dropped in openDeliveryNote().
+    const printable = orderedTicketLines.filter((l) => !l.isBomParent && deliveryItems[l.id]);
+    const statusOf = (l: TicketLineOption) => deliveryItems[l.id]?.status ?? "DELIVERED";
+    const physicalLines = printable.filter((l) => ["DELIVERED", "PARTIAL", "BACK_ORDER"].includes(statusOf(l)));
+    const directLines = printable.filter((l) => statusOf(l) === "DIRECT");
+
+    let deliveryNo: number | null = null;
+    const persistLines = physicalLines
+      .map((l) => {
+        const item = deliveryItems[l.id];
+        if (!item) return null;
+        const status = item.status as "DELIVERED" | "PARTIAL" | "BACK_ORDER";
+        return {
+          ticketLineId: l.id,
+          qtyDelivered: item.qtyDelivered,
+          qtyBackOrder: Math.max(0, item.qtyTotal - item.qtyDelivered),
+          status,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x);
+
+    if (persistLines.length > 0) {
+      try {
+        const res = await fetch(`/api/tickets/${ticketId}/delivery-notes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            deliveryDate,
+            lines: persistLines,
+            callOffId: dnCallOffId || undefined,
+          }),
+        });
+        if (res.ok) {
+          const saved = await res.json();
+          deliveryNo = saved.deliveryNo ?? null;
+        }
+      } catch {
+        // proceed with printing even if persistence fails
+      }
+    }
+
+    const dnCallOff = dnCallOffId ? callOffs.find((c) => c.id === dnCallOffId) : null;
+
+    const renderPhysicalRow = (line: TicketLineOption, prev: TicketLineOption | null) => {
+      const item = deliveryItems[line.id] || { status: "DELIVERED" as const, qtyDelivered: physicalQty(line), qtyTotal: physicalQty(line) };
       const backQty = item.qtyTotal - item.qtyDelivered;
-      const prevSection = i > 0 ? ticketLines[i - 1].sectionLabel : null;
+      const prevSection = prev?.sectionLabel ?? null;
       const sectionRow = line.sectionLabel && line.sectionLabel !== prevSection
         ? `<tr><td colspan="6" style="background:#eee;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:1px;padding:8px">${line.sectionLabel}</td></tr>`
         : "";
-
-      if (item.status === "NOT_ORDERED") return "";
-
-      const statusLabel = item.status === "DELIVERED" ? "✓ Delivered" :
-        item.status === "DIRECT" ? "↗ Direct from Supplier" :
-        item.status === "PARTIAL" ? `✓ ${item.qtyDelivered} delivered / ${backQty} back order` :
-        item.status === "BACK_ORDER" ? "⏳ Back Order" : "";
-      const color = item.status === "DELIVERED" ? "#000" : item.status === "DIRECT" ? "#3399FF" : item.status === "PARTIAL" ? "#FF6600" : "#FF6600";
-
-      return `${sectionRow}<tr>
-        <td style="width:24px;text-align:center">${item.status === "BACK_ORDER" ? "☐" : item.status === "DIRECT" ? "↗" : "☑"}</td>
-        <td>${line.description}</td>
+      const bomHeaderRow = line.parentLineId && line.parentDescription && (!prev || prev.parentLineId !== line.parentLineId)
+        ? `<tr><td colspan="6" style="background:#eef5ff;color:#1d4ed8;font-weight:700;font-size:10px;padding:6px 8px;border-top:1px solid #3399FF">BOM: ${line.parentDescription}${line.parentQty ? ` × ${line.parentQty}` : ""}</td></tr>`
+        : "";
+      const statusLabel = item.status === "DELIVERED" ? "✓ Delivered"
+        : item.status === "PARTIAL" ? `✓ ${item.qtyDelivered} delivered / ${backQty} back order`
+        : "⏳ Back Order";
+      const color = item.status === "DELIVERED" ? "#000" : "#FF6600";
+      const descCell = (line.parentLineId
+        ? `<span style="color:#3399FF;margin-right:6px">└</span>${line.description}`
+        : line.description)
+        + (line.substitutedFrom ? `<div style="font-size:9px;color:#7c3aed;font-weight:600">🔄 substitute for ${line.substitutedFrom}</div>` : "");
+      return `${sectionRow}${bomHeaderRow}<tr>
+        <td style="width:24px;text-align:center">${item.status === "BACK_ORDER" ? "☐" : "☑"}</td>
+        <td${line.parentLineId ? ' style="padding-left:18px"' : ""}>${descCell}</td>
         <td style="text-align:right">${item.qtyDelivered > 0 ? item.qtyDelivered : "—"}</td>
         <td style="text-align:right;color:#FF6600">${backQty > 0 ? backQty : ""}</td>
         <td>${line.unit}</td>
         <td style="font-size:10px;font-weight:bold;color:${color}">${statusLabel}</td>
       </tr>`;
-    }).join("");
+    };
 
-    const deliveredCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "DELIVERED").length;
-    const directCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "DIRECT").length;
-    const partialCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "PARTIAL").length;
-    const backOrderCount = ticketLines.filter((l) => deliveryItems[l.id]?.status === "BACK_ORDER").length;
+    const renderDirectRow = (line: TicketLineOption, prev: TicketLineOption | null) => {
+      const item = deliveryItems[line.id] || { status: "DIRECT" as const, qtyDelivered: physicalQty(line), qtyTotal: physicalQty(line) };
+      const prevSection = prev?.sectionLabel ?? null;
+      const sectionRow = line.sectionLabel && line.sectionLabel !== prevSection
+        ? `<tr><td colspan="5" style="background:#eee;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:1px;padding:8px">${line.sectionLabel}</td></tr>`
+        : "";
+      const bomHeaderRow = line.parentLineId && line.parentDescription && (!prev || prev.parentLineId !== line.parentLineId)
+        ? `<tr><td colspan="5" style="background:#eef5ff;color:#1d4ed8;font-weight:700;font-size:10px;padding:6px 8px;border-top:1px solid #3399FF">BOM: ${line.parentDescription}${line.parentQty ? ` × ${line.parentQty}` : ""}</td></tr>`
+        : "";
+      const descCell = (line.parentLineId
+        ? `<span style="color:#3399FF;margin-right:6px">└</span>${line.description}`
+        : line.description)
+        + (line.substitutedFrom ? `<div style="font-size:9px;color:#7c3aed;font-weight:600">🔄 substitute for ${line.substitutedFrom}</div>` : "");
+      return `${sectionRow}${bomHeaderRow}<tr>
+        <td style="width:24px;text-align:center;color:#3399FF">↗</td>
+        <td${line.parentLineId ? ' style="padding-left:18px"' : ""}>${descCell}</td>
+        <td style="text-align:right">${item.qtyTotal}</td>
+        <td>${line.unit}</td>
+        <td style="font-size:10px;font-weight:bold;color:#3399FF">${line.supplierName ? `↗ ${line.supplierName}` : "↗ Direct from supplier"}</td>
+      </tr>`;
+    };
+
+    const rows = physicalLines.map((line, i) => renderPhysicalRow(line, i > 0 ? physicalLines[i - 1] : null)).join("");
+    const directRows = directLines.map((line, i) => renderDirectRow(line, i > 0 ? directLines[i - 1] : null)).join("");
+
+    const deliveredCount = physicalLines.filter((l) => deliveryItems[l.id]?.status === "DELIVERED").length;
+    const directCount = directLines.length;
+    const partialCount = physicalLines.filter((l) => deliveryItems[l.id]?.status === "PARTIAL").length;
+    const backOrderCount = physicalLines.filter((l) => deliveryItems[l.id]?.status === "BACK_ORDER").length;
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -543,20 +976,102 @@ export function TicketProcurementTab({
       @page { margin:15mm; }
     </style></head><body>
       <h1>Cromwell Plumbing Ltd</h1>
-      <div class="sub">Delivery Note</div>
+      <div class="sub">Delivery Note${deliveryNo != null ? ` #${deliveryNo}` : ""}</div>
       <hr />
       <div class="ref">${ticketTitle}</div>
-      <div class="meta">Date: ${new Date(deliveryDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</div>
+      <div class="meta">Date: ${new Date(deliveryDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}${dnCallOff ? ` &nbsp;·&nbsp; Call-off <b>CO${dnCallOff.coSeq ?? dnCallOff.callOffNo}</b> (PO ${dnCallOff.customerPO.poNo})` : (customerPONo ? ` &nbsp;·&nbsp; Customer PO: <b>${customerPONo}</b>` : "")}</div>
+      ${physicalLines.length > 0 ? `
+      <div style="font-size:12px;font-weight:700;margin-top:8px;text-transform:uppercase;letter-spacing:0.5px">Delivered by Cromwell</div>
       <table>
         <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Delivered</th><th style="text-align:right;color:#FF6600">Back Order</th><th>Unit</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="summary">
         <div><b>Delivered:</b> ${deliveredCount}</div>
-        ${directCount > 0 ? `<div><b>Direct:</b> ${directCount}</div>` : ""}
         <div><b>Partial:</b> ${partialCount}</div>
         <div><b>Back Order:</b> ${backOrderCount}</div>
-        <div><b>Total Lines:</b> ${ticketLines.length}</div>
+        <div><b>Total Lines:</b> ${physicalLines.length}</div>
+      </div>
+      <div class="sig">
+        <div class="sig-box">Received By (Print Name)</div>
+        <div class="sig-box">Signature</div>
+        <div class="sig-box">Date</div>
+      </div>` : ""}
+      ${directLines.length > 0 ? `
+      <div style="margin-top:${physicalLines.length > 0 ? "40px" : "8px"};background:#eef5ff;color:#1d4ed8;padding:8px 10px;font-weight:700;font-size:11px">
+        ↗ Direct from supplier — shipped separately, not part of this Cromwell delivery
+      </div>
+      <table>
+        <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Qty</th><th>Unit</th><th>Supplier</th></tr></thead>
+        <tbody>${directRows}</tbody>
+      </table>
+      <div class="summary"><div><b>Direct lines:</b> ${directCount}</div></div>` : ""}
+    </body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+    if (deliveryNo != null) {
+      setDeliveryNoteOpen(false);
+      void loadPriorDeliveryNotes();
+      router.refresh();
+    }
+  }
+
+  function reprintDeliveryNote(dn: (typeof priorDeliveryNotes)[number]) {
+    const lineById = new Map(ticketLines.map((l) => [l.id, l] as const));
+    const dateStr = new Date(dn.deliveryDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    const rowsHtml = dn.lines.map((dl) => {
+      const tl = lineById.get(dl.ticketLineId);
+      const desc = tl?.description ?? "(line removed)";
+      const unit = tl?.unit ?? "EA";
+      const qd = Number(dl.qtyDelivered);
+      const bo = Number(dl.qtyBackOrder);
+      const statusLabel = dl.status === "DELIVERED" ? "✓ Delivered"
+        : dl.status === "PARTIAL" ? `✓ ${qd} delivered / ${bo} back order`
+        : "⏳ Back Order";
+      const color = dl.status === "DELIVERED" ? "#000" : "#FF6600";
+      return `<tr>
+        <td style="width:24px;text-align:center">${dl.status === "BACK_ORDER" ? "☐" : "☑"}</td>
+        <td>${desc}${tl?.substitutedFrom ? `<div style="font-size:9px;color:#7c3aed;font-weight:600">🔄 substitute for ${tl.substitutedFrom}</div>` : ""}${dl.note ? `<div style="font-size:9px;color:#666;font-style:italic;margin-top:1px">${dl.note}</div>` : ""}</td>
+        <td style="text-align:right">${qd > 0 ? qd : "—"}</td>
+        <td style="text-align:right;color:#FF6600">${bo > 0 ? bo : ""}</td>
+        <td>${unit}</td>
+        <td style="font-size:10px;font-weight:bold;color:${color}">${statusLabel}</td>
+      </tr>`;
+    }).join("");
+    const deliveredCount = dn.lines.filter((l) => l.status === "DELIVERED").length;
+    const partialCount = dn.lines.filter((l) => l.status === "PARTIAL").length;
+    const backOrderCount = dn.lines.filter((l) => l.status === "BACK_ORDER").length;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:-apple-system,'Helvetica Neue',Arial,sans-serif; padding:30px 40px; font-size:12px; color:#000; }
+      h1 { font-size:18px; font-weight:800; } .sub { font-size:11px; color:#555; margin-top:2px; }
+      hr { border:none; border-top:2px solid #000; margin:12px 0; }
+      .ref { font-size:13px; font-weight:600; margin-top:12px; }
+      .meta { font-size:11px; color:#555; margin-top:2px; margin-bottom:16px; }
+      table { width:100%; border-collapse:collapse; margin-top:8px; }
+      th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #000; font-weight:700; }
+      td { padding:5px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      .sig { margin-top:40px; display:flex; gap:60px; } .sig-box { border-top:1px solid #000; padding-top:4px; width:200px; font-size:10px; color:#555; }
+      .summary { margin-top:12px; font-size:11px; display:flex; gap:30px; }
+      @page { margin:15mm; }
+    </style></head><body>
+      <h1>Cromwell Plumbing Ltd</h1>
+      <div class="sub">Delivery Note #${dn.deliveryNo}</div>
+      <hr />
+      <div class="ref">${ticketTitle}</div>
+      <div class="meta">Date: ${dateStr}${customerPONo ? ` &nbsp;·&nbsp; Customer PO: <b>${customerPONo}</b>` : ""}</div>
+      ${dn.notes ? `<div style="font-size:11px;margin-top:8px;padding:8px 10px;border-left:3px solid #FF6600;background:#FFF7F0"><b>Notes:</b><br>${dn.notes.replace(/\n/g, "<br>")}</div>` : ""}
+      <div style="font-size:12px;font-weight:700;margin-top:8px;text-transform:uppercase;letter-spacing:0.5px">Delivered by Cromwell</div>
+      <table>
+        <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Delivered</th><th style="text-align:right;color:#FF6600">Back Order</th><th>Unit</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div class="summary">
+        <div><b>Delivered:</b> ${deliveredCount}</div>
+        <div><b>Partial:</b> ${partialCount}</div>
+        <div><b>Back Order:</b> ${backOrderCount}</div>
+        <div><b>Total Lines:</b> ${dn.lines.length}</div>
       </div>
       <div class="sig">
         <div class="sig-box">Received By (Print Name)</div>
@@ -576,7 +1091,7 @@ export function TicketProcurementTab({
         : "";
       return `${sectionRow}<tr>
         <td style="text-align:center;width:30px"><input type="checkbox" style="width:14px;height:14px" /></td>
-        <td>${line.description}</td>
+        <td>${line.description}${line.internalNotes ? `<div style="font-size:9px;color:#b45309">📝 ${line.internalNotes}</div>` : ""}</td>
         <td style="text-align:right;white-space:nowrap">${Number(line.qty?.toString() || 1)}</td>
         <td>${line.unit}</td>
         <td style="text-align:right;white-space:nowrap">${dec(line.expectedCostUnit)}</td>
@@ -711,9 +1226,62 @@ export function TicketProcurementTab({
     <div className="space-y-6">
 
       {/* Purchase Checklist */}
+      {/* Prior Delivery Notes — history list */}
+      {priorDeliveryNotes.length > 0 && (
+        <div className="border border-[#2A2A2A] bg-[#0A0A0A] mb-2">
+          <div className="px-3 py-2 text-[10px] uppercase tracking-widest text-[#888888] bb-mono border-b border-[#2A2A2A]">
+            Delivery Notes ({priorDeliveryNotes.length})
+          </div>
+          <table className="w-full text-[11px] bb-mono">
+            <thead className="text-[#888888] uppercase">
+              <tr>
+                <th className="text-left px-3 py-1.5">#</th>
+                <th className="text-left px-3 py-1.5">Date</th>
+                <th className="text-right px-3 py-1.5">Delivered</th>
+                <th className="text-right px-3 py-1.5">Partial</th>
+                <th className="text-right px-3 py-1.5">Back Order</th>
+                <th className="text-right px-3 py-1.5">Lines</th>
+                <th className="px-3 py-1.5"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {priorDeliveryNotes.map((dn) => {
+                const delivered = dn.lines.filter((l) => l.status === "DELIVERED").length;
+                const partial = dn.lines.filter((l) => l.status === "PARTIAL").length;
+                const backOrder = dn.lines.filter((l) => l.status === "BACK_ORDER").length;
+                return (
+                  <tr key={dn.id} className="border-t border-[#222222]">
+                    <td className="px-3 py-1.5 text-[#CCCCCC]">DN-{dn.deliveryNo}</td>
+                    <td className="px-3 py-1.5 text-[#CCCCCC]">
+                      {new Date(dn.deliveryDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#00CC66]">{delivered}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#FF9900]">{partial || ""}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#FF6600]">{backOrder || ""}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#888888]">{dn.lines.length}</td>
+                    <td className="px-3 py-1.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => reprintDeliveryNote(dn)}
+                        className="text-[10px] text-[#FF6600] hover:underline bb-mono"
+                      >
+                        REPRINT
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Delivery Note — always available */}
-      <div className="flex justify-end mb-2">
-        <Button size="sm" variant="outline" onClick={openDeliveryNote}>
+      <div className="flex justify-end gap-2 mb-2">
+        <Button size="sm" variant="outline" onClick={() => openProcurement()}>
+          Procurement
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => void openDeliveryNote()}>
           Delivery Note
         </Button>
       </div>
@@ -725,7 +1293,7 @@ export function TicketProcurementTab({
             <SheetTitle>Delivery Note</SheetTitle>
             <SheetDescription>Mark each item as delivered or back order, then print.</SheetDescription>
           </SheetHeader>
-          <div className="flex items-center gap-2 px-4 mb-3">
+          <div className="flex items-center gap-2 px-4 mb-3 flex-wrap">
             <Label className="text-xs text-[#888888]">Delivery Date:</Label>
             <Input
               type="date"
@@ -733,20 +1301,62 @@ export function TicketProcurementTab({
               onChange={(e) => setDeliveryDate(e.target.value)}
               className="w-40 h-7 text-xs"
             />
+            {callOffs.length > 0 && (
+              <>
+                <Label className="text-xs text-[#888888] ml-2">Scope:</Label>
+                <select
+                  value={dnCallOffId}
+                  onChange={(e) => changeDnScope(e.target.value)}
+                  className="h-7 text-xs rounded border bg-background px-2"
+                >
+                  <option value="">All ticket lines</option>
+                  {callOffs.map((co) => (
+                    <option key={co.id} value={co.id}>
+                      Call-off CO{co.coSeq ?? co.callOffNo} — PO {co.customerPO.poNo} ({co.status})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
+          {priorDeliveryNotes.length > 0 && (
+            <div className="px-4 mb-2 text-[10px] text-[#888888]">
+              {dnCallOffId
+                ? (() => {
+                    const c = priorDeliveryNotes.filter((dn) => dn.callOffId === dnCallOffId).length;
+                    return c === 0
+                      ? "No prior delivery notes on this call-off."
+                      : `${c} prior delivery note${c === 1 ? "" : "s"} on this call-off — only outstanding qty is shown below.`;
+                  })()
+                : `${priorDeliveryNotes.length} prior delivery note${priorDeliveryNotes.length === 1 ? "" : "s"} on this ticket — only outstanding qty is shown below.`}
+            </div>
+          )}
           <div className="flex flex-col gap-1 px-4 flex-1 overflow-y-auto max-h-[70vh]">
-            {ticketLines.map((line) => {
-              const item = deliveryItems[line.id] || { status: "DELIVERED", qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
+            {(() => {
+              const sheetLines = orderedTicketLines.filter((l) => !l.isBomParent && deliveryItems[l.id]);
+              if (sheetLines.length === 0) {
+                return <div className="text-xs text-[#888888] py-6 text-center">All ordered lines fully delivered.</div>;
+              }
+              return sheetLines.map((line, idx) => {
+              const prev = idx > 0 ? sheetLines[idx - 1] : null;
+              const showBomHeader = line.parentLineId && line.parentDescription && (!prev || prev.parentLineId !== line.parentLineId);
+              const item = deliveryItems[line.id] || { status: "DELIVERED" as const, qtyDelivered: physicalQty(line), qtyTotal: physicalQty(line) };
               const bgColor = item.status === "DELIVERED" ? "bg-[#00CC66]/10 border-[#00CC66]/30"
                 : item.status === "DIRECT" ? "bg-[#3399FF]/10 border-[#3399FF]/30"
                 : item.status === "PARTIAL" ? "bg-[#FF9900]/10 border-[#FF9900]/30"
                 : item.status === "BACK_ORDER" ? "bg-[#FF3333]/10 border-[#FF3333]/30"
                 : "bg-[#333333]/10 border-[#333333] opacity-50";
               return (
-                <div key={line.id} className={`p-2 border ${bgColor}`}>
-                  <div className="flex items-center gap-1 mb-1">
-                    <span className="text-xs flex-1 truncate font-medium">{line.description}</span>
-                    <span className="text-[10px] text-[#888888] tabular-nums whitespace-nowrap">{item.qtyTotal} {line.unit}</span>
+                <React.Fragment key={line.id}>
+                  {showBomHeader && (
+                    <div className="text-[10px] uppercase tracking-widest font-bold text-[#3399FF] mt-2 px-1">
+                      BOM: {line.parentDescription}{line.parentQty ? ` × ${line.parentQty.toString()}` : ""}
+                    </div>
+                  )}
+                <div className={`p-2 border ${bgColor}${line.parentLineId ? " ml-3" : ""}`}>
+                  <div className="flex items-start gap-1 mb-1">
+                    <span className="text-xs flex-1 font-medium">{line.description}</span>
+                    <span className="text-[10px] text-[#888888] tabular-nums whitespace-nowrap flex-shrink-0">{item.qtyTotal} {line.unit}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button size="sm" variant={item.status === "DELIVERED" ? "default" : "outline"}
@@ -780,21 +1390,140 @@ export function TicketProcurementTab({
                     )}
                   </div>
                 </div>
+                </React.Fragment>
               );
-            })}
+              });
+            })()}
           </div>
           <SheetFooter>
             <div className="flex gap-2 px-4">
               <Button variant="outline" size="sm" onClick={() => {
-                const items: typeof deliveryItems = {};
-                ticketLines.forEach((l) => {
-                  const qty = Number(l.qty?.toString() || 0);
-                  items[l.id] = { status: "DELIVERED", qtyDelivered: qty, qtyTotal: qty };
+                setDeliveryItems((prev) => {
+                  const next: typeof deliveryItems = {};
+                  for (const [lineId, item] of Object.entries(prev)) {
+                    next[lineId] = { ...item, status: "DELIVERED", qtyDelivered: item.qtyTotal };
+                  }
+                  return next;
                 });
-                setDeliveryItems(items);
               }}>All Delivered</Button>
               <Button onClick={printDeliveryNote} className="bg-[#FF6600] text-black hover:bg-[#CC5500]">
                 Print Delivery Note
+              </Button>
+            </div>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* Interactive Procurement Checklist Sheet */}
+      <Sheet open={procOpen} onOpenChange={setProcOpen}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle>Procurement checklist</SheetTitle>
+            <SheetDescription>Mark each item as order, stock, or split, then raise POs.</SheetDescription>
+          </SheetHeader>
+          <div className="flex items-center gap-2 px-4 mb-3 flex-wrap">
+            {callOffs.length > 0 && (
+              <>
+                <Label className="text-xs text-[#888888]">Scope:</Label>
+                <select
+                  value={procCallOffId}
+                  onChange={(e) => changeProcScope(e.target.value)}
+                  className="h-7 text-xs rounded border bg-background px-2"
+                >
+                  <option value="">All ticket lines</option>
+                  {callOffs.map((co) => (
+                    <option key={co.id} value={co.id}>
+                      Call-off CO{co.coSeq ?? co.callOffNo} — PO {co.customerPO.poNo} ({co.status})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+          {(() => {
+            const its = Object.values(procItems);
+            const orderCount = its.filter((i) => i.action === "ORDER" || i.action === "SPLIT").length;
+            const stockUnits = its.reduce((s, i) => s + (i.action === "STOCK" ? i.qtyTotal : i.action === "SPLIT" ? Math.min(i.qtyStock, i.qtyTotal) : 0), 0);
+            return (
+              <div className="px-4 mb-2 text-[10px] text-[#888888]">
+                {orderCount} line{orderCount === 1 ? "" : "s"} to order · {stockUnits} unit{stockUnits === 1 ? "" : "s"} from stock
+              </div>
+            );
+          })()}
+          <div className="flex flex-col gap-1 px-4 flex-1 overflow-y-auto max-h-[70vh]">
+            {(() => {
+              const sheetLines = orderedTicketLines.filter((l) => !l.isBomParent && procItems[l.id]);
+              if (sheetLines.length === 0) {
+                return <div className="text-xs text-[#888888] py-6 text-center">No lines to procure for this scope.</div>;
+              }
+              return sheetLines.map((line) => {
+                const item = procItems[line.id];
+                const bgColor = item.action === "ORDER" ? "bg-[#FF9900]/10 border-[#FF9900]/30"
+                  : item.action === "STOCK" ? "bg-[#00CC66]/10 border-[#00CC66]/30"
+                  : item.action === "SPLIT" ? "bg-[#3399FF]/10 border-[#3399FF]/30"
+                  : "bg-[#333333]/10 border-[#333333] opacity-50";
+                const set = (patch: Partial<typeof item>) =>
+                  setProcItems((prev) => ({ ...prev, [line.id]: { ...prev[line.id], ...patch } }));
+                return (
+                  <div key={line.id} className={`p-2 border ${bgColor}`}>
+                    <div className="flex items-center gap-1 mb-1">
+                      <span className="text-xs flex-1 truncate font-medium">{line.description}</span>
+                      <span className="text-[10px] text-[#888888] tabular-nums whitespace-nowrap">{item.qtyTotal} {line.unit}</span>
+                      {item.stockAvail > 0 && (
+                        <span className="text-[9px] text-[#00CC66] whitespace-nowrap">{item.stockAvail} stock</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant={item.action === "ORDER" ? "default" : "outline"}
+                        className={`h-5 text-[9px] px-2 ${item.action === "ORDER" ? "bg-[#FF9900] text-black" : ""}`}
+                        onClick={() => set({ action: "ORDER" })}
+                      >Order</Button>
+                      <Button size="sm" variant={item.action === "SPLIT" ? "default" : "outline"}
+                        className={`h-5 text-[9px] px-2 ${item.action === "SPLIT" ? "bg-[#3399FF] text-white" : ""}`}
+                        onClick={() => set({ action: "SPLIT", qtyStock: item.qtyStock > 0 && item.qtyStock < item.qtyTotal ? item.qtyStock : (item.stockAvail > 0 ? Math.min(item.stockAvail, item.qtyTotal - 1) : Math.max(1, Math.floor(item.qtyTotal / 2))) })}
+                      >Split</Button>
+                      <Button size="sm" variant={item.action === "STOCK" ? "default" : "outline"}
+                        className={`h-5 text-[9px] px-2 ${item.action === "STOCK" ? "bg-[#00CC66] text-black" : ""}`}
+                        onClick={() => set({ action: "STOCK" })}
+                      >Stock</Button>
+                      <Button size="sm" variant={item.action === "SKIP" ? "default" : "outline"}
+                        className={`h-5 text-[9px] px-2 ${item.action === "SKIP" ? "bg-[#666666] text-white" : ""}`}
+                        onClick={() => set({ action: "SKIP" })}
+                      >Skip</Button>
+                      {item.action === "SPLIT" && (
+                        <>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={item.qtyTotal - 1}
+                            value={item.qtyStock}
+                            onChange={(e) => set({ qtyStock: Math.max(0, Math.min(Number(e.target.value) || 0, item.qtyTotal)) })}
+                            className="h-5 w-16 text-[10px] text-center px-1"
+                            title="Qty from stock — rest is ordered"
+                          />
+                          <span className="text-[9px] text-[#3399FF] whitespace-nowrap">
+                            {Math.min(item.qtyStock, item.qtyTotal)} stk / {Math.max(0, item.qtyTotal - Math.min(item.qtyStock, item.qtyTotal))} ord
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+          <SheetFooter>
+            <div className="flex gap-2 px-4">
+              <Button variant="outline" size="sm" onClick={() =>
+                setProcItems((prev) => {
+                  const next: typeof prev = {};
+                  for (const [id, it] of Object.entries(prev)) next[id] = { ...it, action: "ORDER" };
+                  return next;
+                })
+              }>All Order</Button>
+              <Button variant="outline" size="sm" onClick={printProcurement}>Print</Button>
+              <Button onClick={() => void submitProcurement()} disabled={procSubmitting} className="bg-[#FF6600] text-black hover:bg-[#CC5500]">
+                {procSubmitting ? "Working…" : "Raise POs & Allocate"}
               </Button>
             </div>
           </SheetFooter>
@@ -1406,6 +2135,13 @@ export function TicketProcurementTab({
             Orders ({procurementOrders.length})
           </h3>
           <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => router.push(`/tickets/${ticketId}/call-offs`)}
+            >
+              <Package className="size-4 mr-1" /> Call-off tracker
+            </Button>
             <Sheet open={ackSheetOpen} onOpenChange={setAckSheetOpen}>
               <SheetTrigger
                 render={
@@ -1668,6 +2404,48 @@ export function TicketProcurementTab({
               {editPOId && (() => {
                 const po = procurementOrders.find((p) => p.id === editPOId);
                 if (!po) return null;
+                if (editLineItems.length === 0) {
+                  setEditLineItems(po.lines.map(l => ({
+                    id: l.id,
+                    description: l.description,
+                    qty: String(l.qty || 0),
+                    unitCost: String(l.unitCost || 0),
+                    lineTotal: String(l.lineTotal || 0),
+                  })));
+                }
+                const updateLineItem = (idx: number, field: string, value: string) => {
+                  setEditLineItems((prev) => {
+                    const next = [...prev];
+                    next[idx] = { ...next[idx], [field]: value };
+                    if (field === "qty" || field === "unitCost") {
+                      const q = Number(next[idx].qty) || 0;
+                      const u = Number(next[idx].unitCost) || 0;
+                      next[idx].lineTotal = (q * u).toFixed(2);
+                    }
+                    return next;
+                  });
+                };
+                const handleSaveLines = async () => {
+                  setEditPOSubmitting(true);
+                  try {
+                    await Promise.all(editLineItems.map(line =>
+                      fetch(`/api/procurement-order-lines/${line.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          unitCost: Number(line.unitCost) || 0,
+                          lineTotal: Number(line.lineTotal) || 0,
+                          supplierCode: line.supplierCode || undefined,
+                        }),
+                      })
+                    ));
+                    setEditPOId(null);
+                    setEditLineItems([]);
+                    router.refresh();
+                  } finally {
+                    setEditPOSubmitting(false);
+                  }
+                };
                 return (
                   <form onSubmit={handleEditPO} className="flex flex-col gap-4 px-4 flex-1 overflow-y-auto">
                     <div className="space-y-1.5">
@@ -1696,9 +2474,66 @@ export function TicketProcurementTab({
                       <Label>Re-upload Document</Label>
                       <Input type="file" accept=".pdf,.png,.jpg,.jpeg" className="text-xs" />
                     </div>
-                    <SheetFooter>
+                    <div className="border-t border-[#333333] pt-4 mt-4">
+                      <Label className="text-[11px] uppercase tracking-widest text-[#FF6600]">Line Items</Label>
+                      <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+                        {editLineItems.map((line, idx) => (
+                          <div key={line.id} className="border border-[#333333] bg-[#111111] p-2 space-y-1.5">
+                            <div className="text-xs font-medium text-[#CCCCCC]">{line.description}</div>
+                            <div className="grid grid-cols-3 gap-2 text-xs">
+                              <div className="space-y-0.5">
+                                <Label className="text-[10px]">Qty</Label>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  value={line.qty}
+                                  onChange={(e) => updateLineItem(idx, "qty", e.target.value)}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <Label className="text-[10px]">Unit Cost</Label>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  value={line.unitCost}
+                                  onChange={(e) => updateLineItem(idx, "unitCost", e.target.value)}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <Label className="text-[10px]">Line Total</Label>
+                                <Input
+                                  type="text"
+                                  value={line.lineTotal}
+                                  disabled
+                                  className="h-7 text-xs bg-[#222222]"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-0.5">
+                              <Label className="text-[10px]">Supplier Code (Optional)</Label>
+                              <Input
+                                type="text"
+                                placeholder="e.g. SKU-123"
+                                value={line.supplierCode || ""}
+                                onChange={(e) => updateLineItem(idx, "supplierCode", e.target.value)}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <SheetFooter className="flex gap-2">
+                      <Button type="button" variant="outline" onClick={() => { setEditPOId(null); setEditLineItems([]); }} disabled={editPOSubmitting}>
+                        Cancel
+                      </Button>
+                      <Button type="button" onClick={handleSaveLines} disabled={editPOSubmitting} className="bg-[#00CC66] text-black hover:bg-[#00AA55]">
+                        {editPOSubmitting ? "Saving..." : "Save Lines"}
+                      </Button>
                       <Button type="submit" disabled={editPOSubmitting} className="bg-[#FF6600] text-black hover:bg-[#CC5500]">
-                        {editPOSubmitting ? "Saving..." : "Save Changes"}
+                        {editPOSubmitting ? "Saving..." : "Save PO Details"}
                       </Button>
                     </SheetFooter>
                   </form>

@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { execSync } from "child_process";
 import { parseAcknowledgementText } from "@/lib/procurement/parse-acknowledgement";
+import { parseAckWithAI } from "@/lib/procurement/ai-ack-parser";
 
 // Import pdf-parse directly to avoid test-file-read on module load
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -83,9 +84,28 @@ export async function POST(
     }
     const supplierId = supplier.id;
 
-    // Parse line items from extracted text
+    // Parse line items from extracted text — template parsers first, AI fallback
     let parsedLineCount = 0;
-    const parsed = extractedText ? parseAcknowledgementText(extractedText) : null;
+    let parsed: { lines: Array<{ description: string; qty: number; unitCost: number; lineTotal: number }>; totalNet: number | null } | null = null;
+    if (extractedText) {
+      const templateParsed = parseAcknowledgementText(extractedText);
+      if (templateParsed.lines.length > 0) {
+        parsed = templateParsed;
+      } else {
+        const ai = await parseAckWithAI(extractedText);
+        if (ai && ai.lines.length > 0) {
+          parsed = {
+            lines: ai.lines.map((l) => ({
+              description: [l.productCode, l.description].filter(Boolean).join(" ").trim(),
+              qty: l.qty,
+              unitCost: l.unitPrice,
+              lineTotal: l.lineTotal,
+            })),
+            totalNet: ai.totalNet,
+          };
+        }
+      }
+    }
 
     // Create procurement order
     const po = await prisma.procurementOrder.create({

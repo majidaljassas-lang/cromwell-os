@@ -16,13 +16,16 @@ export async function POST(request: Request) {
   }
 
   let updated = 0;
+  let skipped = 0;
   for (const id of lineIds) {
-    const line = await prisma.ticketLine.findUnique({ where: { id }, select: { qty: true } });
+    const line = await prisma.ticketLine.findUnique({ where: { id }, select: { qty: true, priceOverride: true } });
     if (!line) continue;
 
     const qty = Number(line.qty);
     const data: Record<string, unknown> = {};
-    if (expectedCostUnit !== undefined) {
+    // Locked lines keep their cost/supplier; sale-side fields still cascade.
+    const allowPricing = !line.priceOverride;
+    if (allowPricing && expectedCostUnit !== undefined) {
       data.expectedCostUnit = expectedCostUnit;
       data.expectedCostTotal = Math.round(expectedCostUnit * qty * 100) / 100;
     }
@@ -30,13 +33,15 @@ export async function POST(request: Request) {
       data.actualSaleUnit = actualSaleUnit;
       data.actualSaleTotal = Math.round(actualSaleUnit * qty * 100) / 100;
     }
-    if (supplierName !== undefined) data.supplierName = supplierName;
+    if (allowPricing && supplierName !== undefined) data.supplierName = supplierName;
 
     if (Object.keys(data).length > 0) {
       await prisma.ticketLine.update({ where: { id }, data });
       updated++;
+    } else if (line.priceOverride && (expectedCostUnit !== undefined || supplierName !== undefined)) {
+      skipped++;
     }
   }
 
-  return Response.json({ ok: true, updated });
+  return Response.json({ ok: true, updated, skipped });
 }

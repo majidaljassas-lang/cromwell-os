@@ -244,7 +244,7 @@ export function StockTable({ items }: { items: StockItem[] }) {
     router.refresh();
   }
 
-  const unitOptions = ["EA", "M", "LENGTH", "PACK", "LOT", "SET"];
+  const unitOptions = ["EA", "M", "LENGTH", "PACK", "LOT", "SET", "TONNE"];
   const sourceOptions = [
     { value: "RETURN", label: "Return" },
     { value: "MOQ_EXCESS", label: "MOQ Excess" },

@@ -18,6 +18,7 @@
  *   - updates SupplierBill.status to "paid" or "partially_paid" based on remaining balance
  */
 import { prisma } from "@/lib/prisma";
+import { postPaymentMade } from "@/lib/finance/gl-posting";
 
 export async function GET() {
   const payments = await prisma.paymentMade.findMany({
@@ -80,6 +81,8 @@ export async function POST(request: Request) {
         const status = paid + 0.005 >= totalCost ? "paid" : paid > 0 ? "partially_paid" : bill.status;
         await tx.supplierBill.update({ where: { id: billId }, data: { status } });
       }
+      // Post DR Trade Creditors · CR Bank. Sets PaymentMade.journalEntryId.
+      await postPaymentMade(pm.id, "1000", tx);
       return pm;
     });
 

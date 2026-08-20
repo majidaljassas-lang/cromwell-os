@@ -30,13 +30,17 @@ export default async function CashSalesPage() {
     orderBy: { receivedAt: "desc" },
   });
   const tickets = await prisma.ticket.findMany({ select: { id: true, title: true }, orderBy: { title: "asc" } });
+  const customers = await prisma.customer.findMany({
+    select: { id: true, name: true, isCashCustomer: true, isBillingEntity: true },
+    orderBy: { name: "asc" },
+  });
 
   const s = (v: unknown) => JSON.parse(JSON.stringify(v));
 
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-sm font-bold tracking-[0.3em] text-[#FF6600] uppercase bb-mono border-b border-[#333333] pb-2">CASH SALES</h1>
-      <CashSalesView cashSales={s(cashSales)} tickets={s(tickets)} />
+      <CashSalesView cashSales={s(cashSales)} tickets={s(tickets)} customers={s(customers)} />
     </div>
   );
 }

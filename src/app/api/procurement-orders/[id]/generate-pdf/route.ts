@@ -88,12 +88,39 @@ function buildHtml(po: any, expressCharge: number, fontBase64: string): string {
   </div>
   <div style="text-align:right;font-size:11px;line-height:1.8">
     <div><span style="color:#888">Date:</span> <strong>${dateStr}</strong></div>
-    <div><span style="color:#888">Delivery:</span> <strong>${deliveryDateStr}</strong></div>
+    <div><span style="color:#888">Required by:</span> <strong>${deliveryDateStr}</strong></div>
     ${po.supplierRef ? `<div><span style="color:#888">Supplier Ref:</span> <strong>${po.supplierRef}</strong></div>` : ""}
-    ${po.ticket?.title ? `<div><span style="color:#888">Job:</span> <strong>${po.ticket.title.substring(0, 50)}</strong></div>` : ""}
-    ${po.ticket?.site?.siteName ? `<div><span style="color:#888">Site:</span> <strong>${po.ticket.site.siteName}</strong></div>` : ""}
+    ${po.ticket?.title ? `<div><span style="color:#888">Job:</span> <strong>${po.ticket.title.substring(0, 60)}</strong></div>` : ""}
   </div>
 </div>
+
+<!-- Deliver To block -->
+${(() => {
+  const site = po.ticket?.site;
+  if (!site) return "";
+  const addrLines = [
+    site.siteName,
+    site.addressLine1,
+    site.addressLine2,
+    site.city,
+    site.postcode,
+  ].filter(Boolean);
+  const contactLines = po.siteContact
+    ? String(po.siteContact).split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean)
+    : [];
+  return `<div style="display:flex;gap:24px;padding:12px 14px;border:1px solid #ddd;border-left:3px solid #FF6600;background:#fafafa;margin-bottom:16px">
+    <div style="flex:1">
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:#999;margin-bottom:4px">Deliver To</div>
+      ${addrLines.map((l: string) => `<div style="font-size:11px;color:#222;font-weight:${l === site.siteName ? "700" : "400"}">${l}</div>`).join("")}
+    </div>
+    <div style="flex:1">
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:#999;margin-bottom:4px">Site Contact</div>
+      ${contactLines.length > 0
+        ? contactLines.map((l: string) => `<div style="font-size:11px;color:#222">${l}</div>`).join("")
+        : `<div style="font-size:11px;color:#888;font-style:italic">TBC</div>`}
+    </div>
+  </div>`;
+})()}
 
 <!-- Lines table -->
 <table>
@@ -137,8 +164,8 @@ function buildHtml(po: any, expressCharge: number, fontBase64: string): string {
 
 <!-- Notes -->
 <div style="border-top:1px solid #ddd;padding-top:14px;margin-top:30px;font-size:10px;color:#555;line-height:1.6">
-  <strong style="color:#333">Delivery Address:</strong> ${po.ticket?.site?.siteName || "TBC"}<br>
-  <strong style="color:#333">Confirmation:</strong> Please acknowledge this order and confirm delivery date.<br>
+  <strong style="color:#333">Confirmation:</strong> Please acknowledge this order and confirm the delivery slot.<br>
+  <strong style="color:#333">Delivery:</strong> Coordinate access with the site contact above before dispatch.<br>
   <strong style="color:#333">Invoicing:</strong> Please reference PO ${po.poNo} on all invoices and delivery notes.
 </div>
 
@@ -161,7 +188,12 @@ export async function POST(
     // Use raw queries to bypass Prisma's null validation on poNo
     const poRows = await prisma.$queryRaw<any[]>`
       SELECT po.*, s.name as supplier_name, s.email as supplier_email, s.phone as supplier_phone,
-             t.title as ticket_title, st."siteName" as site_name
+             t.title as ticket_title,
+             st."siteName" as site_name,
+             st."addressLine1" as site_addr1,
+             st."addressLine2" as site_addr2,
+             st.city as site_city,
+             st.postcode as site_postcode
       FROM "ProcurementOrder" po
       LEFT JOIN "Supplier" s ON s.id = po."supplierId"
       LEFT JOIN "Ticket" t ON t.id = po."ticketId"
@@ -181,7 +213,16 @@ export async function POST(
       poNo: poRow.poNo || `PO-${id.substring(0, 8)}`,
       lines: lineRows,
       supplier: poRow.supplier_name ? { name: poRow.supplier_name, email: poRow.supplier_email, phone: poRow.supplier_phone } : null,
-      ticket: poRow.ticket_title ? { title: poRow.ticket_title, site: poRow.site_name ? { siteName: poRow.site_name } : null } : null,
+      ticket: poRow.ticket_title ? {
+        title: poRow.ticket_title,
+        site: poRow.site_name ? {
+          siteName: poRow.site_name,
+          addressLine1: poRow.site_addr1,
+          addressLine2: poRow.site_addr2,
+          city: poRow.site_city,
+          postcode: poRow.site_postcode,
+        } : null,
+      } : null,
     };
 
     const fontBase64 = getGeistFontBase64();

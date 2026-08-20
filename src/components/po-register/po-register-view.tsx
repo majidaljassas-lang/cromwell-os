@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, Fragment } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -137,6 +138,8 @@ export function PORegisterView({
   tickets,
   contacts,
   commercialLinks = [],
+  plumberBroughtForwardAmount = 0,
+  plumberBroughtForwardDate = null,
 }: {
   customerPOs: CustomerPOData[];
   customers: CustomerOption[];
@@ -144,6 +147,8 @@ export function PORegisterView({
   tickets: TicketOption[];
   contacts: ContactOption[];
   commercialLinks?: CommercialLink[];
+  plumberBroughtForwardAmount?: number;
+  plumberBroughtForwardDate?: string | null;
 }) {
   const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -202,6 +207,89 @@ export function PORegisterView({
   const [invoicePO, setInvoicePO] = useState<CustomerPOData | null>(null);
   const [invoiceLines, setInvoiceLines] = useState<Array<{ description: string; qty: string; unitPrice: string }>>([]);
   const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+
+  // Delivery Note state
+  const [dnPO, setDnPO] = useState<CustomerPOData | null>(null);
+  const [dnDate, setDnDate] = useState(new Date().toISOString().split("T")[0]);
+  const [dnItems, setDnItems] = useState<Record<string, { status: "DELIVERED" | "PARTIAL" | "BACK_ORDER"; qtyDelivered: number; qtyTotal: number }>>({});
+
+  function openDeliveryNote(po: CustomerPOData) {
+    const items: Record<string, { status: "DELIVERED" | "PARTIAL" | "BACK_ORDER"; qtyDelivered: number; qtyTotal: number }> = {};
+    for (const l of po.lines || []) {
+      const qty = Number(l.qty?.toString() || 0);
+      items[l.id] = { status: "DELIVERED", qtyDelivered: qty, qtyTotal: qty };
+    }
+    setDnItems(items);
+    setDnDate(new Date().toISOString().split("T")[0]);
+    setDnPO(po);
+  }
+
+  function printDeliveryNote() {
+    if (!dnPO) return;
+    const lines = dnPO.lines || [];
+    const siteName = dnPO.site?.siteName || dnPO.ticket?.site?.siteName || "";
+    const rows = lines.map((line: any) => {
+      const item = dnItems[line.id] || { status: "DELIVERED", qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
+      const backQty = item.qtyTotal - item.qtyDelivered;
+      const statusLabel = item.status === "DELIVERED" ? "✓ Delivered"
+        : item.status === "PARTIAL" ? `✓ ${item.qtyDelivered} delivered / ${backQty} back order`
+        : "⏳ Back Order";
+      const color = item.status === "DELIVERED" ? "#000" : "#FF6600";
+      return `<tr>
+        <td style="width:24px;text-align:center">${item.status === "BACK_ORDER" ? "☐" : "☑"}</td>
+        <td>${line.description}</td>
+        <td style="text-align:right">${item.qtyDelivered > 0 ? item.qtyDelivered : "—"}</td>
+        <td style="text-align:right;color:#FF6600">${backQty > 0 ? backQty : ""}</td>
+        <td style="font-size:10px;font-weight:bold;color:${color}">${statusLabel}</td>
+      </tr>`;
+    }).join("");
+
+    const deliveredCount = lines.filter((l: any) => dnItems[l.id]?.status === "DELIVERED").length;
+    const partialCount = lines.filter((l: any) => dnItems[l.id]?.status === "PARTIAL").length;
+    const backOrderCount = lines.filter((l: any) => dnItems[l.id]?.status === "BACK_ORDER").length;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:-apple-system,'Helvetica Neue',Arial,sans-serif; padding:30px 40px; font-size:12px; color:#000; }
+      h1 { font-size:18px; font-weight:800; } .sub { font-size:11px; color:#555; margin-top:2px; }
+      hr { border:none; border-top:2px solid #000; margin:12px 0; }
+      .ref { font-size:13px; font-weight:600; margin-top:12px; }
+      .meta { font-size:11px; color:#555; margin-top:2px; margin-bottom:16px; }
+      .meta b { color:#000; }
+      table { width:100%; border-collapse:collapse; margin-top:8px; }
+      th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #000; font-weight:700; }
+      td { padding:5px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      .sig { margin-top:40px; display:flex; gap:60px; } .sig-box { border-top:1px solid #000; padding-top:4px; width:200px; font-size:10px; color:#555; }
+      .summary { margin-top:12px; font-size:11px; display:flex; gap:30px; }
+      @page { margin:15mm; }
+    </style></head><body>
+      <h1>Cromwell Plumbing Ltd</h1>
+      <div class="sub">Delivery Note</div>
+      <hr />
+      <div class="ref">PO ${dnPO.poNo}</div>
+      <div class="meta">
+        <b>Customer:</b> ${dnPO.customer.name}${siteName ? ` &middot; <b>Site:</b> ${siteName}` : ""}<br/>
+        <b>Date:</b> ${new Date(dnDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+      </div>
+      <table>
+        <thead><tr><th style="width:24px"></th><th>Description</th><th style="text-align:right">Delivered</th><th style="text-align:right;color:#FF6600">Back Order</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="summary">
+        <div><b>Delivered:</b> ${deliveredCount}</div>
+        <div><b>Partial:</b> ${partialCount}</div>
+        <div><b>Back Order:</b> ${backOrderCount}</div>
+        <div><b>Total Lines:</b> ${lines.length}</div>
+      </div>
+      <div class="sig">
+        <div class="sig-box">Received By (Print Name)</div>
+        <div class="sig-box">Signature</div>
+        <div class="sig-box">Date</div>
+      </div>
+    </body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+  }
 
   function openBuildInvoice(po: CustomerPOData) {
     setInvoicePO(po);
@@ -369,16 +457,21 @@ export function PORegisterView({
     let totalEarned = 0;
     let totalPaidGlobal = 0;
 
+    const cutoff = plumberBroughtForwardDate ? new Date(plumberBroughtForwardDate) : null;
+    const afterCutoff = (d: Date) => (cutoff ? d > cutoff : true);
+
     for (const po of customerPOs) {
       if (po.poType !== "DRAWDOWN_LABOUR") continue;
       for (const e of po.labourDrawdowns) {
         if (e.status === "ADVANCE_BILLED") continue;
+        const d = new Date(e.workDate);
+        if (!afterCutoff(d)) continue;
         const cost = Number(e.internalCostValue) || 0;
         totalEarned += cost;
         allEntries.push({
           poNo: po.poNo,
           siteName: po.site?.siteName || "—",
-          workDate: new Date(e.workDate).toLocaleDateString("en-GB"),
+          workDate: d.toLocaleDateString("en-GB"),
           dayType: e.dayType === "WEEKEND" ? "Weekend" : "Weekday",
           daysWorked: Number(e.daysWorked) || 0,
           plumberCount: e.plumberCount || 1,
@@ -389,10 +482,12 @@ export function PORegisterView({
       }
       for (const p of (po.cashPayments || [])) {
         if (p.payeeType !== "PLUMBER") continue;
+        const d = new Date(p.paymentDate);
+        if (!afterCutoff(d)) continue;
         const amt = Number(p.amount) || 0;
         totalPaidGlobal += amt;
         allPayments.push({
-          paymentDate: new Date(p.paymentDate).toLocaleDateString("en-GB"),
+          paymentDate: d.toLocaleDateString("en-GB"),
           amount: amt,
           reference: p.reference || "Cash",
           poNo: po.poNo,
@@ -412,11 +507,25 @@ export function PORegisterView({
       return da.localeCompare(db);
     });
 
-    const owing = totalEarned - totalPaidGlobal;
+    const owing = plumberBroughtForwardAmount + totalEarned - totalPaidGlobal;
 
     // Build a combined ledger: interleave work and payments by date, with running balance
-    type LedgerRow = { date: string; sortKey: string; type: "work" | "payment"; desc: string; ref: string; debit: number; credit: number };
+    type LedgerRow = { date: string; sortKey: string; type: "work" | "payment" | "bfwd"; desc: string; ref: string; debit: number; credit: number };
     const ledger: LedgerRow[] = [];
+
+    if (plumberBroughtForwardAmount !== 0) {
+      const bfDate = plumberBroughtForwardDate ? new Date(plumberBroughtForwardDate) : null;
+      const parts = bfDate ? bfDate.toLocaleDateString("en-GB").split("/") : ["01","01","0000"];
+      ledger.push({
+        date: bfDate ? bfDate.toLocaleDateString("en-GB") : "—",
+        sortKey: "0" + (parts[2] + parts[1] + parts[0]),
+        type: "bfwd",
+        desc: `Balance brought forward${plumberBroughtForwardDate ? ` as of ${bfDate!.toLocaleDateString("en-GB")}` : ""}`,
+        ref: "—",
+        debit: plumberBroughtForwardAmount,
+        credit: 0,
+      });
+    }
 
     for (const e of allEntries) {
       const parts = e.workDate.split("/");
@@ -437,7 +546,7 @@ export function PORegisterView({
         sortKey: parts[2] + parts[1] + parts[0],
         type: "payment",
         desc: `Payment — ${p.reference}`,
-        ref: p.poNo,
+        ref: "—",
         debit: 0,
         credit: p.amount,
       });
@@ -447,7 +556,12 @@ export function PORegisterView({
     let runningBalance = 0;
     const ledgerRows = ledger.map((row) => {
       runningBalance += row.debit - row.credit;
-      return `<tr${row.type === "payment" ? ' style="background:#f0fff0"' : ""}>
+      const rowStyle = row.type === "payment"
+        ? ' style="background:#f0fff0"'
+        : row.type === "bfwd"
+          ? ' style="background:#fff7e6;font-weight:600"'
+          : "";
+      return `<tr${rowStyle}>
         <td>${row.date}</td>
         <td>${row.desc}</td>
         <td style="font-size:10px;color:#555">${row.ref}</td>
@@ -509,6 +623,28 @@ export function PORegisterView({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ invoiceNo: invoiceNo || null }),
+    });
+    router.refresh();
+  }
+
+  // Overhead disbursement: record a cash/purchase payment against the PO's 10% overhead.
+  // Stored as POCashPayment(payeeType=OVERHEAD); owing = accrued − Σ OVERHEAD payments.
+  async function logOverheadPayment(poId: string, owing: number) {
+    const rawAmt = prompt(`Overhead payment amount (£). Owing: £${owing.toFixed(2)}`, owing.toFixed(2));
+    if (rawAmt === null) return;
+    const amount = Number(rawAmt);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const rawMethod = prompt("Method — CASH or PURCHASE:", "CASH");
+    if (rawMethod === null) return;
+    const paymentMethod = rawMethod.trim().toUpperCase() === "PURCHASE" ? "PURCHASE" : "CASH";
+    const payee = prompt("Paid to (payee):", "Overhead");
+    if (payee === null) return;
+    const reference = prompt("Reference / note (optional):", "") ?? "";
+    const today = new Date().toISOString().slice(0, 10);
+    await fetch(`/api/customer-pos/${poId}/cash-payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payee: payee || "Overhead", payeeType: "OVERHEAD", amount, paymentDate: today, paymentMethod, reference: reference || null }),
     });
     router.refresh();
   }
@@ -593,7 +729,9 @@ export function PORegisterView({
       poDate: (formData.get("poDate") as string) || undefined,
       totalValue: Number(formData.get("totalValue")) || undefined,
       poLimitValue: Number(formData.get("poLimitValue")) || undefined,
-      overheadPct: Number(formData.get("overheadPct")) || 10,
+      // Overhead only auto-defaults for drawdown/labour POs (the plumber overhead arrangement).
+      // STANDARD_FIXED carries no overhead by default — it's set explicitly where it applies (e.g. Whittington).
+      overheadPct: Number(formData.get("overheadPct")) || (poType === "STANDARD_FIXED" ? undefined : 10),
       notes: (formData.get("notes") as string) || undefined,
     };
 
@@ -645,6 +783,9 @@ export function PORegisterView({
           </h1>
         </div>
         <div className="flex gap-2">
+          <Link href="/po-register/call-offs">
+            <Button size="sm" variant="outline">Call-off POs</Button>
+          </Link>
           <Button size="sm" variant="outline" onClick={printGlobalPlumberStatement}>
             Plumber Statement
           </Button>
@@ -662,10 +803,31 @@ export function PORegisterView({
             <Upload className="size-4 mr-1" />
             {uploading ? "Parsing..." : "Upload PO"}
           </Button>
-          <Sheet open={addOpen} onOpenChange={setAddOpen}>
+          <Sheet
+            open={addOpen}
+            onOpenChange={(open) => {
+              setAddOpen(open);
+              if (!open) {
+                setPoType("STANDARD_FIXED");
+                setCustomerId("");
+                setSiteId("");
+                setTicketId("");
+                setAddIssuedBy("");
+              }
+            }}
+          >
             <SheetTrigger
               render={
-                <Button size="sm">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setPoType("STANDARD_FIXED");
+                    setCustomerId("");
+                    setSiteId("");
+                    setTicketId("");
+                    setAddIssuedBy("");
+                  }}
+                >
                   <Plus className="size-4 mr-1" />
                   Add PO
                 </Button>
@@ -727,9 +889,6 @@ export function PORegisterView({
                     // Auto-select site if customer has exactly one linked site
                     const linked = commercialLinks.filter((cl) => cl.customerId === newId);
                     if (linked.length === 1) setSiteId(linked[0].siteId);
-                    // Auto-select ticket if customer has exactly one ticket
-                    const custTickets = tickets.filter((t) => t.payingCustomerId === newId);
-                    if (custTickets.length === 1) setTicketId(custTickets[0].id);
                   }}
                 >
                   <SelectTrigger className="w-full">
@@ -968,35 +1127,49 @@ export function PORegisterView({
         let globalOverheadPaid = 0;
         const ledgerItems: Array<{ date: string; sortKey: string; desc: string; ref: string; earned: number; paid: number }> = [];
 
+        const cutoff = plumberBroughtForwardDate ? new Date(plumberBroughtForwardDate) : null;
+        const afterCutoff = (d: Date) => (cutoff ? d > cutoff : true);
+
+        if (plumberBroughtForwardAmount !== 0) {
+          const label = plumberBroughtForwardDate
+            ? `B/Fwd as of ${new Date(plumberBroughtForwardDate).toLocaleDateString("en-GB")}`
+            : "Brought forward";
+          const sk = plumberBroughtForwardDate ? plumberBroughtForwardDate.replace(/-/g, "") : "00000000";
+          ledgerItems.push({ date: plumberBroughtForwardDate ? new Date(plumberBroughtForwardDate).toLocaleDateString("en-GB") : "—", sortKey: sk, desc: label, ref: "—", earned: plumberBroughtForwardAmount, paid: 0 });
+        }
+
         for (const po of customerPOs) {
           if (po.poType !== "DRAWDOWN_LABOUR") continue;
+          const poLimit = Number(po.poLimitValue ?? po.totalValue) || 0;
+          const poPct = Number(po.overheadPct) || 0;
+          globalOverhead += poLimit * poPct / 100;
           for (const e of po.labourDrawdowns) {
             if (e.status === "ADVANCE_BILLED") continue;
-            const cost = Number(e.internalCostValue) || 0;
-            const oh = Number(e.overheadValue) || 0;
-            globalEarned += cost;
-            globalOverhead += oh;
             const d = new Date(e.workDate);
+            if (!afterCutoff(d)) continue;
+            const cost = Number(e.internalCostValue) || 0;
+            globalEarned += cost;
             const ds = d.toLocaleDateString("en-GB");
             const sk = d.toISOString().slice(0, 10).replace(/-/g, "");
             ledgerItems.push({ date: ds, sortKey: sk, desc: `${n(e.daysWorked)} day × £${n(e.internalDayCost).toFixed(0)}`, ref: po.poNo, earned: cost, paid: 0 });
           }
           for (const p of (po.cashPayments || [])) {
+            const d = new Date(p.paymentDate);
+            if (!afterCutoff(d)) continue;
             const amt = Number(p.amount) || 0;
             if (p.payeeType === "PLUMBER") globalPlumberPaid += amt;
             else globalOverheadPaid += amt;
-            const d = new Date(p.paymentDate);
             const ds = d.toLocaleDateString("en-GB");
             const sk = d.toISOString().slice(0, 10).replace(/-/g, "");
-            ledgerItems.push({ date: ds, sortKey: sk, desc: `Payment — ${p.payee}${p.reference ? ` (${p.reference})` : ""}`, ref: po.poNo, earned: 0, paid: amt });
+            ledgerItems.push({ date: ds, sortKey: sk, desc: `Payment — ${p.payee}${p.reference ? ` (${p.reference})` : ""}`, ref: "—", earned: 0, paid: amt });
           }
         }
         ledgerItems.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
-        const plumberOwing = globalEarned - globalPlumberPaid;
+        const plumberOwing = plumberBroughtForwardAmount + globalEarned - globalPlumberPaid;
         const overheadOwing = globalOverhead - globalOverheadPaid;
 
-        if (globalEarned === 0 && globalPlumberPaid === 0) return null;
+        if (plumberBroughtForwardAmount === 0 && globalEarned === 0 && globalPlumberPaid === 0) return null;
 
         return (
           <div className="border border-[#333333] bg-[#1A1A1A] p-4 space-y-4">
@@ -1006,7 +1179,39 @@ export function PORegisterView({
                 Print Statement
               </Button>
             </div>
-            <div className="grid grid-cols-5 gap-3 text-center">
+            <div className="grid grid-cols-6 gap-3 text-center">
+              <div className="border border-[#333333] bg-[#111111] p-2">
+                <p className="text-[10px] text-[#888888] uppercase">
+                  B/Fwd{plumberBroughtForwardDate ? ` ${new Date(plumberBroughtForwardDate).toLocaleDateString("en-GB")}` : ""}
+                </p>
+                <p className="text-lg font-semibold tabular-nums">{fmt(plumberBroughtForwardAmount)}</p>
+                <button
+                  className="text-[9px] text-[#888888] hover:text-[#FF6600] mt-1"
+                  onClick={async () => {
+                    const rawAmt = prompt("Brought-forward amount (£):", String(plumberBroughtForwardAmount));
+                    if (rawAmt === null) return;
+                    const amt = Number(rawAmt);
+                    if (!Number.isFinite(amt)) return;
+                    const rawDate = prompt("As-of date (YYYY-MM-DD), balance is the total up to and including this date:", plumberBroughtForwardDate ?? "");
+                    if (rawDate === null) return;
+                    await Promise.all([
+                      fetch(`/api/settings/plumberBroughtForwardAmount`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ value: String(amt) }),
+                      }),
+                      fetch(`/api/settings/plumberBroughtForwardDate`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ value: rawDate }),
+                      }),
+                    ]);
+                    router.refresh();
+                  }}
+                >
+                  edit
+                </button>
+              </div>
               <div className="border border-[#333333] bg-[#111111] p-2">
                 <p className="text-[10px] text-[#888888] uppercase">Total Earned</p>
                 <p className="text-lg font-semibold tabular-nums">{fmt(globalEarned)}</p>
@@ -1026,6 +1231,42 @@ export function PORegisterView({
               <div className="border border-[#333333] bg-[#111111] p-2">
                 <p className="text-[10px] text-[#888888] uppercase">Overhead Owing</p>
                 <p className={`text-lg font-semibold tabular-nums ${overheadOwing > 0 ? "text-[#FF9900]" : "text-[#00CC66]"}`}>{fmt(overheadOwing)}</p>
+                {overheadOwing > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] mt-1"
+                    onClick={async () => {
+                      if (!confirm(`Mark overhead of £${fmt(overheadOwing)} as paid across all POs?`)) return;
+                      const today = new Date().toISOString().slice(0, 10);
+                      for (const po of customerPOs) {
+                        if (po.poType !== "DRAWDOWN_LABOUR") continue;
+                        const poLimit = Number(po.poLimitValue ?? po.totalValue) || 0;
+                        const poPct = Number(po.overheadPct) || 0;
+                        const poTotal = poLimit * poPct / 100;
+                        const poPaid = (po.cashPayments || [])
+                          .filter((p: any) => p.payeeType === "OVERHEAD")
+                          .reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+                        const owing = poTotal - poPaid;
+                        if (owing <= 0) continue;
+                        await fetch(`/api/customer-pos/${po.id}/cash-payments`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            payee: "Overhead",
+                            payeeType: "OVERHEAD",
+                            amount: owing,
+                            paymentDate: today,
+                            paymentMethod: "BANK_TRANSFER",
+                          }),
+                        });
+                      }
+                      router.refresh();
+                    }}
+                  >
+                    Mark Paid
+                  </Button>
+                )}
               </div>
             </div>
             {/* Running ledger */}
@@ -1149,6 +1390,7 @@ export function PORegisterView({
                 <TableHead className="text-right">Costs</TableHead>
                 <TableHead className="text-right"><SortHeader field="value" label="Ex VAT" /></TableHead>
                 <TableHead className="text-right">Inc VAT</TableHead>
+                <TableHead className="text-right">Overhead</TableHead>
                 <TableHead>Invoice</TableHead>
                 <TableHead><SortHeader field="status" label="Status" /></TableHead>
               </TableRow>
@@ -1156,7 +1398,7 @@ export function PORegisterView({
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={14} className="text-center py-8 text-[#888888]">
+                  <TableCell colSpan={15} className="text-center py-8 text-[#888888]">
                     No standard POs found.
                   </TableCell>
                 </TableRow>
@@ -1169,6 +1411,12 @@ export function PORegisterView({
                   const costs = n(po.poCommittedValue);
                   const quoteNo = po.ticket?.quotes?.[0]?.quoteNo || null;
                   const siteName = po.site?.siteName || po.ticket?.site?.siteName || null;
+                  const ohPct = Number(po.overheadPct) || 0;
+                  const ohAccrued = exVat * ohPct / 100;
+                  const ohPaid = (po.cashPayments || [])
+                    .filter((p: any) => p.payeeType === "OVERHEAD")
+                    .reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+                  const ohOwing = Math.round((ohAccrued - ohPaid) * 100) / 100;
 
                   return (
                     <Fragment key={po.id}>
@@ -1193,6 +1441,34 @@ export function PORegisterView({
                               title="Build invoice from this PO">
                               INV
                             </Button>
+                            <Link
+                              href={`/po-register/${po.id}/call-off`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Log call-off (internal planning record)"
+                            >
+                              <Button size="sm" variant="outline"
+                                className="h-6 px-2 text-[10px] bg-[#FF6600]/10 text-[#FF6600] border-[#FF6600]/30 hover:bg-[#FF6600]/20">
+                                + Call-off
+                              </Button>
+                            </Link>
+                            <Link
+                              href={`/po-register/${po.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Line substitution tracker"
+                            >
+                              <Button size="sm" variant="outline"
+                                className="h-6 px-2 text-[10px] bg-[#7C3AED]/10 text-[#7C3AED] border-[#7C3AED]/30 hover:bg-[#7C3AED]/20">
+                                Swaps
+                              </Button>
+                            </Link>
+                            {(po.lines?.length ?? 0) > 0 && (
+                              <Button size="sm" variant="outline"
+                                className="h-5 px-1.5 text-[9px]"
+                                onClick={(e) => { e.stopPropagation(); openDeliveryNote(po); }}
+                                title="Print delivery note">
+                                DN
+                              </Button>
+                            )}
                             <Button size="sm" variant="outline"
                               className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
                               onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
@@ -1223,6 +1499,26 @@ export function PORegisterView({
                         <TableCell className="text-right tabular-nums">{fmt(costs)}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{fmt(exVat)}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmt(incVat)}</TableCell>
+                        <TableCell className="text-right tabular-nums whitespace-nowrap">
+                          {ohPct > 0 ? (
+                            <div className="flex flex-col items-end leading-tight">
+                              <span title={`${ohPct}% of ex-VAT — accrued £${ohAccrued.toFixed(2)}, paid £${ohPaid.toFixed(2)}`}>{fmt(ohAccrued)}</span>
+                              {ohOwing > 0.005 ? (
+                                <button
+                                  className="text-[9px] text-[#FF9900] hover:text-[#FF6600] mt-0.5"
+                                  onClick={(e) => { e.stopPropagation(); logOverheadPayment(po.id, ohOwing); }}
+                                  title="Log overhead disbursement (cash / purchase)"
+                                >
+                                  owing {fmt(ohOwing)} · pay
+                                </button>
+                              ) : (
+                                <span className="text-[9px] text-[#00CC66] mt-0.5">settled</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[#555555]">{"—"}</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Input
                             className="h-6 w-[100px] text-xs bg-transparent border-[#333333]"
@@ -1241,7 +1537,7 @@ export function PORegisterView({
 
                       {isExpanded && (
                         <TableRow>
-                          <TableCell colSpan={13} className="p-4 bg-[#1A1A1A]">
+                          <TableCell colSpan={15} className="p-4 bg-[#1A1A1A]">
                             <ExpandedPODetail po={po} contacts={contacts} tickets={tickets} sites={sites} commercialLinks={commercialLinks} />
                           </TableCell>
                         </TableRow>
@@ -1265,7 +1561,6 @@ export function PORegisterView({
                 <TableHead>PO No</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Site</TableHead>
-                <TableHead>Ticket</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Invoice</TableHead>
                 <TableHead className="text-right">PO Limit</TableHead>
@@ -1280,7 +1575,7 @@ export function PORegisterView({
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={14} className="text-center py-8 text-[#888888]">
+                  <TableCell colSpan={13} className="text-center py-8 text-[#888888]">
                     No {activeTab === "DRAWDOWN_LABOUR" ? "labour drawdown" : "materials drawdown"} POs found.
                   </TableCell>
                 </TableRow>
@@ -1290,12 +1585,11 @@ export function PORegisterView({
                   const limit = n(po.poLimitValue ?? po.totalValue);
                   const consumed = n(po.poConsumedValue);
                   const remaining = n(po.poRemainingValue);
-                  const profit = n(po.profitToDate);
                   const utilPct = limit > 0 ? (consumed / limit) * 100 : 0;
 
-                  const labourOverhead = po.labourDrawdowns.reduce((s: number, d: any) => s + n(d.overheadValue), 0);
-                  const materialsOverhead = po.materialsDrawdowns.reduce((s: number, d: any) => s + n(d.overheadValue), 0);
-                  const totalOverhead = labourOverhead + materialsOverhead;
+                  const poOverheadPct = Number(po.overheadPct) || 0;
+                  const totalOverhead = limit * poOverheadPct / 100;
+                  const profit = n(po.profitToDate) - totalOverhead;
 
                   const labourCost = po.labourDrawdowns.reduce((s: number, d: any) => s + n(d.internalCostValue), 0);
                   const materialsCost = po.materialsDrawdowns.reduce((s: number, d: any) => s + n(d.costValueActual), 0);
@@ -1324,6 +1618,34 @@ export function PORegisterView({
                               title="Build invoice from this PO">
                               INV
                             </Button>
+                            <Link
+                              href={`/po-register/${po.id}/call-off`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Log call-off (internal planning record)"
+                            >
+                              <Button size="sm" variant="outline"
+                                className="h-6 px-2 text-[10px] bg-[#FF6600]/10 text-[#FF6600] border-[#FF6600]/30 hover:bg-[#FF6600]/20">
+                                + Call-off
+                              </Button>
+                            </Link>
+                            <Link
+                              href={`/po-register/${po.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Line substitution tracker"
+                            >
+                              <Button size="sm" variant="outline"
+                                className="h-6 px-2 text-[10px] bg-[#7C3AED]/10 text-[#7C3AED] border-[#7C3AED]/30 hover:bg-[#7C3AED]/20">
+                                Swaps
+                              </Button>
+                            </Link>
+                            {(po.lines?.length ?? 0) > 0 && (
+                              <Button size="sm" variant="outline"
+                                className="h-5 px-1.5 text-[9px]"
+                                onClick={(e) => { e.stopPropagation(); openDeliveryNote(po); }}
+                                title="Print delivery note">
+                                DN
+                              </Button>
+                            )}
                             <Button size="sm" variant="outline"
                               className="h-5 w-5 p-0 text-red-500 hover:text-red-400 hover:border-red-500"
                               onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id, po.poNo); }}>
@@ -1335,11 +1657,7 @@ export function PORegisterView({
                         <TableCell className="max-w-[120px] truncate">{po.customer.name}</TableCell>
                         <TableCell className="max-w-[100px] truncate text-[#888888]">
                           {po.site?.siteName || po.ticket?.site?.siteName || "\u2014"}
-                        </TableCell>
-                        <TableCell className="text-[#FF6600] font-medium whitespace-nowrap">
-                          {po.ticket ? `T-${po.ticket.ticketNo}` : "\u2014"}
-                        </TableCell>
-                        <TableCell>{statusBadge(po.status)}</TableCell>
+                        </TableCell>                        <TableCell>{statusBadge(po.status)}</TableCell>
                         <TableCell>
                           <Input
                             className="h-6 w-[100px] text-xs bg-transparent border-[#333333]"
@@ -1675,8 +1993,6 @@ export function PORegisterView({
                   setUploadTicketId("");
                   const linked = commercialLinks.filter((cl) => cl.customerId === newId);
                   if (linked.length === 1) setUploadSiteId(linked[0].siteId);
-                  const custTickets = tickets.filter((t) => t.payingCustomerId === newId);
-                  if (custTickets.length === 1) setUploadTicketId(custTickets[0].id);
                 }}>
                   <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
                   <SelectContent>
@@ -1769,6 +2085,87 @@ export function PORegisterView({
                 </Button>
               </SheetFooter>
             </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Delivery Note Sheet */}
+      <Sheet open={!!dnPO} onOpenChange={(open) => { if (!open) setDnPO(null); }}>
+        <SheetContent side="right" className="w-[600px] sm:max-w-[600px]">
+          <SheetHeader>
+            <SheetTitle>Delivery Note — PO {dnPO?.poNo}</SheetTitle>
+            <SheetDescription>Mark each item as delivered, partial, or back order, then print.</SheetDescription>
+          </SheetHeader>
+          {dnPO && (
+            <>
+              <div className="flex items-center gap-2 px-4 mb-3">
+                <Label className="text-xs text-[#888888]">Delivery Date:</Label>
+                <Input
+                  type="date"
+                  value={dnDate}
+                  onChange={(e) => setDnDate(e.target.value)}
+                  className="w-40 h-7 text-xs"
+                />
+              </div>
+              <div className="flex flex-col gap-1 px-4 flex-1 overflow-y-auto max-h-[70vh]">
+                {(dnPO.lines || []).map((line: any) => {
+                  const item = dnItems[line.id] || { status: "DELIVERED" as const, qtyDelivered: Number(line.qty?.toString() || 0), qtyTotal: Number(line.qty?.toString() || 0) };
+                  const bgColor = item.status === "DELIVERED" ? "bg-[#00CC66]/10 border-[#00CC66]/30"
+                    : item.status === "PARTIAL" ? "bg-[#FF9900]/10 border-[#FF9900]/30"
+                    : "bg-[#FF3333]/10 border-[#FF3333]/30";
+                  return (
+                    <div key={line.id} className={`p-2 border ${bgColor}`}>
+                      <div className="flex items-center gap-1 mb-1">
+                        <span className="text-xs flex-1 truncate font-medium">{line.description}</span>
+                        <span className="text-[10px] text-[#888888] tabular-nums whitespace-nowrap">{item.qtyTotal}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant={item.status === "DELIVERED" ? "default" : "outline"}
+                          className={`h-5 text-[9px] px-2 ${item.status === "DELIVERED" ? "bg-[#00CC66] text-black" : ""}`}
+                          onClick={() => setDnItems((prev) => ({ ...prev, [line.id]: { ...item, status: "DELIVERED", qtyDelivered: item.qtyTotal } }))}
+                        >✓ All</Button>
+                        <Button size="sm" variant={item.status === "PARTIAL" ? "default" : "outline"}
+                          className={`h-5 text-[9px] px-2 ${item.status === "PARTIAL" ? "bg-[#FF9900] text-black" : ""}`}
+                          onClick={() => setDnItems((prev) => ({ ...prev, [line.id]: { ...item, status: "PARTIAL", qtyDelivered: Math.min(item.qtyDelivered || 1, Math.max(item.qtyTotal - 1, 1)) } }))}
+                        >Part</Button>
+                        <Button size="sm" variant={item.status === "BACK_ORDER" ? "default" : "outline"}
+                          className={`h-5 text-[9px] px-2 ${item.status === "BACK_ORDER" ? "bg-[#FF3333] text-white" : ""}`}
+                          onClick={() => setDnItems((prev) => ({ ...prev, [line.id]: { ...item, status: "BACK_ORDER", qtyDelivered: 0 } }))}
+                        >B/O</Button>
+                        {item.status === "PARTIAL" && (
+                          <>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={item.qtyTotal - 1}
+                              value={item.qtyDelivered}
+                              onChange={(e) => setDnItems((prev) => ({ ...prev, [line.id]: { ...item, qtyDelivered: Number(e.target.value) || 0 } }))}
+                              className="h-5 w-14 text-[10px] text-center px-1"
+                            />
+                            <span className="text-[9px] text-[#FF9900]">{item.qtyDelivered}/{item.qtyTotal}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <SheetFooter>
+                <div className="flex gap-2 px-4">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const items: typeof dnItems = {};
+                    (dnPO.lines || []).forEach((l: any) => {
+                      const qty = Number(l.qty?.toString() || 0);
+                      items[l.id] = { status: "DELIVERED", qtyDelivered: qty, qtyTotal: qty };
+                    });
+                    setDnItems(items);
+                  }}>All Delivered</Button>
+                  <Button onClick={printDeliveryNote} className="bg-[#FF6600] text-black hover:bg-[#CC5500]">
+                    Print Delivery Note
+                  </Button>
+                </div>
+              </SheetFooter>
+            </>
           )}
         </SheetContent>
       </Sheet>
